@@ -1,0 +1,77 @@
+import http.client
+import json
+
+conn = http.client.HTTPSConnection("api.kkyyxx.xyz")
+payload = json.dumps({
+   "quota": 100000,
+   "count": 1,
+   "expired_time": 0,
+   "name": "Test",
+   "key": "dwidjuohfuohsdjf"
+})
+headers = {
+   'New-Api-User': '1',
+   'Cookie': 'session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==;session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==',
+   'new-api-user': '1',
+   'Content-Type': 'application/json'
+}
+conn.request("POST", "/api/redemption/", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))
+
+
+import http.client
+
+conn = http.client.HTTPSConnection("api.kkyyxx.xyz")
+payload = ''
+headers = {
+   'Cookie': 'session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==',
+   'new-api-user': '1'
+}
+conn.request("GET", "/api/data/?username=&start_timestamp=1756741732&end_timestamp=1759337332&default_time=week", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))
+
+import http.client
+
+conn = http.client.HTTPSConnection("api.kkyyxx.xyz")
+payload = ''
+headers = {
+   'New-Api-User': '1',
+   'Cookie': 'session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==',
+   'new-api-user': '1'
+}
+conn.request("GET", "/api/data/?username=&start_timestamp=1746741732&end_timestamp=1759337332&default_time=week", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))
+
+
+import http.client
+
+conn = http.client.HTTPSConnection("api.kkyyxx.xyz")
+payload = ''
+headers = {
+   'Cookie': 'session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==',
+   'new-api-user': '1'
+}
+conn.request("GET", "/api/redemption/?p=2&page_size=50", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))
+
+
+import http.client
+
+conn = http.client.HTTPSConnection("api.kkyyxx.xyz")
+payload = ''
+headers = {
+   'Cookie': 'session=MTc1OTIyNzE3OHxEWDhFQVFMX2dBQUJFQUVRQUFEX2pmLUFBQVVHYzNSeWFXNW5EQW9BQ0hWelpYSnVZVzFsQm5OMGNtbHVad3dGQUFOcmVYZ0djM1J5YVc1bkRBWUFCSEp2YkdVRGFXNTBCQU1BXzhnR2MzUnlhVzVuREFnQUJuTjBZWFIxY3dOcGJuUUVBZ0FDQm5OMGNtbHVad3dIQUFWbmNtOTFjQVp6ZEhKcGJtY01DUUFIWkdWbVlYVnNkQVp6ZEhKcGJtY01CQUFDYVdRRGFXNTBCQUlBQWc9PXyqhPfvyFuOVoKNDwbcRAgiCR6v-BDC23V7Os3SiI7hng==',
+   'new-api-user': '1'
+}
+conn.request("GET", "/api/log/?p=1&page_size=1000&type=0&username=&token_name=&model_name=&start_timestamp=1753977600&end_timestamp=1759345593&channel=&group=", payload, headers)
+res = conn.getresponse()
+data = res.read()
+print(data.decode("utf-8"))

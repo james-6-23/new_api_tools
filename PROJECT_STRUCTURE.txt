@@ -1,0 +1,72 @@
+卷 Data 的文件夹 PATH 列表
+卷序列号为 A04E-5EA2
+D:.
+|   .gitignore
+|   api_request.txt
+|   DESIGN.md
+|   docker-compose.yml
+|   NewApi.apifox.json
+|   PROJECT_STRUCTURE.txt
+|   PROJECT_SUMMARY.md
+|   QUICKSTART.md
+|   README.md
+|   response.json
+|   默认模块.openapi.json
+|   
++---backend
+|   |   requirements.txt
+|   |   
+|   \---app
+|       |   config.py
+|       |   main.py
+|       |   __init__.py
+|       |   
+|       +---api
+|       |   |   __init__.py
+|       |   |   
+|       |   \---v1
+|       |           channels.py
+|       |           dashboard.py
+|       |           logs.py
+|       |           redemptions.py
+|       |           tokens.py
+|       |           users.py
+|       |           __init__.py
+|       |           
+|       +---core
+|       |       cache.py
+|       |       
+|       +---db
+|       |       session.py
+|       |       
+|       +---schemas
+|       |       dashboard.py
+|       |       
+|       +---services
+|       |       statistics.py
+|       |       
+|       \---utils
+|               logger.py
+|               
++---docker
+|       backend.Dockerfile
+|       frontend.Dockerfile
+|       nginx-frontend.conf
+|       nginx.conf
+|       
+\---frontend
+    |   package.json
+    |   vite.config.js
+    |   
+    \---src
+        +---pages
+        |   \---Dashboard
+        |           index.jsx
+        |           ModelStatsTable.jsx
+        |           QuotaChart.jsx
+        |           StatCard.jsx
+        |           
+        \---services
+                apiClient.js
+                dashboardService.js
+                
