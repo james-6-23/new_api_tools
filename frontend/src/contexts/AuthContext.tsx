@@ -74,11 +74,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json()
-      if (data.success && data.data?.token) {
-        const newToken = data.data.token
-        // Default 24 hours expiry
-        const expiryTime = Date.now() + (data.data.expires_in || 86400) * 1000
-        
+      if (data.success && data.token) {
+        const newToken = data.token
+        // Parse expires_at or default 24 hours
+        let expiryTime: number
+        if (data.expires_at) {
+          expiryTime = new Date(data.expires_at).getTime()
+        } else {
+          expiryTime = Date.now() + 86400 * 1000
+        }
+
         setToken(newToken)
         localStorage.setItem(TOKEN_KEY, newToken)
         localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString())
