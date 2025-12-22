@@ -7,8 +7,21 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'Dockerfile'
+      - '.github/workflows/build.yml'
+      # 忽略文档和配置文件
+      - '!**/*.md'
+      - '!**/.gitignore'
+      - '!.env.example'
   pull_request:
     branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'Dockerfile'
 
 env:
   REGISTRY: ghcr.io
@@ -57,4 +70,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
