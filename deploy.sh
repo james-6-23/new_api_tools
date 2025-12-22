@@ -349,11 +349,11 @@ start_services() {
   docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
   log_success "服务已启动!"
-  
+
   # 获取服务器 IP
   local server_ip
   server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || server_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}')" || server_ip="localhost"
-  
+
   echo ""
   echo -e "${GREEN}========================================${NC}"
   echo -e "${GREEN}  NewAPI Middleware Tool 部署成功!${NC}"
@@ -361,6 +361,8 @@ start_services() {
   echo ""
   echo -e "前端访问地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}${NC}"
   echo -e "API 地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}/api${NC}"
+  echo ""
+  echo -e "登录密码: ${YELLOW}${ADMIN_PASSWORD}${NC}"
   echo ""
   echo -e "配置文件: ${ENV_FILE}"
   echo -e "Compose 文件: ${COMPOSE_FILE}"
