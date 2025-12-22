@@ -16,11 +16,16 @@ from pydantic import BaseModel
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s | %(levelname)-7s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+# Suppress noisy loggers
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,23 +159,28 @@ include_routes(app)
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all API requests with timestamp and client information."""
+    # Skip logging for health check endpoints
+    if request.url.path in ["/api/health", "/api/health/db"]:
+        return await call_next(request)
+
     start_time = time.time()
-    
-    # Get client info
     client_host = request.client.host if request.client else "unknown"
-    
-    logger.info(
-        f"Request: {request.method} {request.url.path} - Client: {client_host}"
-    )
-    
+
     response = await call_next(request)
-    
+
     process_time = time.time() - start_time
-    logger.info(
-        f"Response: {request.method} {request.url.path} - "
-        f"Status: {response.status_code} - Time: {process_time:.3f}s"
-    )
-    
+    status_code = response.status_code
+
+    # Use different log levels based on status code
+    log_msg = f"{request.method} {request.url.path} | {status_code} | {process_time:.3f}s | {client_host}"
+
+    if status_code >= 500:
+        logger.error(log_msg)
+    elif status_code >= 400:
+        logger.warning(log_msg)
+    else:
+        logger.info(log_msg)
+
     return response
 
 

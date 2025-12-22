@@ -60,7 +60,7 @@ stderr_logfile=/dev/stderr\n\
 stderr_logfile_maxbytes=0\n\
 \n\
 [program:uvicorn]\n\
-command=/usr/local/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000\n\
+command=/usr/local/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log\n\
 directory=/app\n\
 autostart=true\n\
 autorestart=true\n\
