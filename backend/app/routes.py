@@ -8,7 +8,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from .auth import get_api_key
+from .auth import verify_auth
 from .expiration_calculator import ExpireMode
 from .main import InvalidParamsError, NotFoundError
 from .quota_calculator import QuotaMode
@@ -96,7 +96,7 @@ class BatchDeleteRequest(BaseModel):
 # API Endpoints
 
 @router.post("/redemptions/generate", response_model=GenerateResponse)
-async def generate_redemption_codes(request: GenerateRequest, api_key: str = Depends(get_api_key)):
+async def generate_redemption_codes(request: GenerateRequest, _: str = Depends(verify_auth)):
     """
     批量生成兑换码。
     
@@ -151,7 +151,7 @@ async def list_redemption_codes(
     status: Optional[RedemptionStatus] = Query(default=None, description="状态筛选"),
     start_date: Optional[str] = Query(default=None, description="创建时间起始 (ISO 8601)"),
     end_date: Optional[str] = Query(default=None, description="创建时间结束 (ISO 8601)"),
-    api_key: str = Depends(get_api_key),
+    _: str = Depends(verify_auth),
 ):
     """
     查询兑换码列表，支持分页和筛选。
@@ -205,7 +205,7 @@ async def list_redemption_codes(
 
 
 @router.delete("/redemptions/{id}", response_model=DeleteResponse)
-async def delete_redemption_code(id: int, api_key: str = Depends(get_api_key)):
+async def delete_redemption_code(id: int, _: str = Depends(verify_auth)):
     """
     删除单个兑换码（软删除）。
     
@@ -227,7 +227,7 @@ async def delete_redemption_code(id: int, api_key: str = Depends(get_api_key)):
 
 
 @router.delete("/redemptions/batch", response_model=DeleteResponse)
-async def batch_delete_redemption_codes(request: BatchDeleteRequest, api_key: str = Depends(get_api_key)):
+async def batch_delete_redemption_codes(request: BatchDeleteRequest, _: str = Depends(verify_auth)):
     """
     批量删除兑换码（软删除）。
     

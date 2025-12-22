@@ -98,49 +98,72 @@ def decode_access_token(token: str) -> Optional[TokenData]:
         return None
 
 
-async def get_api_key(
+async def verify_auth(
     request: Request,
     api_key: Optional[str] = Depends(api_key_header),
+    credentials = Depends(bearer_scheme),
 ) -> str:
     """
-    Dependency to extract and validate API key from request header.
-    Returns the API key if valid, raises HTTPException if invalid.
+    Dependency to verify authentication via API Key OR JWT Token.
+    Accepts either X-API-Key header or Authorization: Bearer token.
+    Returns 'api_key' or 'jwt' to indicate which auth method was used.
     """
     # Skip authentication for health check endpoints
     if request.url.path in ["/api/health", "/api/health/db", "/docs", "/openapi.json", "/redoc"]:
-        return ""
-    
+        return "skip"
+
     # Skip authentication for auth endpoints (login/logout)
     if request.url.path.startswith("/api/auth/"):
-        return ""
-    
-    if api_key is None:
-        logger.warning(f"Missing API key for request: {request.method} {request.url.path}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "UNAUTHORIZED",
-                    "message": "API key is required",
-                }
-            },
-        )
-    
-    if not verify_api_key(api_key):
-        logger.warning(f"Invalid API key for request: {request.method} {request.url.path}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "UNAUTHORIZED",
-                    "message": "Invalid API key",
-                }
-            },
-        )
-    
-    return api_key
+        return "skip"
+
+    # Try API Key authentication first
+    if api_key is not None:
+        if verify_api_key(api_key):
+            return "api_key"
+        else:
+            logger.warning(f"Invalid API key for request: {request.method} {request.url.path}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Invalid API key",
+                    }
+                },
+            )
+
+    # Try JWT Token authentication
+    if credentials is not None:
+        token_data = decode_access_token(credentials.credentials)
+        if token_data is not None:
+            return "jwt"
+        else:
+            logger.warning(f"Invalid JWT token for request: {request.method} {request.url.path}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "Invalid or expired token",
+                    }
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    # No authentication provided
+    logger.warning(f"Missing authentication for request: {request.method} {request.url.path}")
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "success": False,
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "Authentication required (API Key or JWT Token)",
+            }
+        },
+    )
 
 
 async def get_current_user(
