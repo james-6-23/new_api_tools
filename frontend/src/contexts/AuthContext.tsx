@@ -60,7 +60,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = useCallback(async (password: string): Promise<boolean> => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const apiUrl = import.meta.env.VITE_API_URL || ''
       const response = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: {

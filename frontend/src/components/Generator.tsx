@@ -29,7 +29,7 @@ export function Generator() {
     setIsLoading(true)
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const apiUrl = import.meta.env.VITE_API_URL || ''
       
       // Build request body based on form data
       const requestBody: Record<string, unknown> = {
