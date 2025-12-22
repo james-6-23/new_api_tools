@@ -21,7 +21,6 @@ dist/
 # Docker
 Dockerfile
 docker-compose*.yml
-nginx.conf
 
 # Documentation
 *.md
