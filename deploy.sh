@@ -258,17 +258,28 @@ interactive_config() {
 
   # 前端访问密码
   if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-    echo -e "${YELLOW}请设置前端访问密码:${NC}"
-    read -sp "密码: " ADMIN_PASSWORD
-    echo ""
-    if [[ -z "$ADMIN_PASSWORD" ]]; then
-      die "密码不能为空"
-    fi
-    read -sp "确认密码: " ADMIN_PASSWORD_CONFIRM
-    echo ""
-    if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
-      die "两次输入的密码不一致"
-    fi
+    while true; do
+      echo -e "${YELLOW}请设置前端访问密码:${NC}"
+      read -sp "密码: " ADMIN_PASSWORD
+      echo ""
+
+      if [[ -z "$ADMIN_PASSWORD" ]]; then
+        log_error "密码不能为空，请重新输入"
+        echo ""
+        continue
+      fi
+
+      read -sp "确认密码: " ADMIN_PASSWORD_CONFIRM
+      echo ""
+
+      if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+        log_error "两次输入的密码不一致，请重新输入"
+        echo ""
+        continue
+      fi
+
+      break
+    done
   fi
   log_success "前端密码已设置"
 
