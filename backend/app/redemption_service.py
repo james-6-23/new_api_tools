@@ -225,8 +225,8 @@ class RedemptionService:
         try:
             # Execute batch insert
             insert_sql = """
-                INSERT INTO redemptions 
-                (user_id, key, name, quota, created_time, redeemed_time, used_user_id, expired_time)
+                INSERT INTO redemptions
+                (user_id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time)
                 VALUES (:user_id, :key, :name, :quota, :created_time, :redeemed_time, :used_user_id, :expired_time)
             """
             
@@ -295,7 +295,7 @@ class RedemptionService:
         
         sql = (
             "INSERT INTO redemptions "
-            "(user_id, key, name, quota, created_time, redeemed_time, used_user_id, expired_time) "
+            "(user_id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time) "
             "VALUES\n" + ",\n".join(values) + ";"
         )
         return sql
@@ -358,7 +358,7 @@ class RedemptionService:
         
         # Get items
         select_sql = f"""
-            SELECT id, key, name, quota, created_time, redeemed_time, used_user_id, expired_time
+            SELECT id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE {where_sql}
             ORDER BY created_time DESC
@@ -448,7 +448,7 @@ class RedemptionService:
             RedemptionCode if found, None otherwise.
         """
         sql = """
-            SELECT id, key, name, quota, created_time, redeemed_time, used_user_id, expired_time
+            SELECT id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE id = :id AND deleted_at IS NULL
         """
