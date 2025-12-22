@@ -63,8 +63,31 @@ export function History() {
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
-      await navigator.clipboard.writeText(text)
-      showToast('success', `${label}已复制到剪贴板`)
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+        showToast('success', `${label}已复制到剪贴板`)
+        return
+      }
+
+      // Fallback for HTTP or older browsers
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      textArea.style.top = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+
+      if (successful) {
+        showToast('success', `${label}已复制到剪贴板`)
+      } else {
+        showToast('error', '复制失败，请手动复制')
+      }
     } catch {
       showToast('error', '复制失败，请手动复制')
     }
