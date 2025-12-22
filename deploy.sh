@@ -336,7 +336,7 @@ start_services() {
   log_info "启动服务..."
 
   # 检查是否有旧容器
-  if docker ps -a --format '{{.Names}}' | grep -q '^newapi-tools-'; then
+  if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools(-|$)'; then
     log_warn "发现已存在的服务容器，正在停止..."
     docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi

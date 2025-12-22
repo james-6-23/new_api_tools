@@ -3,27 +3,25 @@
 # 使用方式:
 #   1. 通过 deploy.sh 自动部署 (推荐): ./deploy.sh
 #   2. 手动部署: 复制 .env.example 为 .env 并配置后运行 docker-compose up -d
-#
-# 注意: deploy.sh 会根据检测到的环境重新生成此文件
 
 version: '3.8'
 
 services:
-  backend:
+  newapi-tools:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    image: ghcr.io/your-org/newapi-tools-backend:latest
-    container_name: newapi-tools-backend
+    image: ghcr.io/your-org/newapi-tools:latest
+    container_name: newapi-tools
+    ports:
+      - "${FRONTEND_PORT:-1145}:80"
     environment:
-      # 数据库配置 (由 deploy.sh 自动检测或手动配置)
       - DB_ENGINE=${DB_ENGINE}
       - DB_HOST=${DB_DNS}
       - DB_PORT=${DB_PORT}
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      # 认证配置
       - API_KEY=${API_KEY}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
@@ -32,26 +30,10 @@ services:
       - newapi_network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: ghcr.io/your-org/newapi-tools-frontend:latest
-    container_name: newapi-tools-frontend
-    ports:
-      - "${FRONTEND_PORT:-1145}:80"
-    environment:
-      - VITE_API_URL=http://backend:8000
-    depends_on:
-      - backend
-    networks:
-      - newapi_network
-    restart: unless-stopped
 
 networks:
   newapi_network:
