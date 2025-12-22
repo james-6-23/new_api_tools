@@ -27,7 +27,7 @@ env/
 .venv/
 
 # uv
-uv.lock
+# uv.lock  # 需要提交以确保可复现构建
 
 # IDE
 .idea/
