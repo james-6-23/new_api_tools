@@ -17,36 +17,61 @@ NewAPI 兑换码管理工具，提供批量生成、查询、删除兑换码的 
 
 - 运行中的 NewAPI 实例
 - Docker 和 Docker Compose
+- Git (仅手动安装需要)
 
-### 一键部署
+### 方式一：一键安装 (推荐)
+
+在服务器上运行以下命令，脚本会自动检测 NewAPI 位置并完成安装：
 
 ```bash
-./deploy.sh
+bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main/install.sh)
 ```
 
 脚本会自动：
-1. 检测 NewAPI 容器和数据库配置
-2. 交互式设置访问密码
-3. 生成配置文件并启动服务
+1. 检测 NewAPI 安装目录
+2. Clone 项目到 NewAPI 同级目录
+3. 检测数据库配置
+4. 交互式设置访问密码
+5. 启动服务
 
-部署完成后访问 `http://your-server:1145`
-
-### 手动部署
+### 方式二：手动 Clone 安装
 
 ```bash
-# 1. 复制并编辑配置文件
-cp .env.example .env
+# 1. 进入 NewAPI 所在目录 (与 new-api 同级)
+cd /path/to/your/newapi-parent-dir
 
-# 2. 启动服务
+# 2. Clone 项目
+git clone https://github.com/james-6-23/new_api_tools.git
+
+# 3. 进入项目目录并运行部署脚本
+cd new_api_tools
+./deploy.sh
+```
+
+### 方式三：手动配置部署
+
+```bash
+# 1. Clone 项目
+git clone https://github.com/james-6-23/new_api_tools.git
+cd new_api_tools
+
+# 2. 复制并编辑配置文件
+cp .env.example .env
+# 编辑 .env 填写数据库和认证配置
+
+# 3. 启动服务
 docker-compose up -d
 ```
+
+部署完成后访问 `http://your-server:1145`
 
 ## 项目结构
 
 ```
 ├── backend/          # FastAPI 后端服务
 ├── frontend/         # React + TypeScript 前端
-├── deploy.sh         # 一键部署脚本
+├── install.sh        # 快速安装脚本 (curl 远程执行)
+├── deploy.sh         # 本地部署脚本
 ├── docker-compose.yml
 └── .env.example      # 环境变量示例
 ```

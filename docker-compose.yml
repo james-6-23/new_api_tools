@@ -8,9 +8,6 @@ version: '3.8'
 
 services:
   newapi-tools:
-    build:
-      context: .
-      dockerfile: Dockerfile
     image: ghcr.io/james-6-23/new_api_tools:latest
     container_name: newapi-tools
     ports:
