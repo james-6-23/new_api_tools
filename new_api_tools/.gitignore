@@ -78,8 +78,3 @@ NewApi.apifox.json
 默认模块.openapi.json
 
 
-new_api_tools/insert_mysql.sh
-new_api_tools/insert_pgsql.sh
-.kiro/specs/newapi-middleware-tool/design.md
-.kiro/specs/newapi-middleware-tool/requirements.md
-.kiro/specs/newapi-middleware-tool/tasks.md
