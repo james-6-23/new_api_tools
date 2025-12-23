@@ -131,8 +131,10 @@ def include_routes(app: FastAPI):
     """Include API routes."""
     from .routes import router
     from .auth_routes import router as auth_router
+    from .top_up_routes import router as top_up_router
     app.include_router(router)
     app.include_router(auth_router)
+    app.include_router(top_up_router)
 
 
 # Create FastAPI application

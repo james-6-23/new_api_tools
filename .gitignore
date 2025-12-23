@@ -84,3 +84,5 @@ new_api_tools/insert_pgsql.sh
 .kiro/specs/newapi-middleware-tool/requirements.md
 .kiro/specs/newapi-middleware-tool/tasks.md
 .claude/settings.local.json
+pgsql_schema_export
+mysql_schema_export

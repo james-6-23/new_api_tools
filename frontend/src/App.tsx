@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Login, Layout, TabType, Generator, History } from './components'
+import { Login, Layout, TabType, Generator, History, TopUps } from './components'
 import { useAuth } from './contexts/AuthContext'
 
 function App() {
@@ -10,13 +10,22 @@ function App() {
     return <Login onLogin={login} />
   }
 
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'generator':
+        return <Generator />
+      case 'history':
+        return <History />
+      case 'topups':
+        return <TopUps />
+      default:
+        return <Generator />
+    }
+  }
+
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab} onLogout={logout}>
-      {activeTab === 'generator' ? (
-        <Generator />
-      ) : (
-        <History />
-      )}
+      {renderContent()}
     </Layout>
   )
 }

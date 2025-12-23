@@ -44,7 +44,6 @@ class GenerateResponseData(BaseModel):
     """Data model for generate response."""
     keys: List[str]
     count: int
-    sql: str
 
 
 class GenerateResponse(BaseModel):
@@ -135,7 +134,6 @@ async def generate_redemption_codes(request: GenerateRequest, _: str = Depends(v
             data=GenerateResponseData(
                 keys=result.keys,
                 count=result.count,
-                sql=result.sql,
             ) if result.success else None,
         )
         

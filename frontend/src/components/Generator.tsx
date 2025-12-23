@@ -11,7 +11,6 @@ interface ApiResponse {
   data?: {
     keys: string[]
     count: number
-    sql: string
   }
   error?: {
     code: string
@@ -77,9 +76,8 @@ export function Generator() {
         setResult({
           keys: data.data.keys,
           count: data.data.count,
-          sql: data.data.sql,
         })
-        showToast('success', `成功生成 ${data.data.count} 个兑换码`)
+        showToast('success', `成功添加 ${data.data.count} 个兑换码`)
         
         // Save to history in localStorage
         saveToHistory(formData, data.data)
@@ -102,7 +100,6 @@ export function Generator() {
         name: formData.name,
         count: resultData.count,
         keys: resultData.keys,
-        sql: resultData.sql,
         quota_mode: formData.quota_mode,
         expire_mode: formData.expire_mode,
       }
@@ -119,7 +116,7 @@ export function Generator() {
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-medium text-gray-900 mb-6">
-        兑换码生成器
+        添加兑换码
       </h2>
       
       {result ? (

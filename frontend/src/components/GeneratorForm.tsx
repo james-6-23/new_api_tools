@@ -381,10 +381,10 @@ export function GeneratorForm({ onSubmit, isLoading }: GeneratorFormProps) {
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                 ></path>
               </svg>
-              生成中...
+              添加中...
             </span>
           ) : (
-            '生成兑换码'
+            '添加兑换码'
           )}
         </button>
       </div>

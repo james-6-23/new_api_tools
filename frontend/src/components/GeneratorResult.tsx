@@ -4,7 +4,6 @@ import { useToast } from './Toast'
 export interface GenerateResult {
   keys: string[]
   count: number
-  sql: string
 }
 
 interface GeneratorResultProps {
@@ -48,10 +47,6 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
     }
   }
 
-  const copySQL = () => {
-    copyToClipboard(result.sql, 'SQL 语句')
-  }
-
   const copyKeys = () => {
     copyToClipboard(result.keys.join('\n'), '兑换码')
   }
@@ -91,43 +86,10 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
           />
         </svg>
         <div>
-          <h3 className="text-sm font-medium text-green-800">生成成功</h3>
+          <h3 className="text-sm font-medium text-green-800">添加成功</h3>
           <p className="mt-1 text-sm text-green-700">
-            成功生成 {result.count} 个兑换码
+            成功添加 {result.count} 个兑换码到数据库
           </p>
-        </div>
-      </div>
-
-      {/* SQL 语句 */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">
-            SQL 语句
-          </label>
-          <button
-            onClick={copySQL}
-            className="text-sm text-blue-600 hover:text-blue-800 flex items-center"
-          >
-            <svg
-              className="w-4 h-4 mr-1"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
-            复制 SQL
-          </button>
-        </div>
-        <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
-          <pre className="text-sm text-green-400 whitespace-pre-wrap break-all">
-            {result.sql}
-          </pre>
         </div>
       </div>
 
@@ -233,7 +195,7 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
           onClick={onReset}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
         >
-          继续生成
+          继续添加
         </button>
       </div>
     </div>
