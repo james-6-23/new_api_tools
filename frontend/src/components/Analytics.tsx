@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
+import { ConfirmModal } from './ConfirmModal'
 
 interface UserRanking {
   user_id: number
@@ -50,6 +51,21 @@ export function Analytics() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
+  
+  // Confirm modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    type: 'warning' | 'danger' | 'info'
+    onConfirm: () => void
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'warning',
+    onConfirm: () => {},
+  })
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
@@ -126,62 +142,86 @@ export function Analytics() {
     }
   }
 
-  // Batch process logs (for initial sync)
-  const batchProcessLogs = async () => {
-    if (!window.confirm('确定要进行批量处理吗？这将处理最多10万条日志，可能需要几分钟时间。')) {
+  // Batch process logs (for initial sync) - auto continues until complete
+  const batchProcessLogs = async (isAutoSync = false) => {
+    if (!isAutoSync) {
+      setConfirmModal({
+        isOpen: true,
+        title: '批量同步',
+        message: '确定要进行批量处理吗？这将处理所有历史日志，可能需要几分钟时间。',
+        type: 'info',
+        onConfirm: () => {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }))
+          startBatchProcess()
+        },
+      })
       return
     }
+    await startBatchProcess()
+  }
 
+  const startBatchProcess = async () => {
     setBatchProcessing(true)
     try {
-      const response = await fetch(`${apiUrl}/api/analytics/batch?max_iterations=100`, {
+      const response = await fetch(`${apiUrl}/api/analytics/batch?max_iterations=10000`, {
         method: 'POST',
         headers: getAuthHeaders(),
       })
       const data = await response.json()
 
       if (data.success) {
-        const message = data.completed
-          ? `同步完成！共处理 ${data.total_processed} 条日志，耗时 ${data.elapsed_seconds} 秒`
-          : `已处理 ${data.total_processed} 条日志 (${data.progress_percent}%)，剩余 ${data.remaining_logs} 条`
-        showToast(data.completed ? 'success' : 'info', message)
-        fetchAnalytics()
-        fetchSyncStatus()
+        if (data.completed) {
+          showToast('success', `同步完成！共处理 ${data.total_processed} 条日志，耗时 ${data.elapsed_seconds} 秒`)
+          // Refresh both analytics and sync status to update UI
+          await Promise.all([fetchAnalytics(), fetchSyncStatus()])
+          setBatchProcessing(false)
+        } else {
+          // Not completed yet, continue automatically
+          // Update sync status to show progress
+          await fetchSyncStatus()
+          // Auto continue after a short delay
+          setTimeout(() => batchProcessLogs(true), 100)
+        }
       } else {
         showToast('error', '批量处理失败')
+        setBatchProcessing(false)
       }
     } catch (error) {
       console.error('Failed to batch process logs:', error)
       showToast('error', '批量处理失败')
-    } finally {
       setBatchProcessing(false)
     }
   }
 
   // Reset analytics
   const resetAnalytics = async () => {
-    if (!window.confirm('确定要重置所有分析数据吗？此操作不可恢复。')) {
-      return
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: '重置分析数据',
+      message: '确定要重置所有分析数据吗？此操作不可恢复，需要重新同步所有日志。',
+      type: 'danger',
+      onConfirm: async () => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }))
+        try {
+          const response = await fetch(`${apiUrl}/api/analytics/reset`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          })
+          const data = await response.json()
 
-    try {
-      const response = await fetch(`${apiUrl}/api/analytics/reset`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      })
-      const data = await response.json()
-
-      if (data.success) {
-        showToast('success', '分析数据已重置')
-        fetchAnalytics()
-        fetchSyncStatus()
-      } else {
-        showToast('error', '重置失败')
-      }
-    } catch (error) {
-      console.error('Failed to reset analytics:', error)
-      showToast('error', '重置失败')
-    }
+          if (data.success) {
+            showToast('success', '分析数据已重置')
+            fetchAnalytics()
+            fetchSyncStatus()
+          } else {
+            showToast('error', '重置失败')
+          }
+        } catch (error) {
+          console.error('Failed to reset analytics:', error)
+          showToast('error', '重置失败')
+        }
+      },
+    })
   }
 
   // Auto reset when data is inconsistent (logs deleted)
@@ -327,7 +367,7 @@ export function Analytics() {
               </div>
             </div>
             <button
-              onClick={batchProcessLogs}
+              onClick={() => batchProcessLogs(false)}
               disabled={batchProcessing}
               className={`ml-4 inline-flex items-center px-3 py-1.5 border text-sm font-medium rounded-md focus:outline-none disabled:opacity-50 ${
                 syncStatus.is_initializing
@@ -348,7 +388,7 @@ export function Analytics() {
                   <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
-                  {syncStatus.is_initializing ? '继续同步' : '批量同步'}
+                  {syncStatus.is_initializing ? '继续同步' : '开始同步'}
                 </>
               )}
             </button>
@@ -547,13 +587,13 @@ export function Analytics() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
-                      {formatNumber(model.total_requests)}
+                      {model.total_requests.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
-                      {formatNumber(model.success_count)}
+                      {model.success_count.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
-                      {formatNumber(model.empty_count)}
+                      {model.empty_count.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <span className={`text-sm font-semibold ${getSuccessRateColor(model.success_rate)}`}>
@@ -592,6 +632,16 @@ export function Analytics() {
           </div>
         </div>
       </div>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        type={confirmModal.type}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   )
 }

@@ -477,11 +477,20 @@ class LogAnalyticsService:
         elapsed_time = time.time() - start_time
         current_log_id = self._get_state("last_log_id", 0)
 
+        # Check if init cutoff was cleared (sync completed)
+        current_init_cutoff = self._get_state("init_max_log_id", 0)
+        
         # Calculate progress based on init cutoff
         progress = 0.0
         remaining = 0
         completed = False
-        if init_max_log_id > 0:
+        
+        if current_init_cutoff == 0 and init_max_log_id > 0:
+            # Init cutoff was cleared, sync is complete
+            progress = 100.0
+            completed = True
+            remaining = 0
+        elif init_max_log_id > 0:
             if current_log_id >= init_max_log_id:
                 progress = 100.0
                 completed = True
@@ -498,7 +507,7 @@ class LogAnalyticsService:
             "progress_percent": round(progress, 2),
             "remaining_logs": remaining,
             "last_log_id": current_log_id,
-            "init_cutoff_id": init_max_log_id,
+            "init_cutoff_id": current_init_cutoff if current_init_cutoff > 0 else None,
             "completed": completed,
         }
 

@@ -255,7 +255,7 @@ async def reset_analytics(
 
 @router.post("/batch", response_model=BatchProcessResponse)
 async def batch_process_logs(
-    max_iterations: int = Query(default=100, ge=1, le=1000, description="最大迭代次数"),
+    max_iterations: int = Query(default=10000, ge=1, le=100000, description="最大迭代次数"),
     _: str = Depends(verify_auth),
 ):
     """
@@ -265,8 +265,8 @@ async def batch_process_logs(
     适用于首次同步大量历史日志数据。
 
     - **max_iterations**: 最大迭代次数（每次处理1000条）
-        - 设置为 100 则最多处理 100,000 条日志
-        - 设置为 1000 则最多处理 1,000,000 条日志
+        - 默认 10000，最多处理 10,000,000 条日志
+        - 首次初始化会自动处理完所有历史数据
 
     返回处理进度和统计信息。
     """

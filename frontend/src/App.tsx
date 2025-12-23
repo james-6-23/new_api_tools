@@ -1,10 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics } from './components'
 import { useAuth } from './contexts/AuthContext'
 
+// Valid tabs
+const validTabs: TabType[] = ['dashboard', 'generator', 'redemptions', 'history', 'topups', 'analytics']
+
+// Get initial tab from URL hash
+const getInitialTab = (): TabType => {
+  const hash = window.location.hash.slice(1) // Remove #
+  if (validTabs.includes(hash as TabType)) {
+    return hash as TabType
+  }
+  return 'dashboard'
+}
+
 function App() {
   const { isAuthenticated, login, logout } = useAuth()
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard')
+  const [activeTab, setActiveTab] = useState<TabType>(getInitialTab)
+
+  // Sync tab with URL hash
+  useEffect(() => {
+    window.location.hash = activeTab
+  }, [activeTab])
+
+  // Listen for hash changes (browser back/forward)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1)
+      if (validTabs.includes(hash as TabType)) {
+        setActiveTab(hash as TabType)
+      }
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   if (!isAuthenticated) {
     return <Login onLogin={login} />
