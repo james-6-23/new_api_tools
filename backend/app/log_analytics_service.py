@@ -648,18 +648,17 @@ class LogAnalyticsService:
         data_inconsistent = max_log_id > 0 and last_log_id > max_log_id
 
         # If in initialization mode, use init_max_log_id for progress
-        target_log_id = init_max_log_id if init_max_log_id > 0 else max_log_id
         is_initializing = init_max_log_id > 0
 
-        # Calculate progress
+        # Calculate progress based on actual processed count vs total logs
         progress = 0.0
         remaining = 0
-        if target_log_id > 0 and not data_inconsistent:
-            if last_log_id >= target_log_id:
+        if total_logs > 0 and not data_inconsistent:
+            if total_processed >= total_logs:
                 progress = 100.0
             else:
-                progress = (last_log_id / target_log_id) * 100
-            remaining = max(0, target_log_id - last_log_id)
+                progress = (total_processed / total_logs) * 100
+            remaining = max(0, total_logs - total_processed)
 
         return {
             "last_log_id": last_log_id,

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
+import { Select } from './ui/select'
 
 interface TopUpRecord {
   id: number
@@ -141,21 +142,21 @@ export function TopUps() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">状态</label>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className={inputClass}>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
                 <option value="">全部</option>
                 <option value="success">成功</option>
                 <option value="pending">待处理</option>
                 <option value="failed">失败</option>
-              </select>
+              </Select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">支付方式</label>
-              <select value={paymentMethodFilter} onChange={(e) => setPaymentMethodFilter(e.target.value)} className={inputClass}>
+              <Select value={paymentMethodFilter} onChange={(e) => setPaymentMethodFilter(e.target.value)}>
                 <option value="">全部</option>
                 {paymentMethods.map((method) => (
                   <option key={method} value={method}>{method}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">交易号</label>

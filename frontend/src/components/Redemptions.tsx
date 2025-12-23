@@ -7,6 +7,7 @@ import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
+import { Select } from './ui/select'
 
 interface RedemptionCode {
   id: number
@@ -158,12 +159,12 @@ export function Redemptions() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">状态</label>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className={inputClass}>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
                 <option value="">全部</option>
                 <option value="unused">未使用</option>
                 <option value="used">已使用</option>
                 <option value="expired">已过期</option>
-              </select>
+              </Select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">开始日期</label>
