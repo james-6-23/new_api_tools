@@ -1,9 +1,9 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { LayoutDashboard, Plus, Ticket, Clock, DollarSign, BarChart3, LogOut } from 'lucide-react'
+import { LayoutDashboard, Plus, Ticket, Clock, DollarSign, BarChart3, Users, LogOut } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 
-export type TabType = 'dashboard' | 'generator' | 'redemptions' | 'history' | 'topups' | 'analytics'
+export type TabType = 'dashboard' | 'generator' | 'redemptions' | 'history' | 'topups' | 'analytics' | 'users'
 
 interface DbStatus {
   connected: boolean
@@ -21,11 +21,12 @@ interface LayoutProps {
 
 const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: '仪表板', icon: LayoutDashboard },
-  { id: 'generator', label: '生成器', icon: Plus },
-  { id: 'redemptions', label: '兑换码', icon: Ticket },
-  { id: 'history', label: '历史记录', icon: Clock },
   { id: 'topups', label: '充值记录', icon: DollarSign },
   { id: 'analytics', label: '日志分析', icon: BarChart3 },
+  { id: 'users', label: '用户管理', icon: Users },
+  { id: 'generator', label: '生成器', icon: Plus },
+  { id: 'redemptions', label: '兑换码', icon: Ticket },
+  { id: 'history', label: '生成记录', icon: Clock },
 ]
 
 export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutProps) {

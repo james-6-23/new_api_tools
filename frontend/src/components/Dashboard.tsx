@@ -42,157 +42,105 @@ interface DailyTrend {
 }
 
 interface AnalyticsSummary {
-  total_processed: number
-  last_processed_at: number
-  request_king: {
-    user_id: number
-    username: string
-    request_count: number
-  } | null
-  quota_king: {
-    user_id: number
-    username: string
-    quota_used: number
-  } | null
-  sync_status: {
-    is_synced: boolean
-    progress_percent: number
-  }
+  request_king: { user_id: number; username: string; request_count: number } | null
+  quota_king: { user_id: number; username: string; quota_used: number } | null
 }
 
 type PeriodType = '24h' | '3d' | '7d' | '14d'
 
 export function Dashboard() {
   const { token } = useAuth()
-
   const [overview, setOverview] = useState<SystemOverview | null>(null)
   const [usage, setUsage] = useState<UsageStatistics | null>(null)
   const [models, setModels] = useState<ModelUsage[]>([])
   const [dailyTrends, setDailyTrends] = useState<DailyTrend[]>([])
   const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | null>(null)
-
   const [loading, setLoading] = useState(true)
   const [period, setPeriod] = useState<PeriodType>('7d')
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
-
-  const getAuthHeaders = useCallback(() => {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    }
-  }, [token])
+  const getAuthHeaders = useCallback(() => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  }), [token])
 
   const fetchOverview = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/overview`, {
-        headers: getAuthHeaders(),
-      })
+      const response = await fetch(`${apiUrl}/api/dashboard/overview`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setOverview(data.data)
-    } catch (error) {
-      console.error('Failed to fetch overview:', error)
-    }
+    } catch (error) { console.error('Failed to fetch overview:', error) }
   }, [apiUrl, getAuthHeaders])
 
   const fetchUsage = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/usage?period=${period}`, {
-        headers: getAuthHeaders(),
-      })
+      const response = await fetch(`${apiUrl}/api/dashboard/usage?period=${period}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setUsage(data.data)
-    } catch (error) {
-      console.error('Failed to fetch usage:', error)
-    }
+    } catch (error) { console.error('Failed to fetch usage:', error) }
   }, [apiUrl, getAuthHeaders, period])
 
   const fetchModels = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/models?period=${period}&limit=10`, {
-        headers: getAuthHeaders(),
-      })
+      const response = await fetch(`${apiUrl}/api/dashboard/models?period=${period}&limit=10`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setModels(data.data)
-    } catch (error) {
-      console.error('Failed to fetch models:', error)
-    }
+    } catch (error) { console.error('Failed to fetch models:', error) }
   }, [apiUrl, getAuthHeaders, period])
 
   const fetchTrends = useCallback(async () => {
     const days = period === '24h' ? 1 : period === '3d' ? 3 : period === '7d' ? 7 : 14
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, {
-        headers: getAuthHeaders(),
-      })
+      const response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setDailyTrends(data.data)
-    } catch (error) {
-      console.error('Failed to fetch trends:', error)
-    }
+    } catch (error) { console.error('Failed to fetch trends:', error) }
   }, [apiUrl, getAuthHeaders, period])
 
   const fetchAnalyticsSummary = useCallback(async () => {
     try {
-      const [summaryRes, syncRes] = await Promise.all([
-        fetch(`${apiUrl}/api/analytics/summary`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/analytics/sync-status`, { headers: getAuthHeaders() }),
-      ])
-      const summaryData = await summaryRes.json()
-      const syncData = await syncRes.json()
+      const response = await fetch(`${apiUrl}/api/dashboard/top-users?period=${period}&limit=10`, { headers: getAuthHeaders() })
+      const data = await response.json()
       
-      if (summaryData.success && syncData.success) {
-        const requestRanking = summaryData.data.user_request_ranking || []
-        const quotaRanking = summaryData.data.user_quota_ranking || []
+      if (data.success && data.data.length > 0) {
+        const sortedByRequest = [...data.data].sort((a: any, b: any) => b.request_count - a.request_count)
+        const sortedByQuota = [...data.data].sort((a: any, b: any) => b.quota_used - a.quota_used)
         
         setAnalyticsSummary({
-          total_processed: summaryData.data.state?.total_processed || 0,
-          last_processed_at: summaryData.data.state?.last_processed_at || 0,
-          request_king: requestRanking.length > 0 ? {
-            user_id: requestRanking[0].user_id,
-            username: requestRanking[0].username,
-            request_count: requestRanking[0].request_count,
+          request_king: sortedByRequest.length > 0 ? {
+            user_id: sortedByRequest[0].user_id,
+            username: sortedByRequest[0].username,
+            request_count: sortedByRequest[0].request_count,
           } : null,
-          quota_king: quotaRanking.length > 0 ? {
-            user_id: quotaRanking[0].user_id,
-            username: quotaRanking[0].username,
-            quota_used: quotaRanking[0].quota_used,
+          quota_king: sortedByQuota.length > 0 ? {
+            user_id: sortedByQuota[0].user_id,
+            username: sortedByQuota[0].username,
+            quota_used: sortedByQuota[0].quota_used,
           } : null,
-          sync_status: {
-            is_synced: syncData.data.is_synced,
-            progress_percent: syncData.data.progress_percent,
-          },
         })
+      } else {
+        setAnalyticsSummary(null)
       }
-    } catch (error) {
-      console.error('Failed to fetch analytics summary:', error)
-    }
-  }, [apiUrl, getAuthHeaders])
+    } catch (error) { console.error('Failed to fetch analytics summary:', error) }
+  }, [apiUrl, getAuthHeaders, period])
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true)
-      await Promise.all([
-        fetchOverview(),
-        fetchUsage(),
-        fetchModels(),
-        fetchTrends(),
-        fetchAnalyticsSummary(),
-      ])
+      await Promise.all([fetchOverview(), fetchUsage(), fetchModels(), fetchTrends(), fetchAnalyticsSummary()])
       setLoading(false)
     }
     loadData()
   }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
 
-  const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
-
+  const formatQuota = (quota: number) => `${(quota / 500000).toFixed(2)}`
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
     return num.toString()
   }
-
   const getMaxValue = (data: number[]) => Math.max(...data, 1)
+  const getPeriodLabel = () => period === '24h' ? '24小时' : period === '3d' ? '3天' : period === '7d' ? '7天' : '14天'
 
   if (loading) {
     return (
@@ -208,12 +156,7 @@ export function Dashboard() {
       <div className="flex justify-end">
         <div className="inline-flex rounded-lg border bg-card p-1">
           {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
-            <Button
-              key={p}
-              variant={period === p ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setPeriod(p)}
-            >
+            <Button key={p} variant={period === p ? 'default' : 'ghost'} size="sm" onClick={() => setPeriod(p)}>
               {p === '24h' ? '24小时' : p === '3d' ? '3天' : p === '7d' ? '7天' : '14天'}
             </Button>
           ))}
@@ -240,11 +183,8 @@ export function Dashboard() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Trends */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">每日趋势</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">每日趋势</CardTitle></CardHeader>
           <CardContent>
             {dailyTrends.length > 0 ? (
               <div className="space-y-4">
@@ -254,34 +194,20 @@ export function Dashboard() {
                     const height = (trend.request_count / maxRequests) * 100
                     return (
                       <div key={index} className="flex-1 flex flex-col items-center">
-                        <div
-                          className="w-full bg-primary rounded-t transition-all hover:bg-primary/80"
-                          style={{ height: `${Math.max(height, 2)}%` }}
-                          title={`${trend.request_count} 请求`}
-                        />
-                        <span className="text-xs text-muted-foreground mt-2 truncate w-full text-center">
-                          {trend.date.slice(5)}
-                        </span>
+                        <div className="w-full bg-primary rounded-t transition-all hover:bg-primary/80" style={{ height: `${Math.max(height, 2)}%` }} title={`${trend.request_count} 请求`} />
+                        <span className="text-xs text-muted-foreground mt-2 truncate w-full text-center">{trend.date.slice(5)}</span>
                       </div>
                     )
                   })}
                 </div>
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>请求数</span>
-                  <span>日期</span>
-                </div>
+                <div className="flex justify-between text-sm text-muted-foreground"><span>请求数</span><span>日期</span></div>
               </div>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>
-            )}
+            ) : (<div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>)}
           </CardContent>
         </Card>
 
-        {/* Model Usage */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">模型使用分布</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-lg">模型使用分布</CardTitle></CardHeader>
           <CardContent>
             {models.length > 0 ? (
               <div className="space-y-3">
@@ -300,33 +226,15 @@ export function Dashboard() {
                   )
                 })}
               </div>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>
-            )}
+            ) : (<div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>)}
           </CardContent>
         </Card>
       </div>
 
       {/* Analytics Kings */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <KingCard
-          title="🏆 请求王"
-          subtitle="累计请求数最多的用户"
-          icon={Zap}
-          user={analyticsSummary?.request_king}
-          valueLabel="总请求数"
-          value={analyticsSummary?.request_king?.request_count.toLocaleString()}
-          gradient="from-blue-500 to-blue-600"
-        />
-        <KingCard
-          title="👑 额度王"
-          subtitle="累计消耗额度最多的用户"
-          icon={Crown}
-          user={analyticsSummary?.quota_king}
-          valueLabel="总消耗额度"
-          value={analyticsSummary?.quota_king ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined}
-          gradient="from-green-500 to-green-600"
-        />
+        <KingCard title="🏆 请求王" subtitle={`${getPeriodLabel()}内请求数最多`} icon={Zap} user={analyticsSummary?.request_king} valueLabel="总请求数" value={analyticsSummary?.request_king?.request_count.toLocaleString()} gradient="from-blue-500 to-blue-600" />
+        <KingCard title="👑 额度王" subtitle={`${getPeriodLabel()}内消耗额度最多`} icon={Crown} user={analyticsSummary?.quota_king} valueLabel="总消耗额度" value={analyticsSummary?.quota_king ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} gradient="from-green-500 to-green-600" />
       </div>
     </div>
   )
@@ -341,21 +249,12 @@ interface OverviewCardProps {
 }
 
 function OverviewCard({ title, value, subValue, icon: Icon, color }: OverviewCardProps) {
-  const colorClasses = {
-    blue: 'bg-blue-500',
-    green: 'bg-green-500',
-    purple: 'bg-purple-500',
-    orange: 'bg-orange-500',
-    pink: 'bg-pink-500',
-  }
-
+  const colorClasses = { blue: 'bg-blue-500', green: 'bg-green-500', purple: 'bg-purple-500', orange: 'bg-orange-500', pink: 'bg-pink-500' }
   return (
     <Card>
       <CardContent className="p-4">
         <div className="flex items-center">
-          <div className={`${colorClasses[color]} p-3 rounded-lg`}>
-            <Icon className="w-6 h-6 text-white" />
-          </div>
+          <div className={`${colorClasses[color]} p-3 rounded-lg`}><Icon className="w-6 h-6 text-white" /></div>
           <div className="ml-4">
             <p className="text-sm text-muted-foreground">{title}</p>
             <p className="text-2xl font-bold">{value.toLocaleString()}</p>
@@ -367,21 +266,10 @@ function OverviewCard({ title, value, subValue, icon: Icon, color }: OverviewCar
   )
 }
 
-interface UsageCardProps {
-  title: string
-  value: string
-  color: 'blue' | 'green' | 'purple' | 'orange' | 'pink'
-}
+interface UsageCardProps { title: string; value: string; color: 'blue' | 'green' | 'purple' | 'orange' | 'pink' }
 
 function UsageCard({ title, value, color }: UsageCardProps) {
-  const borderColors = {
-    blue: 'border-l-blue-500',
-    green: 'border-l-green-500',
-    purple: 'border-l-purple-500',
-    orange: 'border-l-orange-500',
-    pink: 'border-l-pink-500',
-  }
-
+  const borderColors = { blue: 'border-l-blue-500', green: 'border-l-green-500', purple: 'border-l-purple-500', orange: 'border-l-orange-500', pink: 'border-l-pink-500' }
   return (
     <Card className={`border-l-4 ${borderColors[color]}`}>
       <CardContent className="p-4">
@@ -410,16 +298,12 @@ function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradie
           <p className="text-white/80 text-sm font-medium">{title}</p>
           <p className="text-xs text-white/60 mt-1">{subtitle}</p>
         </div>
-        <div className="bg-white/20 rounded-full p-3">
-          <Icon className="w-8 h-8" />
-        </div>
+        <div className="bg-white/20 rounded-full p-3"><Icon className="w-8 h-8" /></div>
       </div>
       {user ? (
         <div className="mt-4">
           <div className="flex items-center">
-            <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center text-xl font-bold">
-              {user.username.charAt(0).toUpperCase()}
-            </div>
+            <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center text-xl font-bold">{user.username.charAt(0).toUpperCase()}</div>
             <div className="ml-4">
               <p className="text-xl font-bold">{user.username}</p>
               <p className="text-white/70 text-sm">ID: {user.user_id}</p>
@@ -430,9 +314,7 @@ function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradie
             <p className="text-white/70 text-sm">{valueLabel}</p>
           </div>
         </div>
-      ) : (
-        <div className="mt-4 text-center py-6 text-white/70">暂无数据</div>
-      )}
+      ) : (<div className="mt-4 text-center py-6 text-white/70">暂无数据</div>)}
     </div>
   )
 }

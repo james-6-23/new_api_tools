@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics } from './components'
+import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics, UserManagement } from './components'
 import { useAuth } from './contexts/AuthContext'
 
 // Valid tabs
-const validTabs: TabType[] = ['dashboard', 'generator', 'redemptions', 'history', 'topups', 'analytics']
+const validTabs: TabType[] = ['dashboard', 'topups', 'analytics', 'users', 'generator', 'redemptions', 'history']
 
 // Get initial tab from URL hash
 const getInitialTab = (): TabType => {
@@ -53,6 +53,8 @@ function App() {
         return <TopUps />
       case 'analytics':
         return <Analytics />
+      case 'users':
+        return <UserManagement />
       default:
         return <Dashboard />
     }
