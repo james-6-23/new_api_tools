@@ -119,8 +119,9 @@ class DatabaseManager:
         try:
             with self.engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            self._connected = True
-            logger.info("Database connection successful")
+            if not self._connected:
+                self._connected = True
+                logger.info("Database connection successful")
             return True
         except SQLAlchemyError as e:
             self._connected = False

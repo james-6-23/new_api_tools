@@ -2,7 +2,6 @@
 API Routes for NewAPI Middleware Tool.
 Implements redemption code generation, listing, and deletion endpoints.
 """
-import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -18,8 +17,7 @@ from .redemption_service import (
     RedemptionStatus,
     get_redemption_service,
 )
-
-logger = logging.getLogger(__name__)
+from .logger import logger
 
 router = APIRouter(prefix="/api", tags=["Redemptions"])
 
@@ -127,7 +125,11 @@ async def generate_redemption_codes(request: GenerateRequest, _: str = Depends(v
         
         service = get_redemption_service()
         result = service.generate_codes(params)
-        
+
+        if result.success:
+            quota_str = f"${request.fixed_amount}" if request.quota_mode == QuotaMode.FIXED else f"${request.min_amount}-${request.max_amount}"
+            logger.business("兑换码生成", name=request.name, count=result.count, quota=quota_str)
+
         return GenerateResponse(
             success=result.success,
             message=result.message,
@@ -212,7 +214,10 @@ async def batch_delete_redemption_codes(request: BatchDeleteRequest, _: str = De
     try:
         service = get_redemption_service()
         success = service.delete_codes(request.ids)
-        
+
+        if success:
+            logger.business("批量删除兑换码", count=len(request.ids))
+
         return DeleteResponse(
             success=success,
             message=f"Successfully deleted {len(request.ids)} redemption codes" if success else "No redemption codes were deleted",
@@ -237,7 +242,10 @@ async def delete_redemption_code(id: int, _: str = Depends(verify_auth)):
         raise NotFoundError(message=f"Redemption code with id {id} not found")
     
     success = service.delete_code(id)
-    
+
+    if success:
+        logger.business("删除兑换码", id=id)
+
     return DeleteResponse(
         success=success,
         message=f"Successfully deleted redemption code {id}" if success else f"Failed to delete redemption code {id}",

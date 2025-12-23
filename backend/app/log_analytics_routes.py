@@ -2,7 +2,6 @@
 Log Analytics API Routes for NewAPI Middleware Tool.
 Implements endpoints for user rankings and model statistics.
 """
-import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -10,8 +9,7 @@ from pydantic import BaseModel
 
 from .auth import verify_auth
 from .log_analytics_service import get_log_analytics_service
-
-logger = logging.getLogger(__name__)
+from .logger import logger
 
 router = APIRouter(prefix="/api/analytics", tags=["Log Analytics"])
 
@@ -248,33 +246,35 @@ async def reset_analytics(
     service = get_log_analytics_service()
     result = service.reset_analytics()
 
-    logger.warning("Analytics data reset by user")
+    logger.analytics("用户手动重置分析数据")
 
     return ResetResponse(**result)
 
 
 @router.post("/batch", response_model=BatchProcessResponse)
 async def batch_process_logs(
-    max_iterations: int = Query(default=10000, ge=1, le=100000, description="最大迭代次数"),
+    max_iterations: int = Query(default=100, ge=1, le=1000, description="最大迭代次数"),
     _: str = Depends(verify_auth),
 ):
     """
     批量处理日志（用于初始化同步）。
 
     连续处理多个批次的日志，每批次1000条。
-    适用于首次同步大量历史日志数据。
+    前端会自动循环调用直到完成。
 
-    - **max_iterations**: 最大迭代次数（每次处理1000条）
-        - 默认 10000，最多处理 10,000,000 条日志
-        - 首次初始化会自动处理完所有历史数据
+    - **max_iterations**: 单次请求最大迭代次数（每次处理1000条）
+        - 默认 100，单次请求最多处理 100,000 条日志
+        - 前端会自动循环调用直到全部完成
 
     返回处理进度和统计信息。
     """
     service = get_log_analytics_service()
     result = service.batch_process(max_iterations=max_iterations)
 
-    logger.info(
-        f"Batch process completed: {result['total_processed']} logs in {result['elapsed_seconds']}s"
+    logger.analytics(
+        "批量处理完成",
+        processed=result['total_processed'],
+        elapsed=f"{result['elapsed_seconds']}s"
     )
 
     return BatchProcessResponse(**result)
@@ -316,7 +316,7 @@ async def check_data_consistency(
     if auto_reset:
         result = service.check_and_auto_reset()
         if result["reset"]:
-            logger.warning(f"Auto-reset triggered: {result['reason']}")
+            logger.analytics("自动重置触发", reason=result['reason'])
         return {"success": True, **result}
 
     # Just check, don't reset

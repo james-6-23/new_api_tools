@@ -3,7 +3,6 @@ NewAPI Middleware Tool - FastAPI Backend
 Main application entry point with CORS, logging, and exception handling.
 """
 import logging
-import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -13,20 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+from .logger import logger
 
 # Suppress noisy loggers
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
+logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 
 class ErrorResponse(BaseModel):
@@ -121,9 +111,9 @@ class NotFoundError(AppException):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    logger.info("Starting NewAPI Middleware Tool...")
+    logger.system("NewAPI Middleware Tool 启动中...")
     yield
-    logger.info("Shutting down NewAPI Middleware Tool...")
+    logger.system("NewAPI Middleware Tool 已关闭")
 
 
 # Import routes after app is created to avoid circular imports
@@ -179,15 +169,31 @@ async def log_requests(request: Request, call_next):
     process_time = time.time() - start_time
     status_code = response.status_code
 
-    # Use different log levels based on status code
-    log_msg = f"{request.method} {request.url.path} | {status_code} | {process_time:.3f}s | {client_host}"
-
+    # Use the new logger for API requests
     if status_code >= 500:
-        logger.error(log_msg)
+        logger.api_error(
+            request.method,
+            request.url.path,
+            status_code,
+            "服务器内部错误",
+            client_host
+        )
     elif status_code >= 400:
-        logger.warning(log_msg)
+        logger.api_error(
+            request.method,
+            request.url.path,
+            status_code,
+            "客户端错误",
+            client_host
+        )
     else:
-        logger.info(log_msg)
+        logger.api(
+            request.method,
+            request.url.path,
+            status_code,
+            process_time,
+            client_host
+        )
 
     return response
 
@@ -195,7 +201,7 @@ async def log_requests(request: Request, call_next):
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
     """Handle application-specific exceptions."""
-    logger.error(f"AppException: {exc.code} - {exc.message}")
+    logger.error(f"应用异常: {exc.code} - {exc.message}", category="系统")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -212,7 +218,7 @@ async def app_exception_handler(request: Request, exc: AppException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions."""
-    logger.exception(f"Unexpected error: {exc}")
+    logger.error(f"未预期异常: {exc}", category="系统", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -220,7 +226,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             "error": {
                 "code": "INTERNAL_ERROR",
                 "message": "An unexpected error occurred",
-                "details": str(exc) if logger.level == logging.DEBUG else None
+                "details": None
             }
         }
     )

@@ -2,15 +2,13 @@
 Log Analytics Service for NewAPI Middleware Tool.
 Implements incremental log processing for user rankings and model statistics.
 """
-import logging
 import time
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
 from .database import get_db_manager
 from .local_storage import get_local_storage
-
-logger = logging.getLogger(__name__)
+from .logger import logger
 
 # Constants
 BATCH_SIZE = 1000  # Number of logs to process per batch
@@ -154,7 +152,7 @@ class LogAnalyticsService:
                 "limit": BATCH_SIZE,
             })
         except Exception as e:
-            logger.error(f"Failed to fetch logs: {e}")
+            logger.db_error(f"获取日志失败: {e}")
             return {"success": False, "error": str(e), "processed": 0}
 
         if not logs:
@@ -249,7 +247,7 @@ class LogAnalyticsService:
         self._set_state("last_processed_at", now)
         self._set_state("total_processed", total_processed + processed_count)
 
-        logger.info(f"Processed {processed_count} logs, last_id: {max_log_id}")
+        logger.analytics(f"日志处理完成", processed=processed_count, last_id=max_log_id)
 
         return {
             "success": True,
@@ -394,7 +392,7 @@ class LogAnalyticsService:
             cursor.execute("DELETE FROM model_stats")
             conn.commit()
 
-        logger.warning("Analytics data has been reset")
+        logger.analytics("分析数据已重置")
         return {"success": True, "message": "Analytics data reset successfully"}
 
     def get_total_logs_count(self) -> int:
@@ -410,7 +408,7 @@ class LogAnalyticsService:
             result = self._db.execute(sql, {"log_type": LOG_TYPE_CONSUMPTION})
             return int(result[0]["cnt"]) if result else 0
         except Exception as e:
-            logger.error(f"Failed to get logs count: {e}")
+            logger.db_error(f"获取日志总数失败: {e}")
             return 0
 
     def get_max_log_id(self) -> int:
@@ -426,7 +424,7 @@ class LogAnalyticsService:
             result = self._db.execute(sql, {"log_type": LOG_TYPE_CONSUMPTION})
             return int(result[0]["max_id"]) if result and result[0]["max_id"] else 0
         except Exception as e:
-            logger.error(f"Failed to get max log id: {e}")
+            logger.db_error(f"获取最大日志ID失败: {e}")
             return 0
 
     def batch_process(
@@ -456,7 +454,7 @@ class LogAnalyticsService:
             # First time batch processing - set the cutoff point
             init_max_log_id = self.get_max_log_id()
             self._set_state("init_max_log_id", init_max_log_id)
-            logger.info(f"Set initialization cutoff at log_id: {init_max_log_id}")
+            logger.analytics("设置初始化截止点", cutoff_id=init_max_log_id)
 
         while iterations < max_iterations:
             result = self._process_logs_with_cutoff(init_max_log_id)
@@ -545,7 +543,7 @@ class LogAnalyticsService:
                 "limit": BATCH_SIZE,
             })
         except Exception as e:
-            logger.error(f"Failed to fetch logs: {e}")
+            logger.db_error(f"获取日志失败: {e}")
             return {"success": False, "error": str(e), "processed": 0}
 
         if not logs:
@@ -630,7 +628,7 @@ class LogAnalyticsService:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM analytics_state WHERE key = 'init_max_log_id'")
             conn.commit()
-        logger.info("Cleared initialization cutoff - sync complete")
+        logger.analytics("初始化同步完成，已清除截止点")
 
     def get_sync_status(self) -> Dict[str, Any]:
         """
@@ -689,9 +687,10 @@ class LogAnalyticsService:
 
         if last_log_id > 0 and max_log_id > 0 and last_log_id > max_log_id:
             # Data is inconsistent - logs have been deleted
-            logger.warning(
-                f"Data inconsistency detected: last_log_id={last_log_id}, max_log_id={max_log_id}. "
-                "Logs appear to have been deleted. Resetting analytics."
+            logger.security(
+                "检测到数据不一致，日志可能已被删除",
+                last_log_id=last_log_id,
+                max_log_id=max_log_id
             )
             self.reset_analytics()
             return {

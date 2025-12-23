@@ -1,4 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react'
+import { LayoutDashboard, Plus, Ticket, Clock, DollarSign, BarChart3, LogOut } from 'lucide-react'
+import { Button } from './ui/button'
+import { Badge } from './ui/badge'
 
 export type TabType = 'dashboard' | 'generator' | 'redemptions' | 'history' | 'topups' | 'analytics'
 
@@ -15,6 +18,15 @@ interface LayoutProps {
   onTabChange: (tab: TabType) => void
   onLogout: () => void
 }
+
+const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'dashboard', label: '仪表板', icon: LayoutDashboard },
+  { id: 'generator', label: '生成器', icon: Plus },
+  { id: 'redemptions', label: '兑换码', icon: Ticket },
+  { id: 'history', label: '历史记录', icon: Clock },
+  { id: 'topups', label: '充值记录', icon: DollarSign },
+  { id: 'analytics', label: '日志分析', icon: BarChart3 },
+]
 
 export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutProps) {
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null)
@@ -43,104 +55,53 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
   }, [])
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-white shadow">
+      <header className="bg-card border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
+            <div className="flex items-center gap-4">
+              <h1 className="text-xl sm:text-2xl font-bold">
                 NewAPI Middleware Tool
               </h1>
-              {/* Database Status Badge */}
               {dbStatus && (
-                <div className={`hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                  dbStatus.connected
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-red-100 text-red-800'
-                }`}>
-                  <span className={`w-2 h-2 rounded-full ${
-                    dbStatus.connected ? 'bg-green-500' : 'bg-red-500'
-                  }`}></span>
-                  <span>
-                    {dbStatus.connected
-                      ? `${dbStatus.engine.toUpperCase()} · ${dbStatus.database}`
-                      : '数据库未连接'}
-                  </span>
-                </div>
+                <Badge 
+                  variant={dbStatus.connected ? 'success' : 'destructive'} 
+                  className="hidden sm:flex items-center gap-1.5"
+                >
+                  <span className={`w-2 h-2 rounded-full ${dbStatus.connected ? 'bg-green-300' : 'bg-red-300'}`} />
+                  {dbStatus.connected
+                    ? `${dbStatus.engine.toUpperCase()} · ${dbStatus.database}`
+                    : '数据库未连接'}
+                </Badge>
               )}
             </div>
-            <button
-              onClick={onLogout}
-              className="text-gray-500 hover:text-gray-700 text-sm font-medium flex items-center space-x-1"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
+              <LogOut className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">退出登录</span>
-            </button>
+            </Button>
           </div>
         </div>
       </header>
 
       {/* Navigation Tabs */}
-      <nav className="bg-white border-b">
+      <nav className="bg-card border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex space-x-4 sm:space-x-8">
-            <TabButton
-              active={activeTab === 'dashboard'}
-              onClick={() => onTabChange('dashboard')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-              </svg>
-              <span className="hidden sm:inline">仪表板</span>
-            </TabButton>
-            <TabButton
-              active={activeTab === 'generator'}
-              onClick={() => onTabChange('generator')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              <span className="hidden sm:inline">生成器</span>
-            </TabButton>
-            <TabButton
-              active={activeTab === 'redemptions'}
-              onClick={() => onTabChange('redemptions')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
-              </svg>
-              <span className="hidden sm:inline">兑换码</span>
-            </TabButton>
-            <TabButton
-              active={activeTab === 'history'}
-              onClick={() => onTabChange('history')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="hidden sm:inline">历史记录</span>
-            </TabButton>
-            <TabButton
-              active={activeTab === 'topups'}
-              onClick={() => onTabChange('topups')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="hidden sm:inline">充值记录</span>
-            </TabButton>
-            <TabButton
-              active={activeTab === 'analytics'}
-              onClick={() => onTabChange('analytics')}
-            >
-              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-              <span className="hidden sm:inline">日志分析</span>
-            </TabButton>
+          <div className="flex gap-1">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => onTabChange(id)}
+                className={`py-4 px-3 sm:px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${
+                  activeTab === id
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
           </div>
         </div>
       </nav>
@@ -150,26 +111,5 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
         {children}
       </main>
     </div>
-  )
-}
-
-interface TabButtonProps {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}
-
-function TabButton({ active, onClick, children }: TabButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      className={`py-4 px-2 sm:px-1 border-b-2 font-medium text-sm flex items-center transition-colors ${
-        active
-          ? 'border-blue-500 text-blue-600'
-          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-      }`}
-    >
-      {children}
-    </button>
   )
 }

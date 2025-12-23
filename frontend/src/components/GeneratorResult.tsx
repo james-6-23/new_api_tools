@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useToast } from './Toast'
+import { CheckCircle, Copy, Download } from 'lucide-react'
+import { Button } from './ui/button'
 
 export interface GenerateResult {
   keys: string[]
@@ -17,14 +19,11 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
-      // Try modern clipboard API first
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text)
         showToast('success', `${label}已复制到剪贴板`)
         return
       }
-
-      // Fallback for HTTP or older browsers
       const textArea = document.createElement('textarea')
       textArea.value = text
       textArea.style.position = 'fixed'
@@ -33,23 +32,16 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
       document.body.appendChild(textArea)
       textArea.focus()
       textArea.select()
-
       const successful = document.execCommand('copy')
       document.body.removeChild(textArea)
-
-      if (successful) {
-        showToast('success', `${label}已复制到剪贴板`)
-      } else {
-        showToast('error', '复制失败，请手动复制')
-      }
+      if (successful) showToast('success', `${label}已复制到剪贴板`)
+      else showToast('error', '复制失败，请手动复制')
     } catch {
       showToast('error', '复制失败，请手动复制')
     }
   }
 
-  const copyKeys = () => {
-    copyToClipboard(result.keys.join('\n'), '兑换码')
-  }
+  const copyKeys = () => copyToClipboard(result.keys.join('\n'), '兑换码')
 
   const downloadKeys = () => {
     const content = result.keys.join('\n')
@@ -71,23 +63,11 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
   return (
     <div className="space-y-6">
       {/* 成功提示 */}
-      <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start">
-        <svg
-          className="w-5 h-5 text-green-500 mt-0.5 mr-3 flex-shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M5 13l4 4L19 7"
-          />
-        </svg>
+      <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-start">
+        <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 mr-3 flex-shrink-0" />
         <div>
-          <h3 className="text-sm font-medium text-green-800">添加成功</h3>
-          <p className="mt-1 text-sm text-green-700">
+          <h3 className="text-sm font-medium text-green-800 dark:text-green-200">添加成功</h3>
+          <p className="mt-1 text-sm text-green-700 dark:text-green-300">
             成功添加 {result.count} 个兑换码到数据库
           </p>
         </div>
@@ -96,93 +76,40 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
       {/* 兑换码列表 */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">
-            兑换码列表 ({result.count} 个)
-          </label>
+          <label className="block text-sm font-medium">兑换码列表 ({result.count} 个)</label>
           <div className="flex space-x-3">
-            <button
-              onClick={copyKeys}
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center"
-            >
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
-              </svg>
+            <button onClick={copyKeys} className="text-sm text-primary hover:text-primary/80 flex items-center">
+              <Copy className="w-4 h-4 mr-1" />
               复制全部
             </button>
-            <button
-              onClick={downloadKeys}
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center"
-            >
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
+            <button onClick={downloadKeys} className="text-sm text-primary hover:text-primary/80 flex items-center">
+              <Download className="w-4 h-4 mr-1" />
               下载
             </button>
           </div>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-64 overflow-y-auto">
+        <div className="bg-muted border rounded-lg p-4 max-h-64 overflow-y-auto">
           <div className="space-y-1">
             {displayedKeys.map((key, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between py-1 px-2 hover:bg-gray-100 rounded group"
-              >
-                <code className="text-sm text-gray-800 font-mono">{key}</code>
+              <div key={index} className="flex items-center justify-between py-1 px-2 hover:bg-background rounded group">
+                <code className="text-sm font-mono">{key}</code>
                 <button
                   onClick={() => copyToClipboard(key, '兑换码')}
-                  className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 transition-opacity"
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
                   title="复制"
                 >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                  </svg>
+                  <Copy className="w-4 h-4" />
                 </button>
               </div>
             ))}
           </div>
           {hasMoreKeys && !showAllKeys && (
-            <button
-              onClick={() => setShowAllKeys(true)}
-              className="mt-3 text-sm text-blue-600 hover:text-blue-800"
-            >
+            <button onClick={() => setShowAllKeys(true)} className="mt-3 text-sm text-primary hover:text-primary/80">
               显示全部 {result.keys.length} 个兑换码
             </button>
           )}
           {hasMoreKeys && showAllKeys && (
-            <button
-              onClick={() => setShowAllKeys(false)}
-              className="mt-3 text-sm text-blue-600 hover:text-blue-800"
-            >
+            <button onClick={() => setShowAllKeys(false)} className="mt-3 text-sm text-primary hover:text-primary/80">
               收起
             </button>
           )}
@@ -191,12 +118,7 @@ export function GeneratorResult({ result, onReset }: GeneratorResultProps) {
 
       {/* 操作按钮 */}
       <div className="flex justify-end pt-4 border-t">
-        <button
-          onClick={onReset}
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-        >
-          继续添加
-        </button>
+        <Button variant="secondary" onClick={onReset}>继续添加</Button>
       </div>
     </div>
   )

@@ -4,6 +4,7 @@ import { useToast } from './Toast'
 import { GeneratorForm, GenerateFormData } from './GeneratorForm'
 import { ResultModal, GenerateResult } from './ResultModal'
 import { addHistoryItem, HistoryItem } from './History'
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 
 interface ApiResponse {
   success: boolean
@@ -30,8 +31,6 @@ export function Generator() {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || ''
-
-      // Build request body based on form data
       const requestBody: Record<string, unknown> = {
         name: formData.name,
         count: formData.count,
@@ -40,7 +39,6 @@ export function Generator() {
         expire_mode: formData.expire_mode,
       }
 
-      // Add quota-related fields based on mode
       if (formData.quota_mode === 'fixed') {
         requestBody.fixed_amount = formData.fixed_amount
       } else {
@@ -48,11 +46,9 @@ export function Generator() {
         requestBody.max_amount = formData.max_amount
       }
 
-      // Add expiration-related fields based on mode
       if (formData.expire_mode === 'days') {
         requestBody.expire_days = formData.expire_days
       } else if (formData.expire_mode === 'date') {
-        // Convert local datetime to ISO 8601 format
         requestBody.expire_date = new Date(formData.expire_date).toISOString()
       }
 
@@ -68,8 +64,7 @@ export function Generator() {
       const data: ApiResponse = await response.json()
 
       if (!response.ok) {
-        const errorMessage = data.error?.message || data.message || '生成失败'
-        showToast('error', errorMessage)
+        showToast('error', data.error?.message || data.message || '生成失败')
         return
       }
 
@@ -81,8 +76,6 @@ export function Generator() {
         }
         setResult(generateResult)
         setShowModal(true)
-
-        // Save to history in IndexedDB
         await saveToHistory(formData, data.data)
       } else {
         showToast('error', data.message || '生成失败')
@@ -112,23 +105,19 @@ export function Generator() {
     }
   }
 
-  const handleCloseModal = () => {
-    setShowModal(false)
-    setResult(null)
-  }
-
   return (
     <>
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-6">
-          添加兑换码
-        </h2>
-        <GeneratorForm onSubmit={handleSubmit} isLoading={isLoading} />
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>添加兑换码</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <GeneratorForm onSubmit={handleSubmit} isLoading={isLoading} />
+        </CardContent>
+      </Card>
 
-      {/* Result Modal */}
       {showModal && result && (
-        <ResultModal result={result} onClose={handleCloseModal} />
+        <ResultModal result={result} onClose={() => { setShowModal(false); setResult(null) }} />
       )}
     </>
   )
