@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { GeneratorForm, GenerateFormData } from './GeneratorForm'
-import { GeneratorResult, GenerateResult } from './GeneratorResult'
+import { ResultModal, GenerateResult } from './ResultModal'
 import { addHistoryItem, HistoryItem } from './History'
 
 interface ApiResponse {
@@ -23,13 +23,14 @@ export function Generator() {
   const { showToast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<GenerateResult | null>(null)
+  const [showModal, setShowModal] = useState(false)
 
   const handleSubmit = async (formData: GenerateFormData) => {
     setIsLoading(true)
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || ''
-      
+
       // Build request body based on form data
       const requestBody: Record<string, unknown> = {
         name: formData.name,
@@ -73,12 +74,14 @@ export function Generator() {
       }
 
       if (data.success && data.data) {
-        setResult({
+        const generateResult: GenerateResult = {
           keys: data.data.keys,
           count: data.data.count,
-        })
-        showToast('success', `成功添加 ${data.data.count} 个兑换码`)
-        
+          name: formData.name,
+        }
+        setResult(generateResult)
+        setShowModal(true)
+
         // Save to history in localStorage
         saveToHistory(formData, data.data)
       } else {
@@ -92,7 +95,7 @@ export function Generator() {
     }
   }
 
-  const saveToHistory = (formData: GenerateFormData, resultData: GenerateResult) => {
+  const saveToHistory = (formData: GenerateFormData, resultData: { keys: string[]; count: number }) => {
     try {
       const historyItem: HistoryItem = {
         id: Date.now().toString(),
@@ -109,21 +112,24 @@ export function Generator() {
     }
   }
 
-  const handleReset = () => {
+  const handleCloseModal = () => {
+    setShowModal(false)
     setResult(null)
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-lg font-medium text-gray-900 mb-6">
-        添加兑换码
-      </h2>
-      
-      {result ? (
-        <GeneratorResult result={result} onReset={handleReset} />
-      ) : (
+    <>
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-6">
+          添加兑换码
+        </h2>
         <GeneratorForm onSubmit={handleSubmit} isLoading={isLoading} />
+      </div>
+
+      {/* Result Modal */}
+      {showModal && result && (
+        <ResultModal result={result} onClose={handleCloseModal} />
       )}
-    </div>
+    </>
   )
 }

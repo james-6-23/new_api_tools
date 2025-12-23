@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from 'react'
 
-export type TabType = 'generator' | 'history' | 'topups'
+export type TabType = 'dashboard' | 'generator' | 'redemptions' | 'history' | 'topups'
 
 interface DbStatus {
   connected: boolean
@@ -88,6 +88,15 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-4 sm:space-x-8">
             <TabButton
+              active={activeTab === 'dashboard'}
+              onClick={() => onTabChange('dashboard')}
+            >
+              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+              <span className="hidden sm:inline">仪表板</span>
+            </TabButton>
+            <TabButton
               active={activeTab === 'generator'}
               onClick={() => onTabChange('generator')}
             >
@@ -95,6 +104,15 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
               </svg>
               <span className="hidden sm:inline">生成器</span>
+            </TabButton>
+            <TabButton
+              active={activeTab === 'redemptions'}
+              onClick={() => onTabChange('redemptions')}
+            >
+              <svg className="w-4 h-4 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+              </svg>
+              <span className="hidden sm:inline">兑换码</span>
             </TabButton>
             <TabButton
               active={activeTab === 'history'}
