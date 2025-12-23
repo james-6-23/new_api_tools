@@ -246,11 +246,7 @@ export function Analytics() {
   }, [fetchAnalytics, fetchSyncStatus])
 
   const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
-    return num.toString()
-  }
+  const formatNumber = (num: number) => num.toLocaleString('zh-CN')
   const formatTimestamp = (ts: number) => ts ? new Date(ts * 1000).toLocaleString('zh-CN') : '从未'
 
   if (loading) {

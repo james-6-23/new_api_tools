@@ -68,7 +68,7 @@ export function TopUps() {
   useEffect(() => {
     const fetchPaymentMethods = async () => {
       try {
-        const response = await fetch(`${apiUrl}/api/topups/payment-methods`, { headers: getAuthHeaders() })
+        const response = await fetch(`${apiUrl}/api/top-ups/payment-methods`, { headers: getAuthHeaders() })
         const data = await response.json()
         if (data.success) setPaymentMethods(data.data)
       } catch (error) { console.error('Failed to fetch payment methods:', error) }
@@ -82,7 +82,7 @@ export function TopUps() {
       const params = new URLSearchParams()
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
-      const response = await fetch(`${apiUrl}/api/topups/statistics?${params.toString()}`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/top-ups/statistics?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setStatistics(data.data)
     } catch (error) {
@@ -100,7 +100,7 @@ export function TopUps() {
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
 
-      const response = await fetch(`${apiUrl}/api/topups?${params.toString()}`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/top-ups?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) {
         const result: PaginatedResponse = data.data
