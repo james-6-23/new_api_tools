@@ -82,8 +82,8 @@ export function Generator() {
         setResult(generateResult)
         setShowModal(true)
 
-        // Save to history in localStorage
-        saveToHistory(formData, data.data)
+        // Save to history in IndexedDB
+        await saveToHistory(formData, data.data)
       } else {
         showToast('error', data.message || '生成失败')
       }
@@ -95,7 +95,7 @@ export function Generator() {
     }
   }
 
-  const saveToHistory = (formData: GenerateFormData, resultData: { keys: string[]; count: number }) => {
+  const saveToHistory = async (formData: GenerateFormData, resultData: { keys: string[]; count: number }) => {
     try {
       const historyItem: HistoryItem = {
         id: Date.now().toString(),
@@ -106,7 +106,7 @@ export function Generator() {
         quota_mode: formData.quota_mode,
         expire_mode: formData.expire_mode,
       }
-      addHistoryItem(historyItem)
+      await addHistoryItem(historyItem)
     } catch (error) {
       console.error('Failed to save history:', error)
     }

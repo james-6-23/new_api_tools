@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
+import * as db from '../services/indexedDB'
 
 export interface HistoryItem {
   id: string
@@ -11,54 +12,68 @@ export interface HistoryItem {
   expire_mode: 'never' | 'days' | 'date'
 }
 
-const HISTORY_KEY = 'newapi_tools_history'
-const MAX_HISTORY_ITEMS = 20
+const MAX_HISTORY_ITEMS = 100
 
-// localStorage management functions
-export function getHistory(): HistoryItem[] {
+/**
+ * Add a history item to IndexedDB.
+ */
+export async function addHistoryItem(item: HistoryItem): Promise<void> {
   try {
-    const data = localStorage.getItem(HISTORY_KEY)
-    return data ? JSON.parse(data) : []
-  } catch {
-    return []
-  }
-}
-
-export function saveHistory(items: HistoryItem[]): void {
-  try {
-    const limitedItems = items.slice(0, MAX_HISTORY_ITEMS)
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(limitedItems))
+    await db.addHistoryRecord({
+      name: item.name,
+      quota: 0, // Will be set by caller if needed
+      count: item.count,
+      keys: item.keys,
+    })
   } catch (error) {
-    console.error('Failed to save history:', error)
+    console.error('Failed to add history item:', error)
   }
 }
 
-export function addHistoryItem(item: HistoryItem): void {
-  const history = getHistory()
-  const newHistory = [item, ...history].slice(0, MAX_HISTORY_ITEMS)
-  saveHistory(newHistory)
-}
-
-export function deleteHistoryItem(id: string): HistoryItem[] {
-  const history = getHistory()
-  const newHistory = history.filter(item => item.id !== id)
-  saveHistory(newHistory)
-  return newHistory
-}
-
-export function clearHistory(): void {
-  localStorage.removeItem(HISTORY_KEY)
+/**
+ * Clear all history from IndexedDB.
+ */
+export async function clearHistory(): Promise<void> {
+  await db.clearHistory()
 }
 
 export function History() {
   const { showToast } = useToast()
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Load history from IndexedDB
+  const loadHistory = useCallback(async () => {
+    try {
+      setLoading(true)
+      // Initialize storage and run migrations on first load
+      await db.initializeStorage()
+      const records = await db.getHistoryRecords(MAX_HISTORY_ITEMS)
+
+      // Convert IndexedDB records to HistoryItem format
+      const items: HistoryItem[] = records.map(record => ({
+        id: record.id,
+        timestamp: new Date(record.timestamp).toISOString(),
+        name: record.name,
+        count: record.count,
+        keys: record.keys,
+        quota_mode: 'fixed' as const,
+        expire_mode: 'never' as const,
+      }))
+
+      setHistoryItems(items)
+    } catch (error) {
+      console.error('Failed to load history:', error)
+      showToast('error', '加载历史记录失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [showToast])
 
   useEffect(() => {
-    setHistoryItems(getHistory())
-  }, [])
-
+    loadHistory()
+  }, [loadHistory])
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -110,17 +125,27 @@ export function History() {
     showToast('success', '兑换码已下载')
   }
 
-  const handleDelete = (id: string) => {
-    const newHistory = deleteHistoryItem(id)
-    setHistoryItems(newHistory)
-    showToast('success', '记录已删除')
+  const handleDelete = async (id: string) => {
+    try {
+      await db.deleteHistoryRecord(id)
+      setHistoryItems(prev => prev.filter(item => item.id !== id))
+      showToast('success', '记录已删除')
+    } catch (error) {
+      console.error('Failed to delete history item:', error)
+      showToast('error', '删除失败')
+    }
   }
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (window.confirm('确定要清空所有历史记录吗？')) {
-      clearHistory()
-      setHistoryItems([])
-      showToast('success', '历史记录已清空')
+      try {
+        await db.clearHistory()
+        setHistoryItems([])
+        showToast('success', '历史记录已清空')
+      } catch (error) {
+        console.error('Failed to clear history:', error)
+        showToast('error', '清空失败')
+      }
     }
   }
 
@@ -146,6 +171,17 @@ export function History() {
       case 'date': return '指定日期'
       default: return mode
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">历史记录</h2>
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    )
   }
 
   if (historyItems.length === 0) {

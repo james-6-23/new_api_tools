@@ -1,0 +1,388 @@
+"""
+Local SQLite Storage Service for NewAPI Middleware Tool.
+Handles local configuration, caching, and statistics snapshots.
+"""
+import json
+import logging
+import os
+import sqlite3
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Default SQLite database path
+DEFAULT_DB_PATH = os.getenv("LOCAL_DB_PATH", "data/local.db")
+
+
+@dataclass
+class CacheEntry:
+    """Cache entry data model."""
+    key: str
+    value: Any
+    expires_at: int
+    created_at: int
+
+
+@dataclass
+class ConfigEntry:
+    """Configuration entry data model."""
+    key: str
+    value: Any
+    description: str
+    updated_at: int
+
+
+class LocalStorage:
+    """
+    Local SQLite storage for configuration, caching, and statistics.
+    Thread-safe implementation with connection pooling.
+    """
+
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+        """Initialize LocalStorage."""
+        self.db_path = db_path
+        self._ensure_db_directory()
+        self._init_database()
+
+    def _ensure_db_directory(self):
+        """Ensure the database directory exists."""
+        db_dir = Path(self.db_path).parent
+        if not db_dir.exists():
+            db_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created database directory: {db_dir}")
+
+    @contextmanager
+    def _get_connection(self):
+        """Get a database connection with context manager."""
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _init_database(self):
+        """Initialize database schema."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Configuration table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    updated_at INTEGER NOT NULL
+                )
+            """)
+
+            # Cache table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cache (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+
+            # Statistics snapshots table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS stats_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_type TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+
+            # Create indexes
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cache_expires
+                ON cache(expires_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_stats_type_time
+                ON stats_snapshots(snapshot_type, created_at)
+            """)
+
+            conn.commit()
+            logger.info(f"LocalStorage initialized at {self.db_path}")
+
+    # ==================== Configuration Methods ====================
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """Get a configuration value."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM config WHERE key = ?",
+                (key,)
+            )
+            row = cursor.fetchone()
+            if row:
+                try:
+                    return json.loads(row["value"])
+                except json.JSONDecodeError:
+                    return row["value"]
+            return default
+
+    def set_config(self, key: str, value: Any, description: str = "") -> None:
+        """Set a configuration value."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            json_value = json.dumps(value) if not isinstance(value, str) else value
+            cursor.execute("""
+                INSERT OR REPLACE INTO config (key, value, description, updated_at)
+                VALUES (?, ?, ?, ?)
+            """, (key, json_value, description, int(time.time())))
+            conn.commit()
+
+    def delete_config(self, key: str) -> bool:
+        """Delete a configuration value."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM config WHERE key = ?", (key,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_all_configs(self) -> Dict[str, ConfigEntry]:
+        """Get all configuration entries."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value, description, updated_at FROM config")
+            result = {}
+            for row in cursor.fetchall():
+                try:
+                    value = json.loads(row["value"])
+                except json.JSONDecodeError:
+                    value = row["value"]
+                result[row["key"]] = ConfigEntry(
+                    key=row["key"],
+                    value=value,
+                    description=row["description"],
+                    updated_at=row["updated_at"],
+                )
+            return result
+
+    # ==================== Cache Methods ====================
+
+    def cache_get(self, key: str) -> Optional[Any]:
+        """Get a cached value if not expired."""
+        current_time = int(time.time())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value, expires_at FROM cache WHERE key = ?",
+                (key,)
+            )
+            row = cursor.fetchone()
+            if row and row["expires_at"] > current_time:
+                try:
+                    return json.loads(row["value"])
+                except json.JSONDecodeError:
+                    return row["value"]
+            elif row:
+                # Expired, delete it
+                cursor.execute("DELETE FROM cache WHERE key = ?", (key,))
+                conn.commit()
+            return None
+
+    def cache_set(self, key: str, value: Any, ttl: int = 300) -> None:
+        """
+        Set a cached value with TTL.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+            ttl: Time to live in seconds (default 5 minutes)
+        """
+        current_time = int(time.time())
+        expires_at = current_time + ttl
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            json_value = json.dumps(value)
+            cursor.execute("""
+                INSERT OR REPLACE INTO cache (key, value, expires_at, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (key, json_value, expires_at, current_time))
+            conn.commit()
+
+    def cache_delete(self, key: str) -> bool:
+        """Delete a cached value."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM cache WHERE key = ?", (key,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def cache_clear(self, pattern: Optional[str] = None) -> int:
+        """
+        Clear cache entries.
+
+        Args:
+            pattern: Optional LIKE pattern to match keys (e.g., 'dashboard:%')
+
+        Returns:
+            Number of entries deleted
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if pattern:
+                cursor.execute("DELETE FROM cache WHERE key LIKE ?", (pattern,))
+            else:
+                cursor.execute("DELETE FROM cache")
+            conn.commit()
+            return cursor.rowcount
+
+    def cache_cleanup_expired(self) -> int:
+        """Remove all expired cache entries."""
+        current_time = int(time.time())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM cache WHERE expires_at < ?",
+                (current_time,)
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} expired cache entries")
+            return deleted
+
+    # ==================== Statistics Snapshot Methods ====================
+
+    def save_stats_snapshot(self, snapshot_type: str, data: Dict[str, Any]) -> int:
+        """
+        Save a statistics snapshot.
+
+        Args:
+            snapshot_type: Type of snapshot (e.g., 'dashboard', 'usage', 'models')
+            data: Snapshot data
+
+        Returns:
+            Snapshot ID
+        """
+        current_time = int(time.time())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO stats_snapshots (snapshot_type, data, created_at)
+                VALUES (?, ?, ?)
+            """, (snapshot_type, json.dumps(data), current_time))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_latest_snapshot(self, snapshot_type: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent snapshot of a given type."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT data, created_at FROM stats_snapshots
+                WHERE snapshot_type = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (snapshot_type,))
+            row = cursor.fetchone()
+            if row:
+                try:
+                    data = json.loads(row["data"])
+                    data["_snapshot_time"] = row["created_at"]
+                    return data
+                except json.JSONDecodeError:
+                    return None
+            return None
+
+    def get_snapshots_in_range(
+        self,
+        snapshot_type: str,
+        start_time: int,
+        end_time: int,
+    ) -> List[Dict[str, Any]]:
+        """Get snapshots within a time range."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT data, created_at FROM stats_snapshots
+                WHERE snapshot_type = ? AND created_at >= ? AND created_at <= ?
+                ORDER BY created_at ASC
+            """, (snapshot_type, start_time, end_time))
+            result = []
+            for row in cursor.fetchall():
+                try:
+                    data = json.loads(row["data"])
+                    data["_snapshot_time"] = row["created_at"]
+                    result.append(data)
+                except json.JSONDecodeError:
+                    continue
+            return result
+
+    def cleanup_old_snapshots(self, max_age_days: int = 30) -> int:
+        """Remove snapshots older than max_age_days."""
+        cutoff_time = int(time.time()) - (max_age_days * 86400)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM stats_snapshots WHERE created_at < ?",
+                (cutoff_time,)
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old snapshots")
+            return deleted
+
+    # ==================== Utility Methods ====================
+
+    def get_storage_info(self) -> Dict[str, Any]:
+        """Get storage statistics."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Count entries in each table
+            cursor.execute("SELECT COUNT(*) FROM config")
+            config_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM cache")
+            cache_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM stats_snapshots")
+            snapshot_count = cursor.fetchone()[0]
+
+            # Get database file size
+            try:
+                db_size = os.path.getsize(self.db_path)
+            except OSError:
+                db_size = 0
+
+            return {
+                "db_path": self.db_path,
+                "db_size_bytes": db_size,
+                "db_size_mb": round(db_size / (1024 * 1024), 2),
+                "config_entries": config_count,
+                "cache_entries": cache_count,
+                "snapshot_entries": snapshot_count,
+            }
+
+
+# Global instance
+_local_storage: Optional[LocalStorage] = None
+
+
+def get_local_storage() -> LocalStorage:
+    """Get or create the global LocalStorage instance."""
+    global _local_storage
+    if _local_storage is None:
+        _local_storage = LocalStorage()
+    return _local_storage
+
+
+def reset_local_storage() -> None:
+    """Reset the global LocalStorage instance (for testing)."""
+    global _local_storage
+    _local_storage = None

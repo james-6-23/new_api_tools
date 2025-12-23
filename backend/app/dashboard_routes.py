@@ -1,9 +1,8 @@
 """
 Dashboard API Routes for NewAPI Middleware Tool.
-Implements dashboard statistics and analytics endpoints.
+Implements dashboard statistics and analytics endpoints with caching.
 """
 import logging
-import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -11,7 +10,7 @@ from pydantic import BaseModel
 
 from .auth import verify_auth
 from .main import InvalidParamsError
-from .dashboard_service import get_dashboard_service
+from .cached_dashboard import get_cached_dashboard_service
 
 logger = logging.getLogger(__name__)
 
@@ -56,43 +55,39 @@ class ChannelStatusResponse(BaseModel):
     data: list
 
 
+class CacheControlResponse(BaseModel):
+    """Response model for cache control."""
+    success: bool
+    message: str
+    data: Optional[dict] = None
+
+
 # API Endpoints
 
 @router.get("/overview", response_model=SystemOverviewResponse)
 async def get_system_overview(
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取系统概览统计数据。
+    获取系统概览统计数据（带缓存）。
 
     返回用户数、Token数、渠道数、模型数、兑换码数等统计。
     """
-    service = get_dashboard_service()
-    overview = service.get_system_overview()
+    service = get_cached_dashboard_service()
+    data = service.get_system_overview(use_cache=not no_cache)
 
-    return SystemOverviewResponse(
-        success=True,
-        data={
-            "total_users": overview.total_users,
-            "active_users": overview.active_users,
-            "total_tokens": overview.total_tokens,
-            "active_tokens": overview.active_tokens,
-            "total_channels": overview.total_channels,
-            "active_channels": overview.active_channels,
-            "total_models": overview.total_models,
-            "total_redemptions": overview.total_redemptions,
-            "unused_redemptions": overview.unused_redemptions,
-        },
-    )
+    return SystemOverviewResponse(success=True, data=data)
 
 
 @router.get("/usage", response_model=UsageStatisticsResponse)
 async def get_usage_statistics(
     period: str = Query(default="24h", description="时间周期 (1h/6h/24h/7d/30d)"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取使用统计数据。
+    获取使用统计数据（带缓存）。
 
     - **period**: 时间周期
         - 1h: 最近1小时
@@ -101,177 +96,124 @@ async def get_usage_statistics(
         - 7d: 最近7天
         - 30d: 最近30天
     """
-    # Parse period to timestamps
-    end_time = int(time.time())
-    period_map = {
-        "1h": 3600,
-        "6h": 6 * 3600,
-        "24h": 24 * 3600,
-        "7d": 7 * 24 * 3600,
-        "30d": 30 * 24 * 3600,
-    }
-
-    if period not in period_map:
+    valid_periods = ["1h", "6h", "24h", "7d", "30d"]
+    if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 
-    start_time = end_time - period_map[period]
+    service = get_cached_dashboard_service()
+    data = service.get_usage_statistics(period=period, use_cache=not no_cache)
 
-    service = get_dashboard_service()
-    stats = service.get_usage_statistics(start_time=start_time, end_time=end_time)
-
-    return UsageStatisticsResponse(
-        success=True,
-        data={
-            "period": period,
-            "total_requests": stats.total_requests,
-            "total_quota_used": stats.total_quota_used,
-            "total_prompt_tokens": stats.total_prompt_tokens,
-            "total_completion_tokens": stats.total_completion_tokens,
-            "average_response_time": round(stats.average_response_time, 2),
-        },
-    )
+    return UsageStatisticsResponse(success=True, data=data)
 
 
 @router.get("/models", response_model=ModelUsageResponse)
 async def get_model_usage(
     period: str = Query(default="7d", description="时间周期 (24h/7d/30d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取模型使用分布。
+    获取模型使用分布（带缓存）。
 
     - **period**: 时间周期 (24h/7d/30d)
     - **limit**: 返回模型数量 (1-50)
     """
-    end_time = int(time.time())
-    period_map = {
-        "24h": 24 * 3600,
-        "7d": 7 * 24 * 3600,
-        "30d": 30 * 24 * 3600,
-    }
-
-    if period not in period_map:
+    valid_periods = ["24h", "7d", "30d"]
+    if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 
-    start_time = end_time - period_map[period]
+    service = get_cached_dashboard_service()
+    data = service.get_model_usage(period=period, limit=limit, use_cache=not no_cache)
 
-    service = get_dashboard_service()
-    models = service.get_model_usage(start_time=start_time, end_time=end_time, limit=limit)
-
-    return ModelUsageResponse(
-        success=True,
-        data=[
-            {
-                "model_name": m.model_name,
-                "request_count": m.request_count,
-                "quota_used": m.quota_used,
-                "prompt_tokens": m.prompt_tokens,
-                "completion_tokens": m.completion_tokens,
-            }
-            for m in models
-        ],
-    )
+    return ModelUsageResponse(success=True, data=data)
 
 
 @router.get("/trends/daily", response_model=TrendsResponse)
 async def get_daily_trends(
     days: int = Query(default=7, ge=1, le=30, description="天数 (1-30)"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取每日使用趋势。
+    获取每日使用趋势（带缓存）。
 
     - **days**: 返回天数 (1-30)
     """
-    service = get_dashboard_service()
-    trends = service.get_daily_trends(days=days)
+    service = get_cached_dashboard_service()
+    data = service.get_daily_trends(days=days, use_cache=not no_cache)
 
-    return TrendsResponse(
-        success=True,
-        data=[
-            {
-                "date": t.date,
-                "request_count": t.request_count,
-                "quota_used": t.quota_used,
-                "unique_users": t.unique_users,
-            }
-            for t in trends
-        ],
-    )
+    return TrendsResponse(success=True, data=data)
 
 
 @router.get("/trends/hourly", response_model=TrendsResponse)
 async def get_hourly_trends(
     hours: int = Query(default=24, ge=1, le=72, description="小时数 (1-72)"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取每小时使用趋势。
+    获取每小时使用趋势（带缓存）。
 
     - **hours**: 返回小时数 (1-72)
     """
-    service = get_dashboard_service()
-    trends = service.get_hourly_trends(hours=hours)
+    service = get_cached_dashboard_service()
+    data = service.get_hourly_trends(hours=hours, use_cache=not no_cache)
 
-    return TrendsResponse(
-        success=True,
-        data=trends,
-    )
+    return TrendsResponse(success=True, data=data)
 
 
 @router.get("/top-users", response_model=TopUsersResponse)
 async def get_top_users(
     period: str = Query(default="7d", description="时间周期 (24h/7d/30d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取消耗排行榜。
+    获取消耗排行榜（带缓存）。
 
     - **period**: 时间周期 (24h/7d/30d)
     - **limit**: 返回用户数量 (1-50)
     """
-    end_time = int(time.time())
-    period_map = {
-        "24h": 24 * 3600,
-        "7d": 7 * 24 * 3600,
-        "30d": 30 * 24 * 3600,
-    }
-
-    if period not in period_map:
+    valid_periods = ["24h", "7d", "30d"]
+    if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 
-    start_time = end_time - period_map[period]
+    service = get_cached_dashboard_service()
+    data = service.get_top_users(period=period, limit=limit, use_cache=not no_cache)
 
-    service = get_dashboard_service()
-    users = service.get_top_users(start_time=start_time, end_time=end_time, limit=limit)
-
-    return TopUsersResponse(
-        success=True,
-        data=[
-            {
-                "user_id": u.user_id,
-                "username": u.username,
-                "request_count": u.request_count,
-                "quota_used": u.quota_used,
-            }
-            for u in users
-        ],
-    )
+    return TopUsersResponse(success=True, data=data)
 
 
 @router.get("/channels", response_model=ChannelStatusResponse)
 async def get_channel_status(
+    no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """
-    获取渠道状态列表。
+    获取渠道状态列表（带缓存）。
     """
-    service = get_dashboard_service()
-    channels = service.get_channel_status()
+    service = get_cached_dashboard_service()
+    data = service.get_channel_status(use_cache=not no_cache)
 
-    return ChannelStatusResponse(
+    return ChannelStatusResponse(success=True, data=data)
+
+
+@router.post("/cache/invalidate", response_model=CacheControlResponse)
+async def invalidate_dashboard_cache(
+    _: str = Depends(verify_auth),
+):
+    """
+    手动刷新仪表板缓存。
+    """
+    service = get_cached_dashboard_service()
+    deleted = service.invalidate_cache()
+
+    logger.info(f"Dashboard cache invalidated: {deleted} entries")
+
+    return CacheControlResponse(
         success=True,
-        data=channels,
+        message=f"Invalidated {deleted} cache entries",
+        data={"deleted": deleted},
     )

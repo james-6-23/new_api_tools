@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
 
 interface SystemOverview {
@@ -48,7 +47,6 @@ interface TopUser {
 type PeriodType = '24h' | '7d' | '30d'
 
 export function Dashboard() {
-  const { showToast } = useToast()
   const { token } = useAuth()
 
   const [overview, setOverview] = useState<SystemOverview | null>(null)
