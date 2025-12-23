@@ -9,3 +9,4 @@ export { History, type HistoryItem, addHistoryItem, clearHistory } from './Histo
 export { TopUps } from './TopUps'
 export { Dashboard } from './Dashboard'
 export { Redemptions } from './Redemptions'
+export { Analytics } from './Analytics'

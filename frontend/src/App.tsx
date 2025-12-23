@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions } from './components'
+import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics } from './components'
 import { useAuth } from './contexts/AuthContext'
 
 function App() {
@@ -22,6 +22,8 @@ function App() {
         return <History />
       case 'topups':
         return <TopUps />
+      case 'analytics':
+        return <Analytics />
       default:
         return <Dashboard />
     }

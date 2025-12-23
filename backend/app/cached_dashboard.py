@@ -95,8 +95,9 @@ class CachedDashboardService:
             "1h": 3600,
             "6h": 6 * 3600,
             "24h": 24 * 3600,
+            "3d": 3 * 24 * 3600,
             "7d": 7 * 24 * 3600,
-            "30d": 30 * 24 * 3600,
+            "14d": 14 * 24 * 3600,
         }
         start_time = end_time - period_map.get(period, 24 * 3600)
 
@@ -112,8 +113,9 @@ class CachedDashboardService:
             "1h": 60,      # 1 minute for hourly
             "6h": 120,     # 2 minutes
             "24h": 300,    # 5 minutes
+            "3d": 600,     # 10 minutes
             "7d": 600,     # 10 minutes
-            "30d": 900,    # 15 minutes
+            "14d": 900,    # 15 minutes
         }
         self._storage.cache_set(cache_key, data, ttl=ttl_map.get(period, 300))
 
@@ -148,8 +150,9 @@ class CachedDashboardService:
         end_time = int(time.time())
         period_map = {
             "24h": 24 * 3600,
+            "3d": 3 * 24 * 3600,
             "7d": 7 * 24 * 3600,
-            "30d": 30 * 24 * 3600,
+            "14d": 14 * 24 * 3600,
         }
         start_time = end_time - period_map.get(period, 7 * 24 * 3600)
 
@@ -261,8 +264,9 @@ class CachedDashboardService:
         end_time = int(time.time())
         period_map = {
             "24h": 24 * 3600,
+            "3d": 3 * 24 * 3600,
             "7d": 7 * 24 * 3600,
-            "30d": 30 * 24 * 3600,
+            "14d": 14 * 24 * 3600,
         }
         start_time = end_time - period_map.get(period, 7 * 24 * 3600)
 

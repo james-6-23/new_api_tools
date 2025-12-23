@@ -202,6 +202,26 @@ async def list_redemption_codes(
         raise InvalidParamsError(message=str(e))
 
 
+@router.delete("/redemptions/batch", response_model=DeleteResponse)
+async def batch_delete_redemption_codes(request: BatchDeleteRequest, _: str = Depends(verify_auth)):
+    """
+    批量删除兑换码（软删除）。
+    
+    - **ids**: 要删除的兑换码 ID 列表
+    """
+    try:
+        service = get_redemption_service()
+        success = service.delete_codes(request.ids)
+        
+        return DeleteResponse(
+            success=success,
+            message=f"Successfully deleted {len(request.ids)} redemption codes" if success else "No redemption codes were deleted",
+        )
+        
+    except ValueError as e:
+        raise InvalidParamsError(message=str(e))
+
+
 @router.delete("/redemptions/{id}", response_model=DeleteResponse)
 async def delete_redemption_code(id: int, _: str = Depends(verify_auth)):
     """
@@ -222,23 +242,3 @@ async def delete_redemption_code(id: int, _: str = Depends(verify_auth)):
         success=success,
         message=f"Successfully deleted redemption code {id}" if success else f"Failed to delete redemption code {id}",
     )
-
-
-@router.delete("/redemptions/batch", response_model=DeleteResponse)
-async def batch_delete_redemption_codes(request: BatchDeleteRequest, _: str = Depends(verify_auth)):
-    """
-    批量删除兑换码（软删除）。
-    
-    - **ids**: 要删除的兑换码 ID 列表
-    """
-    try:
-        service = get_redemption_service()
-        success = service.delete_codes(request.ids)
-        
-        return DeleteResponse(
-            success=success,
-            message=f"Successfully deleted {len(request.ids)} redemption codes" if success else "No redemption codes were deleted",
-        )
-        
-    except ValueError as e:
-        raise InvalidParamsError(message=str(e))

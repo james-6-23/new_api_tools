@@ -96,7 +96,7 @@ async def get_usage_statistics(
         - 7d: 最近7天
         - 30d: 最近30天
     """
-    valid_periods = ["1h", "6h", "24h", "7d", "30d"]
+    valid_periods = ["1h", "6h", "24h", "3d", "7d", "14d"]
     if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 
@@ -108,7 +108,7 @@ async def get_usage_statistics(
 
 @router.get("/models", response_model=ModelUsageResponse)
 async def get_model_usage(
-    period: str = Query(default="7d", description="时间周期 (24h/7d/30d)"),
+    period: str = Query(default="7d", description="时间周期 (24h/3d/7d/14d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -116,10 +116,10 @@ async def get_model_usage(
     """
     获取模型使用分布（带缓存）。
 
-    - **period**: 时间周期 (24h/7d/30d)
+    - **period**: 时间周期 (24h/3d/7d/14d)
     - **limit**: 返回模型数量 (1-50)
     """
-    valid_periods = ["24h", "7d", "30d"]
+    valid_periods = ["24h", "3d", "7d", "14d"]
     if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 
@@ -165,7 +165,7 @@ async def get_hourly_trends(
 
 @router.get("/top-users", response_model=TopUsersResponse)
 async def get_top_users(
-    period: str = Query(default="7d", description="时间周期 (24h/7d/30d)"),
+    period: str = Query(default="7d", description="时间周期 (24h/3d/7d/14d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -173,10 +173,10 @@ async def get_top_users(
     """
     获取消耗排行榜（带缓存）。
 
-    - **period**: 时间周期 (24h/7d/30d)
+    - **period**: 时间周期 (24h/3d/7d/14d)
     - **limit**: 返回用户数量 (1-50)
     """
-    valid_periods = ["24h", "7d", "30d"]
+    valid_periods = ["24h", "3d", "7d", "14d"]
     if period not in valid_periods:
         raise InvalidParamsError(message=f"Invalid period: {period}")
 

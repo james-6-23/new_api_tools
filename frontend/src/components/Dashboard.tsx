@@ -44,7 +44,7 @@ interface TopUser {
   quota_used: number
 }
 
-type PeriodType = '24h' | '7d' | '30d'
+type PeriodType = '24h' | '3d' | '7d' | '14d'
 
 export function Dashboard() {
   const { token } = useAuth()
@@ -114,7 +114,7 @@ export function Dashboard() {
 
   // Fetch daily trends
   const fetchTrends = useCallback(async () => {
-    const days = period === '24h' ? 1 : period === '7d' ? 7 : 30
+    const days = period === '24h' ? 1 : period === '3d' ? 3 : period === '7d' ? 7 : 14
     try {
       const response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, {
         headers: getAuthHeaders(),
@@ -190,7 +190,7 @@ export function Dashboard() {
       {/* Period Selector */}
       <div className="flex justify-end">
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
-          {(['24h', '7d', '30d'] as PeriodType[]).map((p) => (
+          {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
@@ -200,7 +200,7 @@ export function Dashboard() {
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
-              {p === '24h' ? '24小时' : p === '7d' ? '7天' : '30天'}
+              {p === '24h' ? '24小时' : p === '3d' ? '3天' : p === '7d' ? '7天' : '14天'}
             </button>
           ))}
         </div>
