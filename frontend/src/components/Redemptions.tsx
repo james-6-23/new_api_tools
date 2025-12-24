@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { Trash2, Copy, Ticket, Loader2 } from 'lucide-react'
+import { Trash2, Copy, Ticket, Loader2, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -47,6 +47,8 @@ export function Redemptions() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: 'single' | 'batch'; id?: number }>({ open: false, type: 'single' })
+  const [deleting, setDeleting] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -102,6 +104,8 @@ export function Redemptions() {
   }
 
   const confirmDelete = async () => {
+    if (deleting) return // 防止重复点击
+    setDeleting(true)
     try {
       if (deleteDialog.type === 'single' && deleteDialog.id) {
         const response = await fetch(`${apiUrl}/api/redemptions/${deleteDialog.id}`, { method: 'DELETE', headers: getAuthHeaders() })
@@ -122,8 +126,16 @@ export function Redemptions() {
       showToast('error', '网络错误，请重试')
       console.error('Delete error:', error)
     } finally {
+      setDeleting(false)
       setDeleteDialog({ open: false, type: 'single' })
     }
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchCodes()
+    setRefreshing(false)
+    showToast('success', '数据已刷新')
   }
 
   const copyToClipboard = async (text: string) => {
@@ -186,7 +198,12 @@ export function Redemptions() {
       {/* Table */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between py-4">
-          <CardTitle className="text-lg">兑换码管理 ({total})</CardTitle>
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-lg">兑换码管理 ({total})</CardTitle>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+          </div>
           {selectedIds.size > 0 && (
             <Button variant="destructive" size="sm" onClick={() => setDeleteDialog({ open: true, type: 'batch' })}>
               <Trash2 className="h-4 w-4 mr-1" />
@@ -278,8 +295,10 @@ export function Redemptions() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialog({ open: false, type: 'single' })}>取消</Button>
-            <Button variant="destructive" onClick={confirmDelete}>确认删除</Button>
+            <Button variant="outline" onClick={() => setDeleteDialog({ open: false, type: 'single' })} disabled={deleting}>取消</Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />删除中...</> : '确认删除'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

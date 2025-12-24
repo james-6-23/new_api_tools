@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
@@ -73,7 +74,9 @@ export function UserManagement() {
   const [searchInput, setSearchInput] = useState('')
   const [activityFilter, setActivityFilter] = useState<string>('all')
   const [deleting, setDeleting] = useState(false)
-  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [deletingVeryInactive, setDeletingVeryInactive] = useState(false)
+  const [deletingNever, setDeletingNever] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
@@ -135,6 +138,7 @@ export function UserManagement() {
   }, [apiUrl, getAuthHeaders, page, pageSize, search, activityFilter, showToast])
 
   const deleteUser = async (userId: number, username: string) => {
+    const userToDelete = users.find(u => u.id === userId)
     setConfirmDialog({
       isOpen: true,
       title: '删除用户',
@@ -151,8 +155,21 @@ export function UserManagement() {
           const data = await response.json()
           if (data.success) {
             showToast('success', data.message)
-            fetchUsers()
-            fetchStats()
+            // 直接从本地状态移除用户，避免重新加载
+            setUsers(prev => prev.filter(u => u.id !== userId))
+            setTotal(prev => prev - 1)
+            // 更新统计数据（本地计算）
+            if (stats && userToDelete) {
+              const level = userToDelete.activity_level
+              setStats(prev => prev ? {
+                ...prev,
+                total_users: prev.total_users - 1,
+                active_users: level === 'active' ? prev.active_users - 1 : prev.active_users,
+                inactive_users: level === 'inactive' ? prev.inactive_users - 1 : prev.inactive_users,
+                very_inactive_users: level === 'very_inactive' ? prev.very_inactive_users - 1 : prev.very_inactive_users,
+                never_requested: level === 'never' ? prev.never_requested - 1 : prev.never_requested,
+              } : null)
+            }
           } else {
             showToast('error', data.message || '删除失败')
           }
@@ -167,7 +184,8 @@ export function UserManagement() {
   }
 
   const previewBatchDelete = async (level: string) => {
-    setBatchDeleting(true)
+    const setLoading = level === 'very_inactive' ? setDeletingVeryInactive : setDeletingNever
+    setLoading(true)
     try {
       const response = await fetch(`${apiUrl}/api/users/batch-delete`, {
         method: 'POST',
@@ -180,7 +198,7 @@ export function UserManagement() {
         const usernames = data.data.users || []
         if (count === 0) {
           showToast('info', '没有符合条件的用户')
-          setBatchDeleting(false)
+          setLoading(false)
           return
         }
         setConfirmDialog({
@@ -198,13 +216,14 @@ export function UserManagement() {
       console.error('Failed to preview batch delete:', error)
       showToast('error', '预览失败')
     } finally {
-      setBatchDeleting(false)
+      setLoading(false)
     }
   }
 
   const executeBatchDelete = async (level: string) => {
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-    setBatchDeleting(true)
+    const setLoading = level === 'very_inactive' ? setDeletingVeryInactive : setDeletingNever
+    setLoading(true)
     try {
       const response = await fetch(`${apiUrl}/api/users/batch-delete`, {
         method: 'POST',
@@ -214,8 +233,9 @@ export function UserManagement() {
       const data = await response.json()
       if (data.success) {
         showToast('success', data.message)
-        fetchUsers()
-        fetchStats()
+        // 并行刷新数据
+        setPage(1)
+        Promise.all([fetchUsers(), fetchStats()])
       } else {
         showToast('error', data.message || '批量删除失败')
       }
@@ -223,7 +243,7 @@ export function UserManagement() {
       console.error('Failed to batch delete:', error)
       showToast('error', '批量删除失败')
     } finally {
-      setBatchDeleting(false)
+      setLoading(false)
     }
   }
 
@@ -243,6 +263,13 @@ export function UserManagement() {
   useEffect(() => {
     fetchUsers()
   }, [fetchUsers])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await Promise.all([fetchUsers(), fetchStats()])
+    setRefreshing(false)
+    showToast('success', '数据已刷新')
+  }
 
   const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
 
@@ -389,18 +416,18 @@ export function UserManagement() {
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-100"
                 onClick={() => previewBatchDelete('very_inactive')}
-                disabled={batchDeleting || !stats?.very_inactive_users}
+                disabled={deletingVeryInactive || !stats?.very_inactive_users}
               >
-                {batchDeleting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                {deletingVeryInactive ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
                 清理非常不活跃 ({stats?.very_inactive_users || 0})
               </Button>
               <Button
                 variant="outline"
                 className="border-gray-300 text-gray-700 hover:bg-gray-100"
                 onClick={() => previewBatchDelete('never')}
-                disabled={batchDeleting || !stats?.never_requested}
+                disabled={deletingNever || !stats?.never_requested}
               >
-                {batchDeleting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                {deletingNever ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
                 清理从未请求 ({stats?.never_requested || 0})
               </Button>
             </div>
@@ -412,7 +439,12 @@ export function UserManagement() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center justify-between">
-            <span>用户列表 <span className="text-sm font-normal text-muted-foreground">共 {total} 个用户</span></span>
+            <div className="flex items-center gap-3">
+              <span>用户列表 <span className="text-sm font-normal text-muted-foreground">共 {total} 个用户</span></span>
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
+                {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </div>
             {activityFilter !== 'all' && (
               <Button variant="ghost" size="sm" onClick={() => { setActivityFilter('all'); setPage(1) }}>
                 清除筛选

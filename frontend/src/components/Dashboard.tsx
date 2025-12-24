@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2 } from 'lucide-react'
+import { useToast } from './Toast'
+import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Progress } from './ui/progress'
@@ -50,12 +51,14 @@ type PeriodType = '24h' | '3d' | '7d' | '14d'
 
 export function Dashboard() {
   const { token } = useAuth()
+  const { showToast } = useToast()
   const [overview, setOverview] = useState<SystemOverview | null>(null)
   const [usage, setUsage] = useState<UsageStatistics | null>(null)
   const [models, setModels] = useState<ModelUsage[]>([])
   const [dailyTrends, setDailyTrends] = useState<DailyTrend[]>([])
   const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<PeriodType>('7d')
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
@@ -133,6 +136,13 @@ export function Dashboard() {
     loadData()
   }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
 
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await Promise.all([fetchOverview(), fetchUsage(), fetchModels(), fetchTrends(), fetchAnalyticsSummary()])
+    setRefreshing(false)
+    showToast('success', '数据已刷新')
+  }
+
   const formatQuota = (quota: number) => `${(quota / 500000).toFixed(2)}`
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -152,8 +162,12 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Period Selector */}
-      <div className="flex justify-end">
+      {/* Period Selector & Refresh */}
+      <div className="flex justify-between items-center">
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+          {refreshing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+          刷新
+        </Button>
         <div className="inline-flex rounded-lg border bg-card p-1">
           {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
             <Button key={p} variant={period === p ? 'default' : 'ghost'} size="sm" onClick={() => setPeriod(p)}>

@@ -194,7 +194,7 @@ async def batch_delete_inactive_users(
     if request.dry_run:
         logger.business(
             "批量删除预览",
-            level=request.activity_level,
+            activity_level=request.activity_level,
             count=result.get("count", 0)
         )
 

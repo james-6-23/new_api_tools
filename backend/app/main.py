@@ -2,6 +2,7 @@
 NewAPI Middleware Tool - FastAPI Backend
 Main application entry point with CORS, logging, and exception handling.
 """
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -112,8 +113,52 @@ class NotFoundError(AppException):
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.system("NewAPI Middleware Tool 启动中...")
+
+    # 启动后台日志同步任务
+    sync_task = asyncio.create_task(background_log_sync())
+
     yield
+
+    # 停止后台任务
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        pass
     logger.system("NewAPI Middleware Tool 已关闭")
+
+
+async def background_log_sync():
+    """后台定时同步日志分析数据"""
+    from .log_analytics_service import get_log_analytics_service
+
+    # 启动后等待 10 秒再开始同步
+    await asyncio.sleep(10)
+    logger.system("后台日志同步任务已启动")
+
+    while True:
+        try:
+            service = get_log_analytics_service()
+
+            # 检查数据一致性
+            service.check_and_auto_reset()
+
+            # 处理新日志（每次最多处理 5000 条）
+            total_processed = 0
+            for _ in range(5):  # 最多 5 轮，每轮 1000 条
+                result = service.process_new_logs()
+                if not result.get("success") or result.get("processed", 0) == 0:
+                    break
+                total_processed += result.get("processed", 0)
+
+            if total_processed > 0:
+                logger.analytics("后台同步完成", processed=total_processed)
+
+        except Exception as e:
+            logger.error(f"后台日志同步失败: {e}", category="任务")
+
+        # 每 5 分钟同步一次
+        await asyncio.sleep(300)
 
 
 # Import routes after app is created to avoid circular imports

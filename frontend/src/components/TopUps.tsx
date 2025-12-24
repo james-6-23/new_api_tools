@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { CreditCard, Loader2 } from 'lucide-react'
+import { CreditCard, Loader2, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -58,6 +58,7 @@ export function TopUps() {
   const [tradeNoSearch, setTradeNoSearch] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -118,6 +119,13 @@ export function TopUps() {
   useEffect(() => { fetchRecords() }, [fetchRecords])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
   useEffect(() => { setPage(1) }, [statusFilter, paymentMethodFilter, tradeNoSearch, startDate, endDate])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await Promise.all([fetchRecords(), fetchStatistics()])
+    setRefreshing(false)
+    showToast('success', '数据已刷新')
+  }
 
   const formatTimestamp = (ts: number) => ts ? new Date(ts * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'
   const formatAmount = (amount: number) => `${(amount / 500000).toFixed(2)}`
@@ -181,8 +189,13 @@ export function TopUps() {
 
       {/* Records Table */}
       <Card>
-        <CardHeader className="py-4">
-          <CardTitle className="text-lg">充值记录 ({total})</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between py-4">
+          <div className="flex items-center gap-3">
+            <CardTitle className="text-lg">充值记录 ({total})</CardTitle>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
