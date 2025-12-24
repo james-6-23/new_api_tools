@@ -188,6 +188,13 @@ class RedemptionService:
         if self.db.config.engine == DatabaseEngine.POSTGRESQL:
             return '"key"'
         return '`key`'
+
+    @property
+    def _key_col_alias(self) -> str:
+        """Get properly quoted 'key' column with alias based on database engine."""
+        if self.db.config.engine == DatabaseEngine.POSTGRESQL:
+            return '"key" as "key"'
+        return '`key` as `key`'
     
     def generate_codes(self, params: GenerateParams) -> GenerateResult:
         """
@@ -365,7 +372,7 @@ class RedemptionService:
         
         # Get items
         select_sql = f"""
-            SELECT id, {self._key_col} as key, name, quota, created_time, redeemed_time, used_user_id, expired_time
+            SELECT id, {self._key_col_alias}, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE {where_sql}
             ORDER BY created_time DESC
@@ -455,7 +462,7 @@ class RedemptionService:
             RedemptionCode if found, None otherwise.
         """
         sql = f"""
-            SELECT id, {self._key_col} as key, name, quota, created_time, redeemed_time, used_user_id, expired_time
+            SELECT id, {self._key_col_alias}, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE id = :id AND deleted_at IS NULL
         """

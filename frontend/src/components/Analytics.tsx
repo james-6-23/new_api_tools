@@ -227,7 +227,7 @@ export function Analytics() {
           headers: getAuthHeaders(),
         })
         const data = await response.json()
-        if (data.success && data.processed > 0) {
+        if (data.success) {
           fetchAnalytics()
           fetchSyncStatus()
         }
@@ -266,7 +266,7 @@ export function Analytics() {
             headers: getAuthHeaders(),
           })
           const data = await response.json()
-          if (data.success && data.processed > 0) {
+          if (data.success) {
             fetchAnalytics()
             fetchSyncStatus()
           }
@@ -310,11 +310,11 @@ export function Analytics() {
       if (data.success) {
         if (data.processed > 0) {
           showToast('success', `已处理 ${data.processed} 条日志`)
-          fetchAnalytics()
-          fetchSyncStatus()
         } else {
           showToast('info', '没有新日志需要处理')
         }
+        fetchAnalytics()
+        fetchSyncStatus()
       } else {
         showToast('error', data.message || '处理失败')
       }

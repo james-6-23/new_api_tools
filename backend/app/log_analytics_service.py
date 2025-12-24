@@ -166,7 +166,16 @@ class LogAnalyticsService:
             return {"success": False, "error": str(e), "processed": 0}
 
         if not logs:
-            return {"success": True, "processed": 0, "message": "No new logs to process"}
+            # Even when there are no new logs, record the time we last checked/processed.
+            now = int(time.time())
+            self._set_state("last_processed_at", now)
+            logger.analytics("无新日志需要处理", processed=0, last_id=last_log_id)
+            return {
+                "success": True,
+                "processed": 0,
+                "message": "No new logs to process",
+                "last_log_id": last_log_id,
+            }
 
         # Process logs and aggregate statistics
         user_stats: Dict[int, Dict[str, Any]] = {}
