@@ -45,6 +45,18 @@ class BatchDeleteRequest(BaseModel):
     dry_run: bool = True  # 预演模式
 
 
+class BanRequest(BaseModel):
+    """封禁请求"""
+    reason: Optional[str] = None
+    disable_tokens: bool = True
+
+
+class UnbanRequest(BaseModel):
+    """解除封禁请求"""
+    reason: Optional[str] = None
+    enable_tokens: bool = False
+
+
 # API Endpoints
 
 @router.get("/stats", response_model=ActivityStatsResponse)
@@ -206,4 +218,36 @@ async def batch_delete_inactive_users(
             "dry_run": result.get("dry_run", False),
             "users": result.get("users", []),
         } if result["success"] else None,
+    )
+
+
+@router.post("/{user_id}/ban", response_model=DeleteResponse)
+async def ban_user(
+    user_id: int,
+    request: BanRequest,
+    _: str = Depends(verify_auth),
+):
+    """封禁用户（status=2），可选同时禁用其 tokens。"""
+    service = get_user_management_service()
+    result = service.ban_user(user_id=user_id, reason=request.reason, disable_tokens=request.disable_tokens)
+    return DeleteResponse(
+        success=result["success"],
+        message=result["message"],
+        data=result.get("data"),
+    )
+
+
+@router.post("/{user_id}/unban", response_model=DeleteResponse)
+async def unban_user(
+    user_id: int,
+    request: UnbanRequest,
+    _: str = Depends(verify_auth),
+):
+    """解除封禁（status=1），可选同时启用其 tokens。"""
+    service = get_user_management_service()
+    result = service.unban_user(user_id=user_id, reason=request.reason, enable_tokens=request.enable_tokens)
+    return DeleteResponse(
+        success=result["success"],
+        message=result["message"],
+        data=result.get("data"),
     )

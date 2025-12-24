@@ -86,3 +86,4 @@ new_api_tools/insert_pgsql.sh
 .claude/settings.local.json
 pgsql_schema_export
 mysql_schema_export
+plan.md

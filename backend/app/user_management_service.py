@@ -575,6 +575,90 @@ class UserManagementService:
             logger.db_error(f"批量删除用户失败: {e}")
             return {"success": False, "message": f"批量删除失败: {str(e)}"}
 
+    def ban_user(self, user_id: int, reason: Optional[str] = None, disable_tokens: bool = True) -> Dict[str, Any]:
+        """封禁用户（设置 status=2），可选同时禁用其所有 tokens（设置 tokens.status=2）。"""
+        try:
+            self._db.connect()
+
+            check_sql = "SELECT id, username, status FROM users WHERE id = :user_id AND deleted_at IS NULL"
+            check_result = self._db.execute(check_sql, {"user_id": user_id})
+            if not check_result:
+                return {"success": False, "message": "用户不存在"}
+
+            username = check_result[0].get("username", "")
+            current_status = int(check_result[0].get("status") or 0)
+            if current_status == 2:
+                return {"success": True, "message": f"用户 {username} 已是禁用状态"}
+
+            user_update = self._db.execute(
+                "UPDATE users SET status = 2 WHERE id = :user_id AND deleted_at IS NULL",
+                {"user_id": user_id},
+            )
+
+            tokens_affected = 0
+            if disable_tokens:
+                token_update = self._db.execute(
+                    "UPDATE tokens SET status = 2 WHERE user_id = :user_id AND deleted_at IS NULL",
+                    {"user_id": user_id},
+                )
+                tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
+
+            logger.security("封禁用户", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
+            return {
+                "success": True,
+                "message": f"用户 {username} 已封禁",
+                "data": {
+                    "user_affected": int((user_update[0] or {}).get("affected_rows", 0) or 0),
+                    "tokens_affected": tokens_affected,
+                    "status": 2,
+                },
+            }
+        except Exception as e:
+            logger.db_error(f"封禁用户失败: {e}")
+            return {"success": False, "message": f"封禁失败: {str(e)}"}
+
+    def unban_user(self, user_id: int, reason: Optional[str] = None, enable_tokens: bool = False) -> Dict[str, Any]:
+        """解除封禁（设置 status=1），可选同时启用其 tokens（设置 tokens.status=1）。"""
+        try:
+            self._db.connect()
+
+            check_sql = "SELECT id, username, status FROM users WHERE id = :user_id AND deleted_at IS NULL"
+            check_result = self._db.execute(check_sql, {"user_id": user_id})
+            if not check_result:
+                return {"success": False, "message": "用户不存在"}
+
+            username = check_result[0].get("username", "")
+            current_status = int(check_result[0].get("status") or 0)
+            if current_status != 2:
+                return {"success": True, "message": f"用户 {username} 当前非禁用状态"}
+
+            user_update = self._db.execute(
+                "UPDATE users SET status = 1 WHERE id = :user_id AND deleted_at IS NULL",
+                {"user_id": user_id},
+            )
+
+            tokens_affected = 0
+            if enable_tokens:
+                token_update = self._db.execute(
+                    "UPDATE tokens SET status = 1 WHERE user_id = :user_id AND deleted_at IS NULL",
+                    {"user_id": user_id},
+                )
+                tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
+
+            logger.security("解除封禁", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
+            return {
+                "success": True,
+                "message": f"用户 {username} 已解除封禁",
+                "data": {
+                    "user_affected": int((user_update[0] or {}).get("affected_rows", 0) or 0),
+                    "tokens_affected": tokens_affected,
+                    "status": 1,
+                },
+            }
+        except Exception as e:
+            logger.db_error(f"解除封禁失败: {e}")
+            return {"success": False, "message": f"解除封禁失败: {str(e)}"}
+
 
 # 全局实例
 _user_management_service: Optional[UserManagementService] = None

@@ -178,6 +178,7 @@ def include_routes(app: FastAPI):
     from .storage_routes import router as storage_router
     from .log_analytics_routes import router as analytics_router
     from .user_management_routes import router as user_management_router
+    from .risk_monitoring_routes import router as risk_monitoring_router
     app.include_router(router)
     app.include_router(auth_router)
     app.include_router(top_up_router)
@@ -185,6 +186,7 @@ def include_routes(app: FastAPI):
     app.include_router(storage_router)
     app.include_router(analytics_router)
     app.include_router(user_management_router)
+    app.include_router(risk_monitoring_router)
 
 
 # Create FastAPI application
