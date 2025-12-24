@@ -356,6 +356,41 @@ class LocalStorage:
             "total_pages": (total + page_size - 1) // page_size,
         }
 
+    def get_latest_ban_record(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """获取用户最近的封禁记录"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, action, user_id, username, operator, reason, context, created_at
+                FROM security_audit
+                WHERE user_id = ? AND action = 'ban'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                [user_id],
+            )
+            row = cursor.fetchone()
+            
+            if not row:
+                return None
+            
+            try:
+                ctx = json.loads(row["context"]) if row["context"] else {}
+            except json.JSONDecodeError:
+                ctx = {}
+            
+            return {
+                "id": int(row["id"]),
+                "action": row["action"],
+                "user_id": int(row["user_id"]),
+                "username": row["username"] or "",
+                "operator": row["operator"] or "",
+                "reason": row["reason"] or "",
+                "context": ctx,
+                "created_at": int(row["created_at"]),
+            }
+
     def cache_cleanup_expired(self) -> int:
         """Remove all expired cache entries."""
         current_time = int(time.time())

@@ -109,6 +109,24 @@ async def get_activity_stats(
     )
 
 
+@router.get("/banned", response_model=UserListResponse)
+async def get_banned_users(
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=50, ge=1, le=100, description="每页数量"),
+    search: Optional[str] = Query(default=None, description="搜索关键词 (用户名)"),
+    _: str = Depends(verify_auth),
+):
+    """
+    获取当前被封禁的用户列表
+    
+    返回 status=2 的用户，包含封禁时间、原因等信息
+    """
+    service = get_user_management_service()
+    result = service.get_banned_users(page=page, page_size=page_size, search=search)
+    
+    return UserListResponse(success=True, data=result)
+
+
 @router.get("", response_model=UserListResponse)
 async def get_users(
     page: int = Query(default=1, ge=1, description="页码"),

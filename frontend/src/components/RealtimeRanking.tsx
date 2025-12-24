@@ -80,6 +80,39 @@ const UNBAN_REASONS = [
   { value: '临时解封观察', label: '临时解封观察' },
 ]
 
+const REASON_STYLES: Record<string, string> = {
+  'HIGH_RPM': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
+  'MANY_IPS': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
+  'HIGH_FAILURE_RATE': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
+  'HIGH_EMPTY_RATE': 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400',
+  '账号共享': 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400',
+  '令牌泄露': 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400',
+  '滥用': 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400',
+  '违反使用条款': 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400',
+  '误封': 'bg-green-50 text-green-700 border-green-100 dark:bg-green-900/20 dark:text-green-400',
+  '申诉': 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400',
+  '风险已排除': 'bg-teal-50 text-teal-700 border-teal-100 dark:bg-teal-900/20 dark:text-teal-400',
+  '核实完成': 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400',
+  '临时解封': 'bg-cyan-50 text-cyan-700 border-cyan-100 dark:bg-cyan-900/20 dark:text-cyan-400',
+}
+
+const getReasonStyle = (reason: string) => {
+  if (!reason) return 'text-muted-foreground'
+  for (const [key, style] of Object.entries(REASON_STYLES)) {
+    if (reason.includes(key)) return style
+  }
+  return 'bg-muted text-muted-foreground'
+}
+
+const renderReasonBadge = (reason: string | null) => {
+  if (!reason) return <span className="text-muted-foreground">-</span>
+  return (
+    <Badge variant="outline" className={cn("font-normal py-0 h-5", getReasonStyle(reason))}>
+      {reason}
+    </Badge>
+  )
+}
+
 function formatNumber(n: number) {
   return n.toLocaleString('zh-CN')
 }
@@ -115,6 +148,21 @@ interface BanRecordItem {
     source?: string
   }
   created_at: number
+}
+
+// 被封禁用户列表项
+interface BannedUserItem {
+  id: number
+  username: string
+  display_name: string
+  email: string
+  quota: number
+  used_quota: number
+  request_count: number
+  banned_at: number | null
+  ban_reason: string | null
+  ban_operator: string | null
+  ban_context: Record<string, any> | null
 }
 
 // IP Monitoring Types
@@ -167,7 +215,7 @@ export function RealtimeRanking() {
   const windows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h'], [])
   const extendedWindows = useMemo<WindowKey[]>(() => ['24h', '3d', '7d'], [])
   const [selectedWindow, setSelectedWindow] = useState<WindowKey>('24h')
-  const [view, setView] = useState<'leaderboards' | 'ban_records' | 'ip_monitoring'>('leaderboards')
+  const [view, setView] = useState<'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'>('leaderboards')
   const [sortBy, setSortBy] = useState<SortKey>('requests')
   const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [], '3d': [], '7d': [] })
   const [generatedAt, setGeneratedAt] = useState<number>(0)
@@ -181,6 +229,14 @@ export function RealtimeRanking() {
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
 
+  // 封禁列表状态
+  const [bannedUsers, setBannedUsers] = useState<BannedUserItem[]>([])
+  const [bannedLoading, setBannedLoading] = useState(false)
+  const [bannedPage, setBannedPage] = useState(1)
+  const [bannedTotalPages, setBannedTotalPages] = useState(1)
+  const [bannedTotal, setBannedTotal] = useState(0)
+
+  // 审计日志状态 (原封禁记录)
   const [records, setRecords] = useState<BanRecordItem[]>([])
   const [recordsLoading, setRecordsLoading] = useState(false)
   const [recordsRefreshing, setRecordsRefreshing] = useState(false)
@@ -266,13 +322,36 @@ export function RealtimeRanking() {
         setRecordsTotalPages(res.data?.total_pages || 1)
         if (showSuccessToast) showToast('success', '已刷新')
       } else {
-        showToast('error', res.message || '获取封禁记录失败')
+        showToast('error', res.message || '获取审计日志失败')
       }
     } catch (e) {
       console.error('Failed to fetch ban records:', e)
-      showToast('error', '获取封禁记录失败')
+      showToast('error', '获取审计日志失败')
     } finally {
       setRecordsLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
+
+  // 获取封禁列表
+  const fetchBannedUsers = useCallback(async (page = 1, showSuccessToast = false) => {
+    setBannedLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/users/banned?page=${page}&page_size=50`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setBannedUsers(res.data?.items || [])
+        setBannedPage(res.data?.page || page)
+        setBannedTotalPages(res.data?.total_pages || 1)
+        setBannedTotal(res.data?.total || 0)
+        if (showSuccessToast) showToast('success', '已刷新')
+      } else {
+        showToast('error', res.message || '获取封禁列表失败')
+      }
+    } catch (e) {
+      console.error('Failed to fetch banned users:', e)
+      showToast('error', '获取封禁列表失败')
+    } finally {
+      setBannedLoading(false)
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
@@ -404,9 +483,10 @@ export function RealtimeRanking() {
 
   useEffect(() => {
     if (view === 'leaderboards') fetchLeaderboards()
-    if (view === 'ban_records') fetchBanRecords(1)
+    if (view === 'banned_list') fetchBannedUsers(1)
+    if (view === 'audit_logs') fetchBanRecords(1)
     if (view === 'ip_monitoring') fetchIPData()
-  }, [fetchLeaderboards, fetchBanRecords, fetchIPData, view])
+  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, view])
 
   useEffect(() => {
     if (view === 'ip_monitoring') fetchIPData()
@@ -525,7 +605,7 @@ export function RealtimeRanking() {
               刷新
             </Button>
           )}
-          {view === 'ban_records' && (
+          {view === 'audit_logs' && (
             <Button variant="outline" size="sm" onClick={handleRefreshRecords} disabled={recordsRefreshing} className="h-9">
               <RefreshCw className={cn("h-4 w-4 mr-2", recordsRefreshing && "animate-spin")} />
               刷新
@@ -538,7 +618,8 @@ export function RealtimeRanking() {
         <TabsList>
           <TabsTrigger value="leaderboards">实时排行</TabsTrigger>
           <TabsTrigger value="ip_monitoring">IP 监控</TabsTrigger>
-          <TabsTrigger value="ban_records">封禁记录</TabsTrigger>
+          <TabsTrigger value="banned_list">封禁列表</TabsTrigger>
+          <TabsTrigger value="audit_logs">审计日志</TabsTrigger>
         </TabsList>
 
         <TabsContent value="leaderboards">
@@ -739,16 +820,208 @@ export function RealtimeRanking() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="ban_records">
+        {/* 封禁列表 Tab */}
+        <TabsContent value="banned_list">
           <Card className="rounded-xl shadow-sm border">
             <CardHeader className="pb-3 border-b bg-muted/20">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <ShieldBan className="h-5 w-5 text-destructive" />
-                  封禁审计记录
+                  封禁列表
                 </CardTitle>
-                <div className="text-xs text-muted-foreground">
-                  共 {records.length} 条记录 (本页)
+                <div className="flex items-center gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    共 {bannedTotal} 个用户被封禁
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => fetchBannedUsers(1, true)} 
+                    disabled={bannedLoading}
+                    className="h-8"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", bannedLoading && "animate-spin")} />
+                    刷新
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {bannedLoading ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-6 w-6 mr-2 animate-spin" />加载中...
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableHead className="w-[80px]">ID</TableHead>
+                          <TableHead className="w-[150px]">用户</TableHead>
+                          <TableHead className="w-[140px]">封禁时间</TableHead>
+                          <TableHead className="w-[100px]">操作者</TableHead>
+                          <TableHead>封禁原因</TableHead>
+                          <TableHead className="w-[100px] text-right">操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {bannedUsers.length ? bannedUsers.map((user) => (
+                          <TableRow key={user.id} className="group hover:bg-muted/30">
+                            <TableCell className="text-xs text-muted-foreground font-mono py-2">
+                              {user.id}
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <div className="flex flex-col">
+                                <span className="font-medium text-sm truncate max-w-[130px]" title={user.username}>
+                                  {user.username}
+                                </span>
+                                {user.display_name && user.display_name !== user.username && (
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[130px]">
+                                    {user.display_name}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground font-mono whitespace-nowrap py-2">
+                              {user.banned_at ? formatTime(user.banned_at) : '-'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground py-2">
+                              {user.ban_operator || '系统'}
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {user.ban_reason ? (
+                                  <span className="text-sm">{user.ban_reason}</span>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">-</span>
+                                )}
+                                {user.ban_context?.source && (
+                                  <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1">
+                                    {user.ban_context.source === 'risk_center' ? '风控' : 
+                                     user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right py-2">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs hover:bg-green-500/10 hover:text-green-600 px-2"
+                                  disabled={mutating}
+                                  onClick={() => {
+                                    setBanConfirmDialog({
+                                      open: true,
+                                      type: 'unban',
+                                      userId: user.id,
+                                      username: user.username,
+                                      reason: '',
+                                      disableTokens: false,
+                                      enableTokens: true,
+                                    })
+                                  }}
+                                >
+                                  <ShieldCheck className="h-3 w-3 mr-1" />
+                                  解封
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs hover:bg-primary/10 hover:text-primary px-2"
+                                  onClick={() => {
+                                    const mockItem: LeaderboardItem = {
+                                      user_id: user.id,
+                                      username: user.username,
+                                      user_status: 2,
+                                      request_count: user.request_count,
+                                      failure_requests: 0,
+                                      failure_rate: 0,
+                                      quota_used: user.used_quota,
+                                      prompt_tokens: 0,
+                                      completion_tokens: 0,
+                                      unique_ips: 0
+                                    }
+                                    openUserDialog(mockItem, '24h')
+                                  }}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  查看
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow>
+                            <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                              <div className="flex flex-col items-center justify-center gap-2">
+                                <ShieldCheck className="h-8 w-8 opacity-20" />
+                                <span>暂无被封禁用户</span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {bannedTotalPages > 1 && (
+                    <div className="flex items-center justify-between p-4 border-t bg-muted/10">
+                      <div className="text-xs text-muted-foreground">
+                        第 {bannedPage} / {bannedTotalPages} 页
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 text-xs"
+                          disabled={bannedPage <= 1 || bannedLoading} 
+                          onClick={() => fetchBannedUsers(bannedPage - 1)}
+                        >
+                          上一页
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 text-xs"
+                          disabled={bannedPage >= bannedTotalPages || bannedLoading} 
+                          onClick={() => fetchBannedUsers(bannedPage + 1)}
+                        >
+                          下一页
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 审计日志 Tab (原封禁记录) */}
+        <TabsContent value="audit_logs">
+          <Card className="rounded-xl shadow-sm border">
+            <CardHeader className="pb-3 border-b bg-muted/20">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-muted-foreground" />
+                  审计日志
+                </CardTitle>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    共 {records.length} 条记录 (本页)
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => fetchBanRecords(1, true)} 
+                    disabled={recordsLoading}
+                    className="h-8"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", recordsLoading && "animate-spin")} />
+                    刷新
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -768,12 +1041,11 @@ export function RealtimeRanking() {
                           <TableHead className="w-[120px]">用户</TableHead>
                           <TableHead className="w-[80px]">操作者</TableHead>
                           <TableHead>原因</TableHead>
-                          <TableHead className="w-[120px] text-right">操作</TableHead>
+                          <TableHead className="w-[80px] text-right">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {records.length ? records.map((r) => {
-                          // 判断封禁类型
                           const isTokenBan = r.context?.token_id !== undefined
                           const tokenName = r.context?.token_name || ''
 
@@ -831,53 +1103,29 @@ export function RealtimeRanking() {
                                 </div>
                               </TableCell>
                               <TableCell className="text-right py-2">
-                                <div className="flex items-center justify-end gap-1">
-                                  {r.action === 'ban' && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 text-xs hover:bg-green-500/10 hover:text-green-600 px-2"
-                                      disabled={mutating}
-                                      onClick={() => {
-                                        setBanConfirmDialog({
-                                          open: true,
-                                          type: 'unban',
-                                          userId: r.user_id,
-                                          username: r.username,
-                                          reason: '',
-                                          disableTokens: false,
-                                          enableTokens: true,
-                                        })
-                                      }}
-                                    >
-                                      <ShieldCheck className="h-3 w-3 mr-1" />
-                                      解封
-                                    </Button>
-                                  )}
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-xs hover:bg-primary/10 hover:text-primary px-2"
-                                    onClick={() => {
-                                      const mockItem: LeaderboardItem = {
-                                        user_id: r.user_id,
-                                        username: r.username,
-                                        user_status: r.action === 'ban' ? 2 : 1,
-                                        request_count: 0,
-                                        failure_requests: 0,
-                                        failure_rate: 0,
-                                        quota_used: 0,
-                                        prompt_tokens: 0,
-                                        completion_tokens: 0,
-                                        unique_ips: 0
-                                      }
-                                      openUserDialog(mockItem, '24h')
-                                    }}
-                                  >
-                                    <Eye className="h-3 w-3 mr-1" />
-                                    查看
-                                  </Button>
-                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs hover:bg-primary/10 hover:text-primary px-2"
+                                  onClick={() => {
+                                    const mockItem: LeaderboardItem = {
+                                      user_id: r.user_id,
+                                      username: r.username,
+                                      user_status: r.action === 'ban' ? 2 : 1,
+                                      request_count: 0,
+                                      failure_requests: 0,
+                                      failure_rate: 0,
+                                      quota_used: 0,
+                                      prompt_tokens: 0,
+                                      completion_tokens: 0,
+                                      unique_ips: 0
+                                    }
+                                    openUserDialog(mockItem, '24h')
+                                  }}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  查看
+                                </Button>
                               </TableCell>
                             </TableRow>
                           )
@@ -885,8 +1133,8 @@ export function RealtimeRanking() {
                           <TableRow>
                             <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                               <div className="flex flex-col items-center justify-center gap-2">
-                                <ShieldCheck className="h-8 w-8 opacity-20" />
-                                <span>暂无封禁记录</span>
+                                <Activity className="h-8 w-8 opacity-20" />
+                                <span>暂无审计日志</span>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -1616,6 +1864,7 @@ export function RealtimeRanking() {
                       setBanConfirmDialog(prev => ({ ...prev, open: false }))
                       setDialogOpen(false)
                       fetchLeaderboards()
+                      fetchBannedUsers(1)
                       fetchBanRecords(1)
                     } else {
                       showToast('error', res.message || '封禁失败')
@@ -1655,6 +1904,7 @@ export function RealtimeRanking() {
                       setBanConfirmDialog(prev => ({ ...prev, open: false }))
                       setDialogOpen(false)
                       fetchLeaderboards()
+                      fetchBannedUsers(bannedPage)
                       fetchBanRecords(recordsPage)
                     } else {
                       showToast('error', res.message || '解封失败')

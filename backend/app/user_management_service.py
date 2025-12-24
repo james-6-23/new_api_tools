@@ -575,6 +575,96 @@ class UserManagementService:
             logger.db_error(f"批量删除用户失败: {e}")
             return {"success": False, "message": f"批量删除失败: {str(e)}"}
 
+    def get_banned_users(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        获取当前被封禁的用户列表 (status=2)
+        
+        Args:
+            page: 页码
+            page_size: 每页数量
+            search: 搜索关键词 (用户名)
+            
+        Returns:
+            分页的被封禁用户列表
+        """
+        offset = (page - 1) * page_size
+        
+        try:
+            self._db.connect()
+            
+            # 构建查询条件
+            where_clauses = ["status = 2", "deleted_at IS NULL"]
+            params: Dict[str, Any] = {
+                "limit": page_size,
+                "offset": offset,
+            }
+            
+            if search:
+                where_clauses.append("(username LIKE :search OR email LIKE :search)")
+                params["search"] = f"%{search}%"
+            
+            where_sql = " AND ".join(where_clauses)
+            
+            # 查询被封禁用户
+            sql = f"""
+                SELECT id, username, display_name, email, status, quota, used_quota, request_count
+                FROM users
+                WHERE {where_sql}
+                ORDER BY id DESC
+                LIMIT :limit OFFSET :offset
+            """
+            result = self._db.execute(sql, params)
+            
+            # 查询总数
+            count_sql = f"SELECT COUNT(*) as cnt FROM users WHERE {where_sql}"
+            count_result = self._db.execute(count_sql, params)
+            total = int(count_result[0]["cnt"]) if count_result else 0
+            
+            # 获取每个用户最近的封禁记录
+            items = []
+            for row in result:
+                user_id = int(row["id"])
+                
+                # 从 security_audit 获取最近的封禁记录
+                ban_info = self._storage.get_latest_ban_record(user_id)
+                
+                items.append({
+                    "id": user_id,
+                    "username": row.get("username") or "",
+                    "display_name": row.get("display_name") or "",
+                    "email": row.get("email") or "",
+                    "quota": int(row.get("quota") or 0),
+                    "used_quota": int(row.get("used_quota") or 0),
+                    "request_count": int(row.get("request_count") or 0),
+                    "banned_at": ban_info.get("created_at") if ban_info else None,
+                    "ban_reason": ban_info.get("reason") if ban_info else None,
+                    "ban_operator": ban_info.get("operator") if ban_info else None,
+                    "ban_context": ban_info.get("context") if ban_info else None,
+                })
+            
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size if total > 0 else 1,
+            }
+            
+        except Exception as e:
+            logger.db_error(f"获取封禁用户列表失败: {e}")
+            return {
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": 1,
+            }
+
     def ban_user(
         self,
         user_id: int,
