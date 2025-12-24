@@ -316,9 +316,13 @@ export function TopUps() {
                           <span className="font-mono text-muted-foreground">{record.trade_no}</span>
                           {record.trade_no && (
                             <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(record.trade_no)
-                                showToast('success', '已复制交易号')
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(record.trade_no)
+                                  showToast('success', '已复制交易号')
+                                } catch {
+                                  showToast('error', '复制失败')
+                                }
                               }}
                               className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
                               title="复制交易号"
