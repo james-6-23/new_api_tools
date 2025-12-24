@@ -497,21 +497,27 @@ export function UserManagement() {
                 </TableHeader>
                 <TableBody>
                   {users.map((user) => (
-                    <TableRow key={user.id} className="hover:bg-muted/50">
-                      <TableCell className="font-mono text-xs text-muted-foreground">{user.id}</TableCell>
+                    <TableRow key={user.id} className="hover:bg-muted/50 transition-colors">
+                      <TableCell className="font-mono text-[10px] text-muted-foreground tabular-nums">{user.id}</TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="font-medium">{user.username}</span>
-                          {user.display_name && <span className="text-xs text-muted-foreground">{user.display_name}</span>}
+                          <span className="font-semibold text-sm">{user.username}</span>
+                          {user.display_name && <span className="text-[10px] text-muted-foreground">{user.display_name}</span>}
                         </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{user.email || '-'}</TableCell>
-                      <TableCell className="hidden sm:table-cell text-xs">{getRoleName(user.role)}</TableCell>
+                      <TableCell className="hidden sm:table-cell text-[11px] font-medium text-muted-foreground/80">{getRoleName(user.role)}</TableCell>
                       <TableCell>{getStatusBadge(user.status)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{formatQuota(user.quota)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm hidden sm:table-cell">{formatQuota(user.used_quota)}</TableCell>
-                      <TableCell className="text-right hidden md:table-cell">{user.request_count.toLocaleString()}</TableCell>
-                      <TableCell className="hidden lg:table-cell text-xs whitespace-nowrap">{formatLastRequest(user)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-bold text-primary tabular-nums tracking-tight">
+                        {formatQuota(user.quota)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground hidden sm:table-cell tabular-nums">
+                        {formatQuota(user.used_quota)}
+                      </TableCell>
+                      <TableCell className="text-right hidden md:table-cell tabular-nums font-medium text-sm">
+                        {user.request_count.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell text-[10px] whitespace-nowrap tabular-nums">{formatLastRequest(user)}</TableCell>
                       <TableCell>{getActivityBadge(user.activity_level)}</TableCell>
                       <TableCell>
                         <Button
