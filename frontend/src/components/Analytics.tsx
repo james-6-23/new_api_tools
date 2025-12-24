@@ -183,7 +183,7 @@ export function Analytics() {
     setCountdown(REFRESH_INTERVAL)
   }, [REFRESH_INTERVAL])
 
-  // Auto refresh with countdown - also auto process new logs
+  // Auto refresh with countdown - only auto process new logs when synced
   useEffect(() => {
     // Don't auto-refresh while batch processing or loading
     if (batchProcessing || loading) return
@@ -191,8 +191,14 @@ export function Analytics() {
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          // Auto process new logs and refresh
-          autoProcessLogs()
+          // Only auto process new logs when already synced (>= 95% progress)
+          // Otherwise just refresh status without processing
+          if (syncStatus?.is_synced) {
+            autoProcessLogs()
+          } else {
+            fetchAnalytics()
+            fetchSyncStatus()
+          }
           return REFRESH_INTERVAL
         }
         return prev - 1
@@ -204,7 +210,7 @@ export function Analytics() {
         clearInterval(countdownRef.current)
       }
     }
-  }, [batchProcessing, loading, autoProcessLogs, REFRESH_INTERVAL])
+  }, [batchProcessing, loading, autoProcessLogs, fetchAnalytics, fetchSyncStatus, syncStatus?.is_synced, REFRESH_INTERVAL])
 
   const processLogs = async () => {
     setProcessing(true)

@@ -710,9 +710,11 @@ class LogAnalyticsService:
                 progress = (total_processed / total_logs) * 100
             remaining = max(0, total_logs - total_processed)
 
-        # is_synced: data has been initialized and is reasonably up to date
-        # (processed some logs, not in init mode, no inconsistency)
-        is_synced = total_processed > 0 and not is_initializing and not data_inconsistent and not needs_initial_sync
+        # is_synced: data has been fully synchronized
+        # - progress >= 95% (allow some new logs to come in)
+        # - not in init mode
+        # - no data inconsistency
+        is_synced = progress >= 95.0 and not is_initializing and not data_inconsistent
 
         return {
             "last_log_id": last_log_id,
