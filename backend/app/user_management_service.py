@@ -578,7 +578,7 @@ class UserManagementService:
             # 清除缓存
             self._storage.cache_delete(STATS_CACHE_KEY)
 
-            logger.business("批量删除不活跃用户", count=len(user_ids), level=activity_level.value)
+            logger.business("批量删除不活跃用户", count=len(user_ids), activity=activity_level.value)
 
             return {
                 "success": True,
