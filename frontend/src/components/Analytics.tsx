@@ -209,8 +209,15 @@ export function Analytics() {
 
   // 浏览器刷新时自动处理新日志
   useEffect(() => {
-    if (!isPageRefresh || loading) return
-    if (syncStatus?.needs_initial_sync || syncStatus?.is_initializing) return
+    // 等待 loading 完成和 syncStatus 加载
+    if (loading || !syncStatus) return
+    // 未刷新页面时不执行
+    if (!isPageRefresh) return
+    // 未初始化时不执行
+    if (syncStatus.needs_initial_sync || syncStatus.is_initializing) {
+      setIsPageRefresh(false)
+      return
+    }
     
     // 浏览器刷新且已初始化，自动处理新日志
     const autoProcess = async () => {
@@ -229,11 +236,11 @@ export function Analytics() {
       }
     }
     
-    if (syncStatus?.is_synced) {
+    if (syncStatus.is_synced) {
       autoProcess()
     }
     setIsPageRefresh(false) // 只执行一次
-  }, [isPageRefresh, loading, syncStatus?.is_synced, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, getAuthHeaders, fetchAnalytics, fetchSyncStatus])
+  }, [isPageRefresh, loading, syncStatus, apiUrl, getAuthHeaders, fetchAnalytics, fetchSyncStatus])
 
   // Auto refresh with countdown - only when initialized (synced)
   useEffect(() => {
