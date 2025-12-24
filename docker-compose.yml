@@ -23,16 +23,9 @@ services:
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
     volumes:
       - ./data:/app/data
-    networks:
-      - newapi_network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-networks:
-  newapi_network:
-    external: true
-    name: ${NEWAPI_NETWORK}

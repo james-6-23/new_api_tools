@@ -358,7 +358,7 @@ start_services() {
   log_info "启动服务..."
 
   # 检查是否有旧容器
-  if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools(-|$)'; then
+  if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools$'; then
     log_warn "发现已存在的服务容器，正在停止..."
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
@@ -369,6 +369,12 @@ start_services() {
 
   # 启动服务
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+
+  # 将容器连接到 NewAPI 网络（用于访问数据库）
+  if [[ -n "$NEWAPI_NETWORK" ]]; then
+    log_info "连接到 NewAPI 网络: $NEWAPI_NETWORK"
+    docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络连接失败，可能已连接"
+  fi
 
   log_success "服务已启动!"
 
