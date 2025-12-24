@@ -85,6 +85,8 @@ export function UserManagement() {
     type: 'warning' | 'danger'
     onConfirm: () => void
     details?: { count: number; users: string[] }
+    loading?: boolean
+    activityLevel?: string
   }>({
     isOpen: false,
     title: '',
@@ -184,8 +186,17 @@ export function UserManagement() {
   }
 
   const previewBatchDelete = async (level: string) => {
-    const setLoading = level === 'very_inactive' ? setDeletingVeryInactive : setDeletingNever
-    setLoading(true)
+    // 先立即显示弹窗，带加载状态
+    setConfirmDialog({
+      isOpen: true,
+      title: '批量删除用户',
+      message: `正在查询${level === 'never' ? '从未请求' : '非常不活跃'}的用户...`,
+      type: 'danger',
+      loading: true,
+      activityLevel: level,
+      onConfirm: () => executeBatchDelete(level),
+    })
+
     try {
       const response = await fetch(`${apiUrl}/api/users/batch-delete`, {
         method: 'POST',
@@ -197,26 +208,25 @@ export function UserManagement() {
         const count = data.data.count
         const usernames = data.data.users || []
         if (count === 0) {
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }))
           showToast('info', '没有符合条件的用户')
-          setLoading(false)
           return
         }
-        setConfirmDialog({
-          isOpen: true,
-          title: '批量删除用户',
+        // 更新弹窗内容
+        setConfirmDialog(prev => ({
+          ...prev,
           message: `确定要删除 ${count} 个${level === 'never' ? '从未请求' : '非常不活跃'}的用户吗？此操作不可恢复。`,
-          type: 'danger',
           details: { count, users: usernames },
-          onConfirm: () => executeBatchDelete(level),
-        })
+          loading: false,
+        }))
       } else {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }))
         showToast('error', data.message || '预览失败')
       }
     } catch (error) {
       console.error('Failed to preview batch delete:', error)
+      setConfirmDialog(prev => ({ ...prev, isOpen: false }))
       showToast('error', '预览失败')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -577,7 +587,12 @@ export function UserManagement() {
             <DialogTitle>{confirmDialog.title}</DialogTitle>
             <DialogDescription>{confirmDialog.message}</DialogDescription>
           </DialogHeader>
-          {confirmDialog.details && (
+          {confirmDialog.loading ? (
+            <div className="py-8 flex flex-col items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+              <p className="text-sm text-muted-foreground">正在查询用户数据，您也可以直接删除...</p>
+            </div>
+          ) : confirmDialog.details && (
             <div className="py-4">
               <p className="text-sm text-muted-foreground mb-2">将删除以下用户（显示前20个）：</p>
               <div className="max-h-40 overflow-y-auto bg-muted rounded-md p-3">
@@ -593,8 +608,13 @@ export function UserManagement() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}>取消</Button>
-            <Button variant={confirmDialog.type === 'danger' ? 'destructive' : 'default'} onClick={confirmDialog.onConfirm}>
+            <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}>
+              取消
+            </Button>
+            <Button
+              variant={confirmDialog.type === 'danger' ? 'destructive' : 'default'}
+              onClick={confirmDialog.onConfirm}
+            >
               确定删除
             </Button>
           </DialogFooter>
