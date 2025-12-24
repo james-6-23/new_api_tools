@@ -61,6 +61,18 @@ class DBConfig:
             return f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}?charset=utf8mb4"
 
 
+# Recommended indexes for IP monitoring and risk analysis
+RECOMMENDED_INDEXES = [
+    # IP monitoring indexes
+    ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
+    ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
+    ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),
+    ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
+    # Risk monitoring indexes
+    ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
+]
+
+
 class DatabaseManager:
     """
     Database connection manager with connection pooling.
@@ -219,6 +231,91 @@ class DatabaseManager:
             self._connected = False
             logger.info("Database connection closed")
 
+    def get_existing_indexes(self, table_name: str) -> set[str]:
+        """
+        Get existing index names for a table.
+        
+        Args:
+            table_name: Name of the table.
+            
+        Returns:
+            Set of existing index names.
+        """
+        try:
+            if self.config.engine == DatabaseEngine.POSTGRESQL:
+                sql = """
+                    SELECT indexname 
+                    FROM pg_indexes 
+                    WHERE tablename = :table_name
+                """
+            else:
+                sql = """
+                    SELECT DISTINCT INDEX_NAME as indexname
+                    FROM INFORMATION_SCHEMA.STATISTICS 
+                    WHERE TABLE_SCHEMA = :db_name AND TABLE_NAME = :table_name
+                """
+            
+            params = {"table_name": table_name}
+            if self.config.engine == DatabaseEngine.MYSQL:
+                params["db_name"] = self.config.database
+            
+            rows = self.execute(sql, params)
+            return {row.get("indexname") or row.get("INDEX_NAME") for row in rows}
+        except Exception as e:
+            logger.warning(f"Failed to get existing indexes for {table_name}: {e}")
+            return set()
+
+    def create_index(self, index_name: str, table_name: str, columns: list[str]) -> bool:
+        """
+        Create an index if it doesn't exist.
+        
+        Args:
+            index_name: Name of the index.
+            table_name: Name of the table.
+            columns: List of column names.
+            
+        Returns:
+            True if index was created, False if it already exists.
+        """
+        existing = self.get_existing_indexes(table_name)
+        if index_name in existing:
+            logger.debug(f"Index {index_name} already exists on {table_name}")
+            return False
+        
+        columns_str = ", ".join(columns)
+        
+        try:
+            if self.config.engine == DatabaseEngine.POSTGRESQL:
+                sql = f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({columns_str})"
+            else:
+                # MySQL doesn't support IF NOT EXISTS for CREATE INDEX
+                sql = f"CREATE INDEX {index_name} ON {table_name} ({columns_str})"
+            
+            self.execute(sql, {})
+            logger.info(f"Created index {index_name} on {table_name}({columns_str})")
+            return True
+        except Exception as e:
+            # Index might already exist (race condition) or other error
+            logger.warning(f"Failed to create index {index_name}: {e}")
+            return False
+
+    def ensure_recommended_indexes(self) -> dict[str, bool]:
+        """
+        Ensure all recommended indexes exist.
+        
+        Returns:
+            Dictionary mapping index names to whether they were created (True) or already existed (False).
+        """
+        results = {}
+        for index_name, table_name, columns in RECOMMENDED_INDEXES:
+            try:
+                created = self.create_index(index_name, table_name, columns)
+                results[index_name] = created
+            except Exception as e:
+                logger.error(f"Error ensuring index {index_name}: {e}")
+                results[index_name] = False
+        return results
+
     def ensure_indexes(self) -> None:
         """
         Create recommended indexes if they don't exist.
@@ -236,18 +333,24 @@ class DatabaseManager:
             ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),  # Risk monitoring, analytics
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),  # User analysis queries
             ("idx_logs_type_created", "logs", ["type", "created_at"]),  # Dashboard stats by type
-            
+
+            # IP monitoring indexes (from RECOMMENDED_INDEXES)
+            ("idx_logs_ip_created", "logs", ["ip", "created_at"]),  # IP analysis base index
+            ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),  # Shared IP detection
+            ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),  # Multi-IP user detection
+            ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),  # Multi-IP token detection
+
             # users table
             ("idx_users_deleted_status", "users", ["deleted_at", "status"]),  # User listing with soft delete
             ("idx_users_request_count", "users", ["request_count"]),  # Sorting by request count
-            
+
             # tokens table
             ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),  # Token queries by user
-            
+
             # top_ups table
             ("idx_topups_create_time", "top_ups", ["create_time"]),  # Top-up listing sorted by time
             ("idx_topups_user_id", "top_ups", ["user_id"]),  # Top-ups by user
-            
+
             # redemptions table
             ("idx_redemptions_created_deleted", "redemptions", ["created_time", "deleted_at"]),  # Redemption listing
         ]

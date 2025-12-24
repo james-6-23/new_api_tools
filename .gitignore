@@ -87,3 +87,6 @@ new_api_tools/insert_pgsql.sh
 pgsql_schema_export
 mysql_schema_export
 plan.md
+.kiro/specs/ip-monitoring/design.md
+.kiro/specs/ip-monitoring/requirements.md
+.kiro/specs/ip-monitoring/tasks.md
