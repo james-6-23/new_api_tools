@@ -193,15 +193,12 @@ class LogAnalyticsService:
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            # Success = quota > 0 (request was charged)
-            # Failure = no input and no output tokens
-            if quota > 0:
+            # Success = quota > 0 OR has any tokens (for embedding models)
+            # Empty = no input and no output tokens (真正的空请求)
+            if quota > 0 or prompt_tokens > 0 or completion_tokens > 0:
                 model_stats[model_name]["success_count"] += 1
-            elif prompt_tokens == 0 and completion_tokens == 0:
-                model_stats[model_name]["empty_count"] += 1
             else:
-                # Has tokens but no charge (unusual case, count as success)
-                model_stats[model_name]["success_count"] += 1
+                model_stats[model_name]["empty_count"] += 1
 
         # Update SQLite with aggregated data
         now = int(time.time())
@@ -587,15 +584,12 @@ class LogAnalyticsService:
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            # Success = quota > 0 (request was charged)
-            # Failure = no input and no output tokens
-            if quota > 0:
+            # Success = quota > 0 OR has any tokens (for embedding models)
+            # Empty = no input and no output tokens (真正的空请求)
+            if quota > 0 or prompt_tokens > 0 or completion_tokens > 0:
                 model_stats[model_name]["success_count"] += 1
-            elif prompt_tokens == 0 and completion_tokens == 0:
-                model_stats[model_name]["empty_count"] += 1
             else:
-                # Has tokens but no charge (unusual case, count as success)
-                model_stats[model_name]["success_count"] += 1
+                model_stats[model_name]["empty_count"] += 1
 
         # Update SQLite
         now = int(time.time())
