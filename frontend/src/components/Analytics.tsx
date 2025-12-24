@@ -77,7 +77,7 @@ export function Analytics() {
   const [processing, setProcessing] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
-  const countdownRef = useRef<NodeJS.Timeout | null>(null)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
