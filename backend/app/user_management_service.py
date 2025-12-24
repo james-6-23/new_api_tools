@@ -541,11 +541,14 @@ class UserManagementService:
                 """
                 params = {"cutoff": inactive_cutoff}
             elif activity_level == ActivityLevel.NEVER:
-                # 使用 request_count = 0 快速查询
+                # 使用 logs 表判断，与统计逻辑一致
                 find_sql = """
-                    SELECT id, username
-                    FROM users
-                    WHERE deleted_at IS NULL AND request_count = 0
+                    SELECT u.id, u.username
+                    FROM users u
+                    LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
+                    WHERE u.deleted_at IS NULL
+                    GROUP BY u.id, u.username
+                    HAVING MAX(l.created_at) IS NULL
                 """
                 params = {}
             else:

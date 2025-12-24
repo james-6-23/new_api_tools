@@ -169,6 +169,7 @@ class LogAnalyticsService:
             username = log.get("username") or f"User#{user_id}"
             model_name = log.get("model_name") or "unknown"
             quota = int(log.get("quota") or 0)
+            prompt_tokens = int(log.get("prompt_tokens") or 0)
             completion_tokens = int(log.get("completion_tokens") or 0)
 
             max_log_id = max(max_log_id, log_id)
@@ -192,11 +193,15 @@ class LogAnalyticsService:
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            # Success = has completion tokens
-            if completion_tokens > 0:
+            # Success = quota > 0 (request was charged)
+            # Failure = no input and no output tokens
+            if quota > 0:
                 model_stats[model_name]["success_count"] += 1
-            else:
+            elif prompt_tokens == 0 and completion_tokens == 0:
                 model_stats[model_name]["empty_count"] += 1
+            else:
+                # Has tokens but no charge (unusual case, count as success)
+                model_stats[model_name]["success_count"] += 1
 
         # Update SQLite with aggregated data
         now = int(time.time())
@@ -560,6 +565,7 @@ class LogAnalyticsService:
             username = log.get("username") or f"User#{user_id}"
             model_name = log.get("model_name") or "unknown"
             quota = int(log.get("quota") or 0)
+            prompt_tokens = int(log.get("prompt_tokens") or 0)
             completion_tokens = int(log.get("completion_tokens") or 0)
 
             new_last_log_id = max(new_last_log_id, log_id)
@@ -581,10 +587,15 @@ class LogAnalyticsService:
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            if completion_tokens > 0:
+            # Success = quota > 0 (request was charged)
+            # Failure = no input and no output tokens
+            if quota > 0:
                 model_stats[model_name]["success_count"] += 1
-            else:
+            elif prompt_tokens == 0 and completion_tokens == 0:
                 model_stats[model_name]["empty_count"] += 1
+            else:
+                # Has tokens but no charge (unusual case, count as success)
+                model_stats[model_name]["success_count"] += 1
 
         # Update SQLite
         now = int(time.time())
