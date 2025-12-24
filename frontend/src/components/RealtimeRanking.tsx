@@ -616,10 +616,10 @@ export function RealtimeRanking() {
 
       <Tabs value={view} onValueChange={(v) => setView(v as any)}>
         <TabsList>
-          <TabsTrigger value="leaderboards">实时排行</TabsTrigger>
-          <TabsTrigger value="ip_monitoring">IP 监控</TabsTrigger>
-          <TabsTrigger value="banned_list">封禁列表</TabsTrigger>
-          <TabsTrigger value="audit_logs">审计日志</TabsTrigger>
+          <TabsTrigger value="leaderboards" className="gap-2"><Activity className="w-4 h-4"/> 实时排行</TabsTrigger>
+          <TabsTrigger value="ip_monitoring" className="gap-2"><Globe className="w-4 h-4"/> IP 监控</TabsTrigger>
+          <TabsTrigger value="banned_list" className="gap-2"><ShieldBan className="w-4 h-4"/> 封禁列表</TabsTrigger>
+          <TabsTrigger value="audit_logs" className="gap-2"><Clock className="w-4 h-4"/> 审计日志</TabsTrigger>
         </TabsList>
 
         <TabsContent value="leaderboards">
@@ -891,11 +891,7 @@ export function RealtimeRanking() {
                             </TableCell>
                             <TableCell className="py-2">
                               <div className="flex flex-wrap items-center gap-1.5">
-                                {user.ban_reason ? (
-                                  <span className="text-sm">{user.ban_reason}</span>
-                                ) : (
-                                  <span className="text-muted-foreground text-sm">-</span>
-                                )}
+                                {renderReasonBadge(user.ban_reason)}
                                 {user.ban_context?.source && (
                                   <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1">
                                     {user.ban_context.source === 'risk_center' ? '风控' : 
@@ -1088,11 +1084,7 @@ export function RealtimeRanking() {
                               </TableCell>
                               <TableCell className="py-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  {r.reason ? (
-                                    <span className="text-sm">{r.reason}</span>
-                                  ) : (
-                                    <span className="text-muted-foreground text-sm">-</span>
-                                  )}
+                                  {renderReasonBadge(r.reason)}
                                   {r.context?.source && (
                                     <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1">
                                       {r.context.source === 'risk_center' ? '风控' : 
@@ -1795,15 +1787,15 @@ export function RealtimeRanking() {
               <label className="text-sm font-medium">
                 {banConfirmDialog.type === 'ban' ? '封禁原因' : '解封原因'}
               </label>
-              <select
+              <Select
                 value={banConfirmDialog.reason}
                 onChange={(e) => setBanConfirmDialog(prev => ({ ...prev, reason: e.target.value }))}
-                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                className="w-full"
               >
                 {(banConfirmDialog.type === 'ban' ? BAN_REASONS : UNBAN_REASONS).map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </Select>
             </div>
             
             {banConfirmDialog.type === 'ban' ? (
