@@ -94,31 +94,36 @@ export function Analytics() {
     'Authorization': `Bearer ${token}`,
   }), [token])
 
-  // 平滑进度动画：在实际进度和显示进度之间插值
+  // 平滑进度动画：持续缓慢增长，不停顿
   useEffect(() => {
-    if (!syncStatus || !batchProcessing) {
+    if (!batchProcessing) {
       setDisplayProgress(syncStatus?.progress_percent || 0)
       return
     }
 
-    const targetProgress = syncStatus.progress_percent
-    if (displayProgress >= targetProgress) {
-      setDisplayProgress(targetProgress)
-      return
-    }
-
-    // 每 50ms 增加一点进度，模拟平滑过渡
+    const targetProgress = syncStatus?.progress_percent || 0
+    
+    // 持续动画，每 100ms 更新一次
     const interval = setInterval(() => {
       setDisplayProgress(prev => {
+        // 如果已经达到或超过目标，保持在目标值
+        if (prev >= targetProgress) {
+          // 但如果还在处理中，允许缓慢超前（最多超前 2%）
+          if (prev < targetProgress + 2 && prev < 99) {
+            return prev + 0.02 // 非常缓慢地增长
+          }
+          return Math.min(prev, 99.9) // 不超过 99.9%
+        }
+        
+        // 快速追赶到目标进度
         const diff = targetProgress - prev
-        if (diff <= 0.1) return targetProgress
-        // 每次增加差值的 10%，实现缓动效果
-        return prev + Math.max(0.1, diff * 0.1)
+        const increment = Math.max(0.05, diff * 0.15)
+        return Math.min(prev + increment, targetProgress)
       })
-    }, 50)
+    }, 100)
 
     return () => clearInterval(interval)
-  }, [syncStatus?.progress_percent, batchProcessing, displayProgress])
+  }, [syncStatus?.progress_percent, batchProcessing])
 
   const fetchSyncStatus = useCallback(async () => {
     try {

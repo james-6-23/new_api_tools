@@ -22,7 +22,7 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET}
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
     volumes:
-      - newapi_tools_data:/app/data
+      - ./data:/app/data
     networks:
       - newapi_network
     restart: unless-stopped
@@ -31,10 +31,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-volumes:
-  newapi_tools_data:
-    name: newapi_tools_data
 
 networks:
   newapi_network:
