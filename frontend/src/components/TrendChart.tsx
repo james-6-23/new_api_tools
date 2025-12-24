@@ -75,7 +75,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
       </CardHeader>
       <CardContent>
         {processedData.length > 0 ? (
-          <div className="relative h-[250px] w-full mt-4 select-none">
+          <div className="relative h-[250px] w-full mt-4 select-none pl-6">
             {/* Background Grid */}
             <div className="absolute inset-0 flex flex-col justify-between text-xs text-muted-foreground/30 pointer-events-none">
               {gridLines.reverse().map((val, i) => (
