@@ -1,7 +1,8 @@
-import { ReactNode, useEffect, useState } from 'react'
+import { ReactNode, useEffect, useState, useRef } from 'react'
 import { LayoutDashboard, Plus, Ticket, Clock, DollarSign, BarChart3, Users, LogOut } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
+import { cn } from '../lib/utils'
 
 export type TabType = 'dashboard' | 'generator' | 'redemptions' | 'history' | 'topups' | 'analytics' | 'users'
 
@@ -31,6 +32,8 @@ const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
 
 export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutProps) {
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null)
+  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, opacity: 0 })
+  const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
 
   useEffect(() => {
     const fetchDbStatus = async () => {
@@ -55,60 +58,110 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
     fetchDbStatus()
   }, [])
 
+  useEffect(() => {
+    const activeTabIndex = tabs.findIndex(tab => tab.id === activeTab)
+    const activeTabElement = tabsRef.current[activeTabIndex]
+
+    if (activeTabElement) {
+      setIndicatorStyle({
+        left: activeTabElement.offsetLeft,
+        width: activeTabElement.offsetWidth,
+        opacity: 1
+      })
+    }
+  }, [activeTab])
+
+  // Handle window resize to recalculate positions
+  useEffect(() => {
+    const handleResize = () => {
+      const activeTabIndex = tabs.findIndex(tab => tab.id === activeTab)
+      const activeTabElement = tabsRef.current[activeTabIndex]
+      if (activeTabElement) {
+        setIndicatorStyle({
+          left: activeTabElement.offsetLeft,
+          width: activeTabElement.offsetWidth,
+          opacity: 1
+        })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [activeTab])
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-card border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center gap-4">
-              <h1 className="text-xl sm:text-2xl font-bold">
-                NewAPI Middleware Tool
-              </h1>
-              {dbStatus && (
-                <Badge 
-                  variant={dbStatus.connected ? 'success' : 'destructive'} 
-                  className="hidden sm:flex items-center gap-1.5"
-                >
-                  <span className={`w-2 h-2 rounded-full ${dbStatus.connected ? 'bg-green-300' : 'bg-red-300'}`} />
-                  {dbStatus.connected
-                    ? `${dbStatus.engine.toUpperCase()} · ${dbStatus.database}`
-                    : '数据库未连接'}
-                </Badge>
-              )}
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Sticky Header Wrapper */}
+      <div className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
+        <header className="w-full">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-3">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                    <LayoutDashboard className="w-5 h-5" />
+                  </div>
+                  <h1 className="text-lg sm:text-xl font-bold tracking-tight">
+                    NewAPI
+                  </h1>
+                </div>
+                {dbStatus && (
+                  <Badge 
+                    variant={dbStatus.connected ? 'success' : 'destructive'} 
+                    className="hidden md:flex items-center gap-1.5 px-2 py-0.5 h-6"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${dbStatus.connected ? 'bg-white animate-pulse' : 'bg-white/50'}`} />
+                    {dbStatus.connected
+                      ? <span className="text-[10px] font-medium opacity-90">{dbStatus.engine.toUpperCase()}</span>
+                      : '离线'}
+                  </Badge>
+                )}
+              </div>
+              <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground hover:text-foreground">
+                <LogOut className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">退出</span>
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={onLogout}>
-              <LogOut className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">退出登录</span>
-            </Button>
+          </div>
+        </header>
+
+        {/* Modern Navigation Tabs */}
+        <div className="w-full border-t border-border/40">
+          <div className="max-w-7xl mx-auto">
+            <nav className="relative flex items-center w-full overflow-x-auto no-scrollbar px-4 sm:px-6 lg:px-8 py-1" aria-label="Tabs">
+              {/* Sliding Background Indicator */}
+              <div
+                className="absolute h-8 sm:h-9 bg-secondary rounded-md transition-all duration-300 ease-in-out"
+                style={{
+                  left: indicatorStyle.left,
+                  width: indicatorStyle.width,
+                  opacity: indicatorStyle.opacity,
+                  bottom: '4px', // Center vertically in the py-1 container
+                }}
+              />
+
+              {tabs.map(({ id, label, icon: Icon }, index) => (
+                <button
+                  key={id}
+                  ref={el => tabsRef.current[index] = el}
+                  onClick={() => onTabChange(id)}
+                  className={cn(
+                    "relative flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 my-1 text-sm font-medium rounded-md whitespace-nowrap transition-colors duration-200 z-10 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                    activeTab === id
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground/80"
+                  )}
+                >
+                  <Icon className={cn("h-4 w-4 transition-transform duration-300", activeTab === id ? "scale-110" : "scale-100")} />
+                  <span className={cn("hidden sm:inline transition-opacity", activeTab === id ? "font-semibold" : "")}>{label}</span>
+                </button>
+              ))}
+            </nav>
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Navigation Tabs */}
-      <nav className="bg-card border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex gap-1">
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => onTabChange(id)}
-                className={`py-4 px-3 sm:px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${
-                  activeTab === id
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+      {/* Main Content with Fade In */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-500 slide-in-from-bottom-2">
         {children}
       </main>
     </div>
