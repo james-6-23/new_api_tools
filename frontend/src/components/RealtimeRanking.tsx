@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye } from 'lucide-react'
@@ -7,7 +7,6 @@ import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Progress } from './ui/progress'
 import { Badge } from './ui/badge'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Select } from './ui/select'
 import { cn } from '../lib/utils'
@@ -206,6 +205,35 @@ interface MultiIPUserItem {
   top_ips: Array<{ ip: string; request_count: number }>
 }
 
+// Hash路径映射
+const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'> = {
+  '': 'leaderboards',
+  'leaderboards': 'leaderboards',
+  'ip': 'ip_monitoring',
+  'ip_monitoring': 'ip_monitoring',
+  'banned': 'banned_list',
+  'banned_list': 'banned_list',
+  'audit': 'audit_logs',
+  'audit_logs': 'audit_logs',
+}
+
+const HASH_VIEW_MAP: Record<string, string> = {
+  'leaderboards': '',
+  'ip_monitoring': 'ip',
+  'banned_list': 'banned',
+  'audit_logs': 'audit',
+}
+
+function getInitialView(): 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' {
+  const hash = window.location.hash
+  // 解析 #risk/ip 或 #risk-ip 格式
+  const match = hash.match(/#risk[/-]?(\w*)/)
+  if (match && match[1]) {
+    return VIEW_HASH_MAP[match[1]] || 'leaderboards'
+  }
+  return 'leaderboards'
+}
+
 export function RealtimeRanking() {
   const { token } = useAuth()
   const { showToast } = useToast()
@@ -215,8 +243,20 @@ export function RealtimeRanking() {
   const windows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h'], [])
   const extendedWindows = useMemo<WindowKey[]>(() => ['24h', '3d', '7d'], [])
   const [selectedWindow, setSelectedWindow] = useState<WindowKey>('24h')
-  
-  const [view, setView] = useState<'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'>('leaderboards')
+
+  const [view, setView] = useState<'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'>(getInitialView)
+
+  // Tab 配置
+  const riskTabs = useMemo(() => [
+    { id: 'leaderboards' as const, label: '实时排行', icon: Activity },
+    { id: 'ip_monitoring' as const, label: 'IP 监控', icon: Globe },
+    { id: 'banned_list' as const, label: '封禁列表', icon: ShieldBan },
+    { id: 'audit_logs' as const, label: '审计日志', icon: Clock },
+  ], [])
+
+  // 滑动指示器状态
+  const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
+  const [tabIndicatorStyle, setTabIndicatorStyle] = useState({ left: 0, width: 0, opacity: 0 })
 
   const [sortBy, setSortBy] = useState<SortKey>('requests')
   const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [], '3d': [], '7d': [] })
@@ -483,6 +523,55 @@ export function RealtimeRanking() {
     setAnalysis(null)
   }
 
+  // 同步 view 和 URL hash
+  useEffect(() => {
+    const subPath = HASH_VIEW_MAP[view] || ''
+    const newHash = subPath ? `#risk/${subPath}` : '#risk'
+    if (window.location.hash !== newHash) {
+      window.history.replaceState(null, '', newHash)
+    }
+  }, [view])
+
+  // 监听浏览器前进/后退
+  useEffect(() => {
+    const handleHashChange = () => {
+      const newView = getInitialView()
+      setView(newView)
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  // 计算Tab指示器位置
+  useEffect(() => {
+    const activeTabIndex = riskTabs.findIndex(tab => tab.id === view)
+    const activeTabElement = tabsRef.current[activeTabIndex]
+    if (activeTabElement) {
+      setTabIndicatorStyle({
+        left: activeTabElement.offsetLeft,
+        width: activeTabElement.offsetWidth,
+        opacity: 1
+      })
+    }
+  }, [view, riskTabs])
+
+  // 窗口大小变化时重新计算指示器位置
+  useEffect(() => {
+    const handleResize = () => {
+      const activeTabIndex = riskTabs.findIndex(tab => tab.id === view)
+      const activeTabElement = tabsRef.current[activeTabIndex]
+      if (activeTabElement) {
+        setTabIndicatorStyle({
+          left: activeTabElement.offsetLeft,
+          width: activeTabElement.offsetWidth,
+          opacity: 1
+        })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [view, riskTabs])
+
   useEffect(() => {
     if (view === 'leaderboards') fetchLeaderboards()
     if (view === 'banned_list') fetchBannedUsers(1)
@@ -616,15 +705,42 @@ export function RealtimeRanking() {
         </div>
       </div>
 
-      <Tabs value={view} onValueChange={(v) => setView(v as any)}>
-        <TabsList>
-          <TabsTrigger value="leaderboards" className="gap-2"><Activity className="w-4 h-4"/> 实时排行</TabsTrigger>
-          <TabsTrigger value="ip_monitoring" className="gap-2"><Globe className="w-4 h-4"/> IP 监控</TabsTrigger>
-          <TabsTrigger value="banned_list" className="gap-2"><ShieldBan className="w-4 h-4"/> 封禁列表</TabsTrigger>
-          <TabsTrigger value="audit_logs" className="gap-2"><Clock className="w-4 h-4"/> 审计日志</TabsTrigger>
-        </TabsList>
+      {/* 自定义 Tabs 带滑动指示器 */}
+      <div className="relative">
+        <div className="relative inline-flex h-10 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
+          {/* 滑动背景指示器 */}
+          <div
+            className="absolute inset-y-1 bg-background rounded-md shadow-sm transition-all duration-300 ease-out"
+            style={{
+              left: tabIndicatorStyle.left,
+              width: tabIndicatorStyle.width,
+              opacity: tabIndicatorStyle.opacity,
+            }}
+          />
 
-        <TabsContent value="leaderboards">
+          {/* Tab 按钮 */}
+          {riskTabs.map(({ id, label, icon: Icon }, index) => (
+            <button
+              key={id}
+              ref={el => tabsRef.current[index] = el}
+              onClick={() => setView(id)}
+              className={cn(
+                "relative z-10 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                view === id
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground/80"
+              )}
+            >
+              <Icon className={cn("w-4 h-4 transition-transform duration-300", view === id && "scale-110")} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab 内容 */}
+      {view === 'leaderboards' && (
+        <div className="mt-4">
           {/* Responsive Grid Layout: 1 col on mobile, 2 cols on tablet/desktop */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {windows.map((w) => (
@@ -830,10 +946,12 @@ export function RealtimeRanking() {
               ))}
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* 封禁列表 Tab */}
-        <TabsContent value="banned_list">
+      {/* 封禁列表 Tab */}
+      {view === 'banned_list' && (
+        <div className="mt-4">
           <Card className="rounded-xl shadow-sm border">
             <CardHeader className="pb-3 border-b bg-muted/20">
               <div className="flex items-center justify-between">
@@ -1009,10 +1127,12 @@ export function RealtimeRanking() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* 审计日志 Tab (原封禁记录) */}
-        <TabsContent value="audit_logs">
+      {/* 审计日志 Tab (原封禁记录) */}
+      {view === 'audit_logs' && (
+        <div className="mt-4">
           <Card className="rounded-xl shadow-sm border">
             <CardHeader className="pb-3 border-b bg-muted/20">
               <div className="flex items-center justify-between">
@@ -1210,10 +1330,12 @@ export function RealtimeRanking() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* IP Monitoring Tab */}
-        <TabsContent value="ip_monitoring">
+      {/* IP Monitoring Tab */}
+      {view === 'ip_monitoring' && (
+        <div className="mt-4">
           <div className="space-y-6">
             {/* Header with controls */}
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1550,8 +1672,8 @@ export function RealtimeRanking() {
               </>
             )}
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       {/* Enable All IP Recording Dialog */}
       <Dialog open={enableAllDialogOpen} onOpenChange={setEnableAllDialogOpen}>
@@ -1817,7 +1939,7 @@ export function RealtimeRanking() {
 
       {/* 封禁/解封确认弹窗 */}
       <Dialog open={banConfirmDialog.open} onOpenChange={(open) => setBanConfirmDialog(prev => ({ ...prev, open }))}>
-        <DialogContent className="max-w-[400px] rounded-xl gap-4 p-6">
+        <DialogContent className="max-w-[600px] w-full rounded-xl gap-6 p-6 overflow-visible">
           <DialogHeader className="space-y-2">
             <DialogTitle className="flex items-center gap-2 text-lg">
               {banConfirmDialog.type === 'ban' ? (
