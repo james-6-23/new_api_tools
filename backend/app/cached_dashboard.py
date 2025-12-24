@@ -36,7 +36,7 @@ class CachedDashboardService:
     def service(self) -> DashboardService:
         return self._service
 
-    def get_system_overview(self, use_cache: bool = True) -> Dict[str, Any]:
+    def get_system_overview(self, period: str = "7d", use_cache: bool = True) -> Dict[str, Any]:
         """
         Get system overview with caching.
 
@@ -46,7 +46,7 @@ class CachedDashboardService:
         Returns:
             System overview data
         """
-        cache_key = "dashboard:overview"
+        cache_key = f"dashboard:overview:{period}"
 
         if use_cache:
             cached_data = self._storage.cache_get(cache_key)
@@ -54,12 +54,28 @@ class CachedDashboardService:
                 logger.debug("Using cached system overview")
                 return cached_data
 
-        # Fetch fresh data
-        overview = self.service.get_system_overview()
-        data = asdict(overview)
+        # Calculate time range for active counts
+        end_time = int(time.time())
+        period_map = {
+            "24h": 24 * 3600,
+            "3d": 3 * 24 * 3600,
+            "7d": 7 * 24 * 3600,
+            "14d": 14 * 24 * 3600,
+        }
+        start_time = end_time - period_map.get(period, 7 * 24 * 3600)
 
-        # Cache for 5 minutes
-        self._storage.cache_set(cache_key, data, ttl=300)
+        # Fetch fresh data
+        overview = self.service.get_system_overview(active_start_time=start_time, active_end_time=end_time)
+        data = asdict(overview)
+        data["period"] = period
+
+        ttl_map = {
+            "24h": 60,
+            "3d": 300,
+            "7d": 300,
+            "14d": 600,
+        }
+        self._storage.cache_set(cache_key, data, ttl=ttl_map.get(period, 300))
 
         # Also save as snapshot
         self._storage.save_stats_snapshot("overview", data)

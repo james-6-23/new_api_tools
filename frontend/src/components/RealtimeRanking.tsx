@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 import { Progress } from './ui/progress'
-import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
@@ -57,6 +56,29 @@ interface UserAnalysis {
 
 const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
 const SORT_LABELS: Record<SortKey, string> = { requests: '请求次数', quota: '额度消耗', failure_rate: '失败率' }
+
+// 预设封禁原因（基于风控检测的风险类型）
+const BAN_REASONS = [
+  { value: '', label: '请选择封禁原因' },
+  { value: '请求频率过高 (HIGH_RPM)', label: '请求频率过高 (HIGH_RPM)' },
+  { value: '多 IP 访问异常 (MANY_IPS)', label: '多 IP 访问异常 (MANY_IPS)' },
+  { value: '失败率过高 (HIGH_FAILURE_RATE)', label: '失败率过高 (HIGH_FAILURE_RATE)' },
+  { value: '空回复率过高 (HIGH_EMPTY_RATE)', label: '空回复率过高 (HIGH_EMPTY_RATE)' },
+  { value: '账号共享嫌疑', label: '账号共享嫌疑' },
+  { value: '令牌泄露风险', label: '令牌泄露风险' },
+  { value: '滥用 API 资源', label: '滥用 API 资源' },
+  { value: '违反使用条款', label: '违反使用条款' },
+]
+
+// 预设解封原因
+const UNBAN_REASONS = [
+  { value: '', label: '请选择解封原因' },
+  { value: '误封解除', label: '误封解除' },
+  { value: '用户申诉通过', label: '用户申诉通过' },
+  { value: '风险已排除', label: '风险已排除' },
+  { value: '账号核实完成', label: '账号核实完成' },
+  { value: '临时解封观察', label: '临时解封观察' },
+]
 
 function formatNumber(n: number) {
   return n.toLocaleString('zh-CN')
@@ -174,6 +196,16 @@ export function RealtimeRanking() {
   const [enableAllLoading, setEnableAllLoading] = useState(false)
   const [expandedSharedIps, setExpandedSharedIps] = useState<Set<string>>(new Set())
   const [expandedTokens, setExpandedTokens] = useState<Set<number>>(new Set())
+
+  // 确认弹窗状态
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    onConfirm: () => void
+    confirmText?: string
+    variant?: 'default' | 'destructive'
+  }>({ open: false, title: '', description: '', onConfirm: () => {} })
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -299,50 +331,38 @@ export function RealtimeRanking() {
 
   // 禁用单个令牌
   const handleDisableToken = async (tokenId: number, tokenName: string) => {
-    if (!confirm(`确定要禁用令牌 "${tokenName}" 吗？`)) return
-    try {
-      const response = await fetch(`${apiUrl}/api/users/tokens/${tokenId}/disable`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ reason: 'IP 监控检测到多 IP 使用', context: { source: 'ip_monitoring' } }),
-      })
-      const res = await response.json()
-      if (res.success) {
-        showToast('success', res.message || '令牌已禁用')
-        fetchIPData()
-      } else {
-        showToast('error', res.message || '禁用失败')
+    setConfirmDialog({
+      open: true,
+      title: '禁用令牌',
+      description: `确定要禁用令牌 "${tokenName}" 吗？`,
+      confirmText: '禁用',
+      variant: 'destructive',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+        try {
+          const response = await fetch(`${apiUrl}/api/users/tokens/${tokenId}/disable`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ reason: 'IP 监控检测到多 IP 使用', context: { source: 'ip_monitoring' } }),
+          })
+          const res = await response.json()
+          if (res.success) {
+            showToast('success', res.message || '令牌已禁用')
+            fetchIPData()
+          } else {
+            showToast('error', res.message || '禁用失败')
+          }
+        } catch (e) {
+          console.error('Failed to disable token:', e)
+          showToast('error', '禁用令牌失败')
+        }
       }
-    } catch (e) {
-      console.error('Failed to disable token:', e)
-      showToast('error', '禁用令牌失败')
-    }
+    })
   }
 
-  // 从 IP 监控快速封禁用户
-  const handleQuickBanUser = async (userId: number, username: string) => {
-    if (!confirm(`确定要封禁用户 "${username}" 吗？将同时禁用其所有令牌。`)) return
-    try {
-      const response = await fetch(`${apiUrl}/api/users/${userId}/ban`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          reason: 'IP 监控检测到异常多 IP 使用',
-          disable_tokens: true,
-          context: { source: 'ip_monitoring' },
-        }),
-      })
-      const res = await response.json()
-      if (res.success) {
-        showToast('success', res.message || '用户已封禁')
-        fetchIPData()
-      } else {
-        showToast('error', res.message || '封禁失败')
-      }
-    } catch (e) {
-      console.error('Failed to ban user:', e)
-      showToast('error', '封禁用户失败')
-    }
+  // 从 IP 监控快速封禁用户 - 打开用户分析弹窗
+  const handleQuickBanUser = (userId: number, username: string) => {
+    openUserAnalysisFromIP(userId, username)
   }
 
   // 从 IP 监控打开用户分析弹窗
@@ -526,6 +546,37 @@ export function RealtimeRanking() {
         setDialogOpen(false)
         fetchLeaderboards()
         fetchBanRecords(1)
+      } else {
+        showToast('error', res.message || '解除封禁失败')
+      }
+    } catch (e) {
+      console.error('Failed to unban user:', e)
+      showToast('error', '解除封禁失败')
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  // 直接从封禁记录解封用户
+  const doUnbanFromRecord = async (userId: number, username: string) => {
+    if (mutating) return
+    setMutating(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/users/${userId}/unban`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          reason: '从封禁记录手动解封',
+          enable_tokens: true,
+          context: {
+            source: 'ban_records',
+          },
+        }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        showToast('success', res.message || `已解封用户 ${username}`)
+        fetchBanRecords(recordsPage)
       } else {
         showToast('error', res.message || '解除封禁失败')
       }
@@ -815,65 +866,157 @@ export function RealtimeRanking() {
                           <TableHead className="w-[100px]">动作</TableHead>
                           <TableHead className="w-[140px]">用户</TableHead>
                           <TableHead className="w-[120px]">操作者</TableHead>
-                          <TableHead className="hidden md:table-cell">原因 & 上下文</TableHead>
+                          <TableHead className="hidden md:table-cell">原因</TableHead>
                           <TableHead className="w-[100px] text-right">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {records.length ? records.map((r) => (
-                          <TableRow key={r.id} className="group hover:bg-muted/30">
-                            <TableCell className="text-xs text-muted-foreground font-mono whitespace-nowrap">
-                              {formatTime(r.created_at)}
-                            </TableCell>
-                            <TableCell>
-                              {r.action === 'ban'
-                                ? <Badge variant="destructive" className="font-normal px-2">封禁</Badge>
-                                : <Badge variant="success" className="font-normal px-2 bg-green-500 hover:bg-green-600">解封</Badge>}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col">
-                                <span className="font-medium text-sm truncate max-w-[120px]" title={r.username}>{r.username || `User#${r.user_id}`}</span>
-                                <span className="text-xs text-muted-foreground">ID: {r.user_id}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{r.operator || '系统'}</TableCell>
-                            <TableCell className="hidden md:table-cell">
-                              <div className="flex flex-col gap-1 max-w-md">
-                                <span className="text-sm truncate" title={r.reason}>{r.reason || '-'}</span>
-                                {r.context && Object.keys(r.context).length > 0 && (
-                                  <span className="text-xs text-muted-foreground truncate font-mono bg-muted/50 px-1 rounded w-fit max-w-full">
-                                    {JSON.stringify(r.context)}
-                                  </span>
+                        {records.length ? records.map((r) => {
+                          // 更加精确的原因样式映射
+                          const getReasonStyle = (reason: string) => {
+                            if (!reason) return 'text-muted-foreground'
+                            
+                            const styleMap: Record<string, string> = {
+                              'HIGH_RPM': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
+                              'MANY_IPS': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
+                              'HIGH_FAILURE_RATE': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
+                              'HIGH_EMPTY_RATE': 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400',
+                              '账号共享': 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400',
+                              '令牌泄露': 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400',
+                              '滥用': 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400',
+                              '违反使用条款': 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-400',
+                              '误封': 'bg-green-50 text-green-700 border-green-100 dark:bg-green-900/20 dark:text-green-400',
+                              '申诉': 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400',
+                              '风险已排除': 'bg-teal-50 text-teal-700 border-teal-100 dark:bg-teal-900/20 dark:text-teal-400',
+                              '核实完成': 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400',
+                              '临时解封': 'bg-cyan-50 text-cyan-700 border-cyan-100 dark:bg-cyan-900/20 dark:text-cyan-400',
+                            }
+
+                            for (const [key, style] of Object.entries(styleMap)) {
+                              if (reason.includes(key)) return style
+                            }
+                            return 'bg-muted text-muted-foreground'
+                          }
+
+                          const renderReasonBadge = (reason: string) => {
+                            if (!reason) return <span className="text-muted-foreground">-</span>
+                            return (
+                              <Badge variant="outline" className={cn("font-normal py-0 h-5", getReasonStyle(reason))}>
+                                {reason}
+                              </Badge>
+                            )
+                          }
+
+                          return (
+                            <TableRow key={r.id} className="group hover:bg-muted/30">
+                              <TableCell className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+                                {formatTime(r.created_at)}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {r.action === 'ban' ? (
+                                    <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
+                                      <div className="p-1 bg-red-100 dark:bg-red-900/30 rounded">
+                                        <ShieldBan className="w-3 h-3" />
+                                      </div>
+                                      <span className="text-xs font-bold">封禁</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                                      <div className="p-1 bg-green-100 dark:bg-green-900/30 rounded">
+                                        <ShieldCheck className="w-3 h-3" />
+                                      </div>
+                                      <span className="text-xs font-bold">解封</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-sm truncate max-w-[120px]" title={r.username}>{r.username || `User#${r.user_id}`}</span>
+                                  <span className="text-xs text-muted-foreground">ID: {r.user_id}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">
+                                    {(r.operator || '系统')[0].toUpperCase()}
+                                  </div>
+                                  <span>{r.operator || '系统'}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                <div className="flex flex-col gap-1.5 py-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {renderReasonBadge(r.reason)}
+                                    {r.context?.source && (
+                                      <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1 opacity-70">
+                                        {r.context.source === 'risk_center' ? '风控自动' : r.context.source}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {r.context && (r.context.risk || r.context.summary) && (
+                                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground tabular-nums">
+                                      {r.context.risk?.requests_per_minute > 0 && (
+                                        <span className="flex items-center gap-1 bg-muted/50 px-1 rounded">
+                                          <Activity className="w-2.5 h-2.5" /> RPM: {r.context.risk.requests_per_minute.toFixed(1)}
+                                        </span>
+                                      )}
+                                      {r.context.summary?.failure_rate !== undefined && (
+                                        <span className={cn("flex items-center gap-1 bg-muted/50 px-1 rounded", r.context.summary.failure_rate > 0.3 && "text-red-500")}>
+                                          <AlertTriangle className="w-2.5 h-2.5" /> 失败: {(r.context.summary.failure_rate * 100).toFixed(1)}%
+                                        </span>
+                                      )}
+                                      {r.context.summary?.unique_ips > 0 && (
+                                        <span className="flex items-center gap-1 bg-muted/50 px-1 rounded">
+                                          <Globe className="w-2.5 h-2.5" /> IP: {r.context.summary.unique_ips}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {r.action === 'ban' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-xs hover:bg-green-500/10 hover:text-green-600"
+                                    disabled={mutating}
+                                    onClick={() => doUnbanFromRecord(r.user_id, r.username)}
+                                  >
+                                    {mutating ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 mr-1" />}
+                                    解封
+                                  </Button>
                                 )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs hover:bg-primary/10 hover:text-primary"
+                                  onClick={() => {
+                                    // Mock item to open dialog
+                                    const mockItem: LeaderboardItem = {
+                                      user_id: r.user_id,
+                                      username: r.username,
+                                      user_status: 0, // Unknown, dialog will fetch latest
+                                      request_count: 0,
+                                      failure_requests: 0,
+                                      failure_rate: 0,
+                                      quota_used: 0,
+                                      prompt_tokens: 0,
+                                      completion_tokens: 0,
+                                      unique_ips: 0
+                                    }
+                                    openUserDialog(mockItem, '24h')
+                                  }}
+                                >
+                                  查看
+                                </Button>
                               </div>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs hover:bg-primary/10 hover:text-primary"
-                                onClick={() => {
-                                  // Mock item to open dialog
-                                  const mockItem: LeaderboardItem = {
-                                    user_id: r.user_id,
-                                    username: r.username,
-                                    user_status: 0, // Unknown, dialog will fetch latest
-                                    request_count: 0,
-                                    failure_requests: 0,
-                                    failure_rate: 0,
-                                    quota_used: 0,
-                                    prompt_tokens: 0,
-                                    completion_tokens: 0,
-                                    unique_ips: 0
-                                  }
-                                  openUserDialog(mockItem, '24h')
-                                }}
-                              >
-                                查看
-                              </Button>
                             </TableCell>
                           </TableRow>
-                        )) : (
+                        )}) : (
                           <TableRow>
                             <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                               <div className="flex flex-col items-center justify-center gap-2">
@@ -1427,12 +1570,15 @@ export function RealtimeRanking() {
           {/* Fixed Footer */}
           <div className="p-5 border-t bg-muted/10 flex-shrink-0 space-y-4">
             <div className="flex items-center gap-3">
-              <Input 
-                value={banReason} 
-                onChange={(e) => setBanReason(e.target.value)} 
-                placeholder="填写操作原因（可选）..." 
+              <Select
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
                 className="flex-1"
-              />
+              >
+                {(analysis?.user.status === 2 ? UNBAN_REASONS : BAN_REASONS).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
               {analysis?.user.status === 2 ? (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
                   <input type="checkbox" checked={enableTokens} onChange={(e) => setEnableTokens(e.target.checked)} className="rounded border-gray-300" />
@@ -1477,7 +1623,27 @@ export function RealtimeRanking() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* 确认弹窗 */}
+      <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-md rounded-xl">
+          <DialogHeader>
+            <DialogTitle>{confirmDialog.title}</DialogTitle>
+            <DialogDescription>{confirmDialog.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+              取消
+            </Button>
+            <Button 
+              variant={confirmDialog.variant || 'default'} 
+              onClick={confirmDialog.onConfirm}
+            >
+              {confirmDialog.confirmText || '确认'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
-

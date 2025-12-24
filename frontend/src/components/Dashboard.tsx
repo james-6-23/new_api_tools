@@ -71,11 +71,11 @@ export function Dashboard() {
 
   const fetchOverview = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/overview`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/dashboard/overview?period=${period}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setOverview(data.data)
     } catch (error) { console.error('Failed to fetch overview:', error) }
-  }, [apiUrl, getAuthHeaders])
+  }, [apiUrl, getAuthHeaders, period])
 
   const fetchUsage = useCallback(async () => {
     try {
@@ -207,14 +207,14 @@ export function Dashboard() {
           <StatCard 
             title="用户总数" 
             value={overview?.total_users || 0} 
-            subValue={`${overview?.active_users || 0} 活跃`} 
+            subValue={`${overview?.active_users || 0} 活跃(${getPeriodLabel()})`} 
             icon={Users} 
             color="blue" 
           />
           <StatCard
             title="令牌总数"
             value={overview?.total_tokens || 0} 
-            subValue={`${overview?.active_tokens || 0} 活跃`} 
+            subValue={`${overview?.active_tokens || 0} 活跃(${getPeriodLabel()})`} 
             icon={Key} 
             color="emerald" 
           />

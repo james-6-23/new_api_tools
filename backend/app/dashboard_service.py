@@ -82,31 +82,44 @@ class DashboardService:
             self._db = get_db_manager()
         return self._db
 
-    def get_system_overview(self) -> SystemOverview:
+    def get_system_overview(
+        self,
+        active_start_time: Optional[int] = None,
+        active_end_time: Optional[int] = None,
+    ) -> SystemOverview:
         """
         Get system overview statistics.
 
         Returns:
             SystemOverview with counts of users, tokens, channels, etc.
         """
-        # Get user counts - active users = users with requests in last 7 days
-        now = int(time.time())
-        seven_days_ago = now - 7 * 24 * 3600
+        # Active counts are computed from logs within the provided time window.
+        if active_end_time is None:
+            active_end_time = int(time.time())
+        if active_start_time is None:
+            active_start_time = active_end_time - 7 * 24 * 3600
 
-        user_sql = """
-            SELECT
-                COUNT(*) as total,
-                COUNT(DISTINCT CASE
-                    WHEN id IN (
-                        SELECT DISTINCT user_id FROM logs
-                        WHERE created_at >= :seven_days_ago AND type = 2 AND user_id IS NOT NULL
-                    ) THEN id
-                END) as active
+        # Get user total
+        user_total_sql = """
+            SELECT COUNT(*) as total
             FROM users
             WHERE deleted_at IS NULL
         """
-        user_result = self.db.execute(user_sql, {"seven_days_ago": seven_days_ago})
-        user_row = user_result[0] if user_result else {}
+        user_total_result = self.db.execute(user_total_sql)
+        user_total_row = user_total_result[0] if user_total_result else {}
+
+        # Active users: users who made requests within window (exclude deleted/disabled)
+        user_active_sql = """
+            SELECT COUNT(DISTINCT l.user_id) as active
+            FROM logs l
+            INNER JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
+            WHERE l.created_at >= :start_time AND l.created_at <= :end_time
+                AND l.type = 2
+                AND l.user_id IS NOT NULL
+                AND COALESCE(u.status, 1) = 1
+        """
+        user_active_result = self.db.execute(user_active_sql, {"start_time": active_start_time, "end_time": active_end_time})
+        user_active_row = user_active_result[0] if user_active_result else {}
 
         # Get token counts
         token_sql = """
@@ -119,6 +132,19 @@ class DashboardService:
         token_result = self.db.execute(token_sql)
         token_row = token_result[0] if token_result else {}
 
+        # Active tokens: tokens used within window (exclude deleted/disabled)
+        token_active_sql = """
+            SELECT COUNT(DISTINCT l.token_id) as active
+            FROM logs l
+            INNER JOIN tokens t ON t.id = l.token_id AND t.deleted_at IS NULL
+            WHERE l.created_at >= :start_time AND l.created_at <= :end_time
+                AND l.type = 2
+                AND l.token_id IS NOT NULL
+                AND COALESCE(t.status, 1) = 1
+        """
+        token_active_result = self.db.execute(token_active_sql, {"start_time": active_start_time, "end_time": active_end_time})
+        token_active_row = token_active_result[0] if token_active_result else {}
+
         # Get channel counts
         channel_sql = """
             SELECT
@@ -129,8 +155,20 @@ class DashboardService:
         channel_result = self.db.execute(channel_sql)
         channel_row = channel_result[0] if channel_result else {}
 
-        # Get model count from abilities table (unique models across all channels)
-        model_sql = "SELECT COUNT(DISTINCT model) as total FROM abilities"
+        # Get model count from abilities table (unique models across enabled channels)
+        from .database import DatabaseEngine
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+
+        model_sql = """
+            SELECT COUNT(DISTINCT a.model) as total
+            FROM abilities a
+            INNER JOIN channels c ON c.id = a.channel_id
+            WHERE c.status = 1
+        """
+        if is_pg:
+            model_sql += " AND COALESCE(a.enabled, TRUE) = TRUE"
+        else:
+            model_sql += " AND COALESCE(a.enabled, 1) = 1"
         try:
             model_result = self.db.execute(model_sql)
             model_count = model_result[0]["total"] if model_result else 0
@@ -155,10 +193,10 @@ class DashboardService:
         redemption_row = redemption_result[0] if redemption_result else {}
 
         return SystemOverview(
-            total_users=int(user_row.get("total", 0) or 0),
-            active_users=int(user_row.get("active", 0) or 0),
+            total_users=int(user_total_row.get("total", 0) or 0),
+            active_users=int(user_active_row.get("active", 0) or 0),
             total_tokens=int(token_row.get("total", 0) or 0),
-            active_tokens=int(token_row.get("active", 0) or 0),
+            active_tokens=int(token_active_row.get("active", 0) or 0),
             total_channels=int(channel_row.get("total", 0) or 0),
             active_channels=int(channel_row.get("active", 0) or 0),
             total_models=int(model_count or 0),

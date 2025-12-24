@@ -66,6 +66,7 @@ class CacheControlResponse(BaseModel):
 
 @router.get("/overview", response_model=SystemOverviewResponse)
 async def get_system_overview(
+    period: str = Query(default="7d", description="活跃口径时间周期 (24h/3d/7d/14d)"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
@@ -74,8 +75,12 @@ async def get_system_overview(
 
     返回用户数、Token数、渠道数、模型数、兑换码数等统计。
     """
+    valid_periods = ["24h", "3d", "7d", "14d"]
+    if period not in valid_periods:
+        raise InvalidParamsError(message=f"Invalid period: {period}")
+
     service = get_cached_dashboard_service()
-    data = service.get_system_overview(use_cache=not no_cache)
+    data = service.get_system_overview(period=period, use_cache=not no_cache)
 
     return SystemOverviewResponse(success=True, data=data)
 
