@@ -207,8 +207,10 @@ export function Dashboard() {
                     const maxRequests = getMaxValue(dailyTrends.map(t => t.request_count))
                     const height = (trend.request_count / maxRequests) * 100
                     return (
-                      <div key={index} className="flex-1 flex flex-col items-center">
-                        <div className="w-full bg-primary rounded-t transition-all hover:bg-primary/80" style={{ height: `${Math.max(height, 2)}%` }} title={`${trend.request_count} 请求`} />
+                      <div key={index} className="flex-1 h-full flex flex-col items-center">
+                        <div className="flex-1 w-full flex items-end">
+                          <div className="w-full bg-primary rounded-t transition-all hover:bg-primary/80" style={{ height: `${Math.max(height, 2)}%` }} title={`${trend.request_count} 请求`} />
+                        </div>
                         <span className="text-xs text-muted-foreground mt-2 truncate w-full text-center">{trend.date.slice(5)}</span>
                       </div>
                     )
