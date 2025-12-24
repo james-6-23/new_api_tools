@@ -37,6 +37,17 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少必要命令: $1"
 }
 
+# 检测 docker compose 命令
+detect_docker_compose() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker-compose"
+  elif docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+  else
+    die "缺少 docker-compose 或 docker compose 命令"
+  fi
+}
+
 trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 
 first_csv() {
@@ -349,15 +360,15 @@ start_services() {
   # 检查是否有旧容器
   if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools(-|$)'; then
     log_warn "发现已存在的服务容器，正在停止..."
-    docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
 
   # 拉取最新镜像
   log_info "拉取最新镜像..."
-  docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
 
   # 启动服务
-  docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
   log_success "服务已启动!"
 
@@ -387,7 +398,7 @@ uninstall() {
   log_warn "正在卸载 NewAPI Middleware Tool..."
 
   if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
-    docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v 2>/dev/null || true
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v 2>/dev/null || true
     log_success "容器已停止并移除"
   fi
 
@@ -407,7 +418,7 @@ show_status() {
   echo ""
 
   if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
-    docker-compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
   else
     log_warn "未找到配置文件，服务可能未部署"
   fi
@@ -450,7 +461,7 @@ EOF
 #######################################
 main() {
   need_cmd docker
-  need_cmd docker-compose
+  detect_docker_compose
 
   local mode="${1:-}"
 

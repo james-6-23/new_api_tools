@@ -37,13 +37,21 @@ check_requirements() {
 
   command -v git >/dev/null 2>&1 || missing+=("git")
   command -v docker >/dev/null 2>&1 || missing+=("docker")
-  command -v docker-compose >/dev/null 2>&1 || missing+=("docker-compose")
+
+  # 检查 docker-compose 或 docker compose
+  if command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker-compose"
+  elif docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+  else
+    missing+=("docker-compose 或 docker compose")
+  fi
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     die "缺少必要命令: ${missing[*]}"
   fi
 
-  log_success "环境检查通过"
+  log_success "环境检查通过 (使用 $DOCKER_COMPOSE)"
 }
 
 #######################################
