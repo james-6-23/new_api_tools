@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Default SQLite database path
-DEFAULT_DB_PATH = os.getenv("LOCAL_DB_PATH", "data/local.db")
+# Default SQLite database path - use absolute path in container
+DEFAULT_DB_PATH = os.getenv("LOCAL_DB_PATH", "/app/data/local.db")
 
 
 @dataclass

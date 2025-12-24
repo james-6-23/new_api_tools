@@ -36,6 +36,9 @@ COPY --from=backend-builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 # 复制后端代码
 COPY backend/app ./app
 
+# 创建数据目录（用于持久化 SQLite 数据库）
+RUN mkdir -p /app/data && chmod 755 /app/data
+
 # 复制前端构建产物
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 
