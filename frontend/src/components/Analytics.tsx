@@ -67,6 +67,8 @@ export function Analytics() {
 
   // Auto refresh interval in seconds
   const REFRESH_INTERVAL = 30
+  const COUNTDOWN_STORAGE_KEY = 'analytics_countdown'
+  const LAST_VISIT_KEY = 'analytics_last_visit'
 
   const [state, setState] = useState<AnalyticsState | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
@@ -77,8 +79,42 @@ export function Analytics() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
-  const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
+  const [isPageRefresh, setIsPageRefresh] = useState(false)
+  
+  // 从 localStorage 恢复倒计时，或使用默认值
+  const [countdown, setCountdown] = useState(() => {
+    const saved = sessionStorage.getItem(COUNTDOWN_STORAGE_KEY)
+    return saved ? parseInt(saved, 10) : REFRESH_INTERVAL
+  })
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  
+  // 检测是否是浏览器刷新（而不是页面切换）
+  useEffect(() => {
+    const lastVisit = sessionStorage.getItem(LAST_VISIT_KEY)
+    const now = Date.now()
+    
+    // 如果没有 lastVisit 记录，或者距离上次访问超过 2 秒，认为是浏览器刷新
+    if (!lastVisit || (now - parseInt(lastVisit, 10)) > 2000) {
+      setIsPageRefresh(true)
+      setCountdown(REFRESH_INTERVAL)
+      sessionStorage.removeItem(COUNTDOWN_STORAGE_KEY)
+    }
+    
+    // 更新最后访问时间
+    sessionStorage.setItem(LAST_VISIT_KEY, now.toString())
+    
+    // 组件卸载时保存倒计时
+    return () => {
+      sessionStorage.setItem(LAST_VISIT_KEY, Date.now().toString())
+    }
+  }, [REFRESH_INTERVAL])
+  
+  // 保存倒计时到 sessionStorage
+  useEffect(() => {
+    if (countdown > 0) {
+      sessionStorage.setItem(COUNTDOWN_STORAGE_KEY, countdown.toString())
+    }
+  }, [countdown])
   
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
@@ -160,51 +196,86 @@ export function Analytics() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
-  // Auto process new logs (silent, no toast)
-  const autoProcessLogs = useCallback(async () => {
-    try {
-      const response = await fetch(`${apiUrl}/api/analytics/process`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      })
-      const data = await response.json()
-      if (data.success && data.processed > 0) {
-        // Silently refresh data after processing
-        fetchAnalytics()
-        fetchSyncStatus()
-      }
-    } catch (error) {
-      console.error('Auto process failed:', error)
-    }
-  }, [apiUrl, getAuthHeaders, fetchAnalytics, fetchSyncStatus])
-
   // Reset countdown to initial value
   const resetCountdown = useCallback(() => {
     setCountdown(REFRESH_INTERVAL)
   }, [REFRESH_INTERVAL])
 
+  // 使用 ref 存储最新的 syncStatus，避免 useEffect 依赖变化导致定时器重建
+  const syncStatusRef = useRef(syncStatus)
+  useEffect(() => {
+    syncStatusRef.current = syncStatus
+  }, [syncStatus])
+
+  // 浏览器刷新时自动处理新日志
+  useEffect(() => {
+    if (!isPageRefresh || loading) return
+    if (syncStatus?.needs_initial_sync || syncStatus?.is_initializing) return
+    
+    // 浏览器刷新且已初始化，自动处理新日志
+    const autoProcess = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/api/analytics/process`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        })
+        const data = await response.json()
+        if (data.success && data.processed > 0) {
+          fetchAnalytics()
+          fetchSyncStatus()
+        }
+      } catch (error) {
+        console.error('Auto process on refresh failed:', error)
+      }
+    }
+    
+    if (syncStatus?.is_synced) {
+      autoProcess()
+    }
+    setIsPageRefresh(false) // 只执行一次
+  }, [isPageRefresh, loading, syncStatus?.is_synced, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, getAuthHeaders, fetchAnalytics, fetchSyncStatus])
+
   // Auto refresh with countdown - only when initialized (synced)
   useEffect(() => {
-    // Don't auto-refresh while batch processing, loading, or not initialized
+    // Don't auto-refresh while batch processing or loading
     if (batchProcessing || loading) return
     
+    // syncStatus 未加载时不启动
+    if (!syncStatus) return
+    
     // 未初始化时不启动自动同步
-    if (syncStatus?.needs_initial_sync || syncStatus?.is_initializing) {
+    if (syncStatus.needs_initial_sync || syncStatus.is_initializing) {
       setCountdown(0) // 不显示倒计时
       return
+    }
+
+    const doAutoRefresh = async () => {
+      const currentStatus = syncStatusRef.current
+      // Only auto process new logs when already synced (>= 95% progress)
+      if (currentStatus?.is_synced) {
+        try {
+          const response = await fetch(`${apiUrl}/api/analytics/process`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          })
+          const data = await response.json()
+          if (data.success && data.processed > 0) {
+            fetchAnalytics()
+            fetchSyncStatus()
+          }
+        } catch (error) {
+          console.error('Auto process failed:', error)
+        }
+      } else {
+        fetchAnalytics()
+        fetchSyncStatus()
+      }
     }
 
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          // Only auto process new logs when already synced (>= 95% progress)
-          // Otherwise just refresh status without processing
-          if (syncStatus?.is_synced) {
-            autoProcessLogs()
-          } else {
-            fetchAnalytics()
-            fetchSyncStatus()
-          }
+          doAutoRefresh()
           return REFRESH_INTERVAL
         }
         return prev - 1
@@ -216,7 +287,9 @@ export function Analytics() {
         clearInterval(countdownRef.current)
       }
     }
-  }, [batchProcessing, loading, autoProcessLogs, fetchAnalytics, fetchSyncStatus, syncStatus?.is_synced, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, REFRESH_INTERVAL])
+  // 只依赖关键状态变化，不依赖 syncStatus 的具体值
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchProcessing, loading, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, REFRESH_INTERVAL])
 
   const processLogs = async () => {
     setProcessing(true)
