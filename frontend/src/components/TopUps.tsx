@@ -329,7 +329,18 @@ export function TopUps() {
                               className="h-6 w-6 ml-1 flex-shrink-0"
                               onClick={async () => {
                                 try {
-                                  await navigator.clipboard.writeText(record.trade_no)
+                                  if (navigator.clipboard && window.isSecureContext) {
+                                    await navigator.clipboard.writeText(record.trade_no)
+                                  } else {
+                                    const textArea = document.createElement('textarea')
+                                    textArea.value = record.trade_no
+                                    textArea.style.position = 'fixed'
+                                    textArea.style.left = '-9999px'
+                                    document.body.appendChild(textArea)
+                                    textArea.select()
+                                    document.execCommand('copy')
+                                    document.body.removeChild(textArea)
+                                  }
                                   showToast('success', '已复制')
                                 } catch { showToast('error', '复制失败') }
                               }}

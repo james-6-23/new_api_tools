@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
+import { TrendChart } from './TrendChart'
 import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
@@ -281,53 +282,11 @@ export function Dashboard() {
         </div>
       </section>
 
+
       {/* Main Charts Area */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Trends Chart */}
-        <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-muted-foreground" />
-              每日请求趋势
-            </CardTitle>
-            <CardDescription>{getPeriodLabel()}内的请求量变化</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {dailyTrends.length > 0 ? (
-              <div className="space-y-4 pt-4">
-                <div className="h-56 flex items-end space-x-2 sm:space-x-4">
-                  {dailyTrends.map((trend, index) => {
-                    const maxRequests = getMaxValue(dailyTrends.map(t => t.request_count))
-                    const height = (trend.request_count / maxRequests) * 100
-                    return (
-                      <div key={index} className="flex-1 h-full flex flex-col items-center group relative">
-                        {/* Tooltip */}
-                        <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center bg-popover text-popover-foreground text-xs rounded shadow-lg p-2 z-10 whitespace-nowrap">
-                          <span className="font-bold">{trend.request_count} 请求</span>
-                          <span className="text-muted-foreground">{trend.date}</span>
-                        </div>
-                        
-                        <div className="flex-1 w-full flex items-end relative">
-                          <div 
-                            className="w-full bg-primary/80 hover:bg-primary rounded-t-md transition-all duration-300 ease-out group-hover:scale-y-105 origin-bottom" 
-                            style={{ height: `${Math.max(height, 4)}%` }} 
-                          />
-                        </div>
-                        <span className="text-[10px] sm:text-xs text-muted-foreground mt-3 truncate w-full text-center">
-                          {trend.date.slice(5)}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="h-56 flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
-                暂无数据
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <TrendChart data={dailyTrends} period={period} loading={loading} />
 
         {/* Model Usage List */}
         <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200">

@@ -303,7 +303,8 @@ class DashboardService:
 
         result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
 
-        trends = []
+        # Build a dict of existing data
+        data_by_date: Dict[str, DailyTrend] = {}
         for row in result:
             date_val = row["date"]
             if isinstance(date_val, datetime):
@@ -311,12 +312,27 @@ class DashboardService:
             else:
                 date_str = str(date_val)
 
-            trends.append(DailyTrend(
+            data_by_date[date_str] = DailyTrend(
                 date=date_str,
                 request_count=int(row["request_count"] or 0),
                 quota_used=int(row["quota_used"] or 0),
                 unique_users=int(row["unique_users"] or 0),
-            ))
+            )
+
+        # Fill in all dates in the range (including days with no data)
+        trends = []
+        for i in range(days):
+            day_ts = start_time + (i * 86400)
+            date_str = datetime.fromtimestamp(day_ts).strftime("%Y-%m-%d")
+            if date_str in data_by_date:
+                trends.append(data_by_date[date_str])
+            else:
+                trends.append(DailyTrend(
+                    date=date_str,
+                    request_count=0,
+                    quota_used=0,
+                    unique_users=0,
+                ))
 
         return trends
 
