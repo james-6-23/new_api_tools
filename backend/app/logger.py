@@ -207,6 +207,10 @@ class AppLogger:
         """警告日志"""
         self._log(logging.WARNING, message, category, **kwargs)
 
+    def warning(self, message: str, category: str = "系统", **kwargs):
+        """警告日志 (warn的别名，兼容标准logging命名)"""
+        self.warn(message, category, **kwargs)
+
     def error(self, message: str, category: str = "系统", exc_info: bool = False, **kwargs):
         """错误日志"""
         if exc_info:

@@ -623,7 +623,7 @@ export function RealtimeRanking() {
                   ) : (data[w]?.length ? (
                     <div className="divide-y">
                       {data[w].slice(0, 10).map((item, idx) => {
-                        const name = item.username || `User#${item.user_id}`
+                        const name = item.username || item.user_id
                         const isBanned = item.user_status === 2
                         return (
                           <div
@@ -724,7 +724,7 @@ export function RealtimeRanking() {
               ) : (data[selectedWindow]?.length ? (
                 <div className="divide-y">
                   {data[selectedWindow].slice(0, 10).map((item, idx) => {
-                    const name = item.username || `User#${item.user_id}`
+                    const name = item.username || item.user_id
                     const isBanned = item.user_status === 2
                     return (
                       <div
@@ -788,9 +788,17 @@ export function RealtimeRanking() {
         </TabsContent>
 
         <TabsContent value="ban_records">
-          <Card className="rounded-xl shadow-sm">
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-lg">封禁审计记录</CardTitle>
+          <Card className="rounded-xl shadow-sm border">
+            <CardHeader className="pb-3 border-b bg-muted/20">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <ShieldBan className="h-5 w-5 text-destructive" />
+                  封禁审计记录
+                </CardTitle>
+                <div className="text-xs text-muted-foreground">
+                  共 {records.length} 条记录 (本页)
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {recordsLoading ? (
@@ -803,32 +811,76 @@ export function RealtimeRanking() {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
-                          <TableHead className="w-[180px]">时间</TableHead>
+                          <TableHead className="w-[160px]">时间</TableHead>
                           <TableHead className="w-[100px]">动作</TableHead>
-                          <TableHead className="w-[150px]">操作者</TableHead>
-                          <TableHead className="w-[200px]">用户</TableHead>
-                          <TableHead>原因</TableHead>
+                          <TableHead className="w-[140px]">用户</TableHead>
+                          <TableHead className="w-[120px]">操作者</TableHead>
+                          <TableHead className="hidden md:table-cell">原因 & 上下文</TableHead>
+                          <TableHead className="w-[100px] text-right">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {records.length ? records.map((r) => (
-                          <TableRow key={r.id}>
-                            <TableCell className="text-sm text-muted-foreground font-mono">{formatTime(r.created_at)}</TableCell>
+                          <TableRow key={r.id} className="group hover:bg-muted/30">
+                            <TableCell className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+                              {formatTime(r.created_at)}
+                            </TableCell>
                             <TableCell>
                               {r.action === 'ban'
-                                ? <Badge variant="destructive" className="font-normal">封禁</Badge>
-                                : <Badge variant="success" className="font-normal">解封</Badge>}
+                                ? <Badge variant="destructive" className="font-normal px-2">封禁</Badge>
+                                : <Badge variant="success" className="font-normal px-2 bg-green-500 hover:bg-green-600">解封</Badge>}
                             </TableCell>
-                            <TableCell className="text-sm">{r.operator || '-'}</TableCell>
-                            <TableCell className="text-sm">
-                              <div className="font-medium">{r.username || `User#${r.user_id}`}</div>
-                              <div className="text-xs text-muted-foreground">ID: {r.user_id}</div>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-sm truncate max-w-[120px]" title={r.username}>{r.username || `User#${r.user_id}`}</span>
+                                <span className="text-xs text-muted-foreground">ID: {r.user_id}</span>
+                              </div>
                             </TableCell>
-                            <TableCell className="text-sm text-muted-foreground max-w-md truncate" title={r.reason}>{r.reason || '-'}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{r.operator || '系统'}</TableCell>
+                            <TableCell className="hidden md:table-cell">
+                              <div className="flex flex-col gap-1 max-w-md">
+                                <span className="text-sm truncate" title={r.reason}>{r.reason || '-'}</span>
+                                {r.context && Object.keys(r.context).length > 0 && (
+                                  <span className="text-xs text-muted-foreground truncate font-mono bg-muted/50 px-1 rounded w-fit max-w-full">
+                                    {JSON.stringify(r.context)}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs hover:bg-primary/10 hover:text-primary"
+                                onClick={() => {
+                                  // Mock item to open dialog
+                                  const mockItem: LeaderboardItem = {
+                                    user_id: r.user_id,
+                                    username: r.username,
+                                    user_status: 0, // Unknown, dialog will fetch latest
+                                    request_count: 0,
+                                    failure_requests: 0,
+                                    failure_rate: 0,
+                                    quota_used: 0,
+                                    prompt_tokens: 0,
+                                    completion_tokens: 0,
+                                    unique_ips: 0
+                                  }
+                                  openUserDialog(mockItem, '24h')
+                                }}
+                              >
+                                查看
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         )) : (
                           <TableRow>
-                            <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">暂无记录</TableCell>
+                            <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                              <div className="flex flex-col items-center justify-center gap-2">
+                                <ShieldCheck className="h-8 w-8 opacity-20" />
+                                <span>暂无封禁记录</span>
+                              </div>
+                            </TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -836,13 +888,27 @@ export function RealtimeRanking() {
                   </div>
 
                   {recordsTotalPages > 1 && (
-                    <div className="flex items-center justify-between p-4 border-t">
-                      <div className="text-sm text-muted-foreground">第 {recordsPage} / {recordsTotalPages} 页</div>
+                    <div className="flex items-center justify-between p-4 border-t bg-muted/10">
+                      <div className="text-xs text-muted-foreground">
+                        第 {recordsPage} / {recordsTotalPages} 页
+                      </div>
                       <div className="flex gap-2">
-                        <Button variant="outline" size="sm" disabled={recordsPage <= 1 || recordsLoading} onClick={() => fetchBanRecords(recordsPage - 1)}>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 text-xs"
+                          disabled={recordsPage <= 1 || recordsLoading} 
+                          onClick={() => fetchBanRecords(recordsPage - 1)}
+                        >
                           上一页
                         </Button>
-                        <Button variant="outline" size="sm" disabled={recordsPage >= recordsTotalPages || recordsLoading} onClick={() => fetchBanRecords(recordsPage + 1)}>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 text-xs"
+                          disabled={recordsPage >= recordsTotalPages || recordsLoading} 
+                          onClick={() => fetchBanRecords(recordsPage + 1)}
+                        >
                           下一页
                         </Button>
                       </div>
@@ -997,7 +1063,7 @@ export function RealtimeRanking() {
                                   <div key={t.token_id} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2 border border-border/50">
                                     <div className="flex items-center gap-2">
                                       <span className="font-medium">{t.token_name || `Token#${t.token_id}`}</span>
-                                      <span className="text-muted-foreground text-xs">({t.username || `User#${t.user_id}`})</span>
+                                      <span className="text-muted-foreground text-xs">({t.username || t.user_id})</span>
                                     </div>
                                     <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(t.request_count)} 请求</span>
                                   </div>
@@ -1044,7 +1110,7 @@ export function RealtimeRanking() {
                                       openUserAnalysisFromIP(item.user_id, item.username)
                                     }}
                                   >
-                                    ({item.username || `User#${item.user_id}`})
+                                    ({item.username || item.user_id})
                                   </span>
                                 </div>
                                 <Badge variant="destructive" className="ml-auto sm:ml-0 flex-shrink-0">{item.ip_count} IP</Badge>
@@ -1123,7 +1189,7 @@ export function RealtimeRanking() {
                                     className="font-medium hover:text-primary hover:underline cursor-pointer truncate max-w-[180px]"
                                     onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
                                   >
-                                    {item.username || `User#${item.user_id}`}
+                                    {item.username || item.user_id}
                                   </span>
                                   <span className="text-xs text-muted-foreground">ID: {item.user_id}</span>
                                 </div>

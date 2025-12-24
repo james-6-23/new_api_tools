@@ -151,7 +151,11 @@ class RiskMonitoringService:
         sql = """
             SELECT
                 l.user_id as user_id,
-                COALESCE(MAX(u.display_name), MAX(u.username), MAX(l.username)) as username,
+                COALESCE(
+                    NULLIF(MAX(u.display_name), ''),
+                    NULLIF(MAX(u.username), ''),
+                    NULLIF(MAX(l.username), '')
+                ) as username,
                 COALESCE(MAX(u.status), 0) as user_status,
                 COUNT(*) as total_requests,
                 SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_requests,

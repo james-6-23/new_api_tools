@@ -89,15 +89,23 @@ class DashboardService:
         Returns:
             SystemOverview with counts of users, tokens, channels, etc.
         """
-        # Get user counts
+        # Get user counts - active users = users with requests in last 7 days
+        now = int(time.time())
+        seven_days_ago = now - 7 * 24 * 3600
+
         user_sql = """
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN quota > 0 AND (deleted_at IS NULL) THEN 1 ELSE 0 END) as active
+                COUNT(DISTINCT CASE
+                    WHEN id IN (
+                        SELECT DISTINCT user_id FROM logs
+                        WHERE created_at >= :seven_days_ago AND type = 2 AND user_id IS NOT NULL
+                    ) THEN id
+                END) as active
             FROM users
             WHERE deleted_at IS NULL
         """
-        user_result = self.db.execute(user_sql)
+        user_result = self.db.execute(user_sql, {"seven_days_ago": seven_days_ago})
         user_row = user_result[0] if user_result else {}
 
         # Get token counts

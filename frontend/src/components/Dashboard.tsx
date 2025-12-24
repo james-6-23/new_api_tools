@@ -37,10 +37,11 @@ interface ModelUsage {
 }
 
 interface DailyTrend {
-  date: string
+  date?: string
+  hour?: string
   request_count: number
   quota_used: number
-  unique_users: number
+  unique_users?: number
 }
 
 interface AnalyticsSummary {
@@ -93,9 +94,15 @@ export function Dashboard() {
   }, [apiUrl, getAuthHeaders, period])
 
   const fetchTrends = useCallback(async () => {
-    const days = period === '24h' ? 1 : period === '3d' ? 3 : period === '7d' ? 7 : 14
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, { headers: getAuthHeaders() })
+      let response
+      if (period === '24h') {
+        // 24小时使用小时级数据
+        response = await fetch(`${apiUrl}/api/dashboard/trends/hourly?hours=24`, { headers: getAuthHeaders() })
+      } else {
+        const days = period === '3d' ? 3 : period === '7d' ? 7 : 14
+        response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, { headers: getAuthHeaders() })
+      }
       const data = await response.json()
       if (data.success) setDailyTrends(data.data)
     } catch (error) { console.error('Failed to fetch trends:', error) }
@@ -204,8 +211,8 @@ export function Dashboard() {
             icon={Users} 
             color="blue" 
           />
-          <StatCard 
-            title="Token总数" 
+          <StatCard
+            title="令牌总数"
             value={overview?.total_tokens || 0} 
             subValue={`${overview?.active_tokens || 0} 活跃`} 
             icon={Key} 
@@ -256,21 +263,21 @@ export function Dashboard() {
             color="amber"
             variant="compact"
           />
-          <StatCard 
-            title="输入Token" 
-            value={formatNumber(usage?.total_prompt_tokens || 0)} 
+          <StatCard
+            title="输入Token"
+            value={formatNumber(usage?.total_prompt_tokens || 0)}
             icon={Users} // Reusing Users icon for visual consistency or change to another
             color="cyan"
             variant="compact"
-            customLabel="Prompt"
+            customLabel="输入"
           />
-          <StatCard 
-            title="输出Token" 
-            value={formatNumber(usage?.total_completion_tokens || 0)} 
+          <StatCard
+            title="输出Token"
+            value={formatNumber(usage?.total_completion_tokens || 0)}
             icon={Users}
             color="teal"
             variant="compact"
-            customLabel="Completion"
+            customLabel="输出"
           />
           <StatCard 
             title="平均响应" 

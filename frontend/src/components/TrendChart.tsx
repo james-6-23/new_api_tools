@@ -4,10 +4,11 @@ import { BarChart3, TrendingUp, Calendar } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 interface DailyTrend {
-  date: string
+  date?: string
+  hour?: string
   request_count: number
   quota_used: number
-  unique_users: number
+  unique_users?: number
 }
 
 interface TrendChartProps {
@@ -27,8 +28,8 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
       ...d,
       // Calculate normalized height (0-100)
       height: (d.request_count / maxRequests) * 100,
-      // Format date for display
-      displayDate: d.date.slice(5), // "MM-DD"
+      // Format date/hour for display
+      displayDate: d.hour || (d.date ? d.date.slice(5) : ''), // "HH:MM" or "MM-DD"
       x: i // original index
     }))
   }, [data])
@@ -69,7 +70,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
              <div className="text-2xl font-bold text-primary">
                {data.reduce((acc, curr) => acc + curr.request_count, 0).toLocaleString()}
              </div>
-             <div className="text-xs text-muted-foreground font-medium uppercase">Total Requests</div>
+             <div className="text-xs text-muted-foreground font-medium">请求总数</div>
           </div>
         </div>
       </CardHeader>
@@ -137,7 +138,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
                     <div className="bg-popover/95 backdrop-blur-sm text-popover-foreground text-xs rounded-lg shadow-xl border border-border p-3 min-w-[140px]">
                        <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
                           <Calendar className="w-3 h-3 text-muted-foreground" />
-                          {item.date}
+                          {item.hour || item.date}
                        </div>
                        <div className="space-y-1 mt-2">
                           <div className="flex justify-between items-center gap-4">
