@@ -575,7 +575,14 @@ class UserManagementService:
             logger.db_error(f"批量删除用户失败: {e}")
             return {"success": False, "message": f"批量删除失败: {str(e)}"}
 
-    def ban_user(self, user_id: int, reason: Optional[str] = None, disable_tokens: bool = True) -> Dict[str, Any]:
+    def ban_user(
+        self,
+        user_id: int,
+        reason: Optional[str] = None,
+        disable_tokens: bool = True,
+        operator: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """封禁用户（设置 status=2），可选同时禁用其所有 tokens（设置 tokens.status=2）。"""
         try:
             self._db.connect()
@@ -604,6 +611,17 @@ class UserManagementService:
                 tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
 
             logger.security("封禁用户", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
+            self._storage.add_security_audit(
+                action="ban",
+                user_id=user_id,
+                username=username,
+                operator=operator,
+                reason=reason or "",
+                context={
+                    "disable_tokens": bool(disable_tokens),
+                    **(context or {}),
+                },
+            )
             return {
                 "success": True,
                 "message": f"用户 {username} 已封禁",
@@ -617,7 +635,14 @@ class UserManagementService:
             logger.db_error(f"封禁用户失败: {e}")
             return {"success": False, "message": f"封禁失败: {str(e)}"}
 
-    def unban_user(self, user_id: int, reason: Optional[str] = None, enable_tokens: bool = False) -> Dict[str, Any]:
+    def unban_user(
+        self,
+        user_id: int,
+        reason: Optional[str] = None,
+        enable_tokens: bool = False,
+        operator: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """解除封禁（设置 status=1），可选同时启用其 tokens（设置 tokens.status=1）。"""
         try:
             self._db.connect()
@@ -646,6 +671,17 @@ class UserManagementService:
                 tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
 
             logger.security("解除封禁", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
+            self._storage.add_security_audit(
+                action="unban",
+                user_id=user_id,
+                username=username,
+                operator=operator,
+                reason=reason or "",
+                context={
+                    "enable_tokens": bool(enable_tokens),
+                    **(context or {}),
+                },
+            )
             return {
                 "success": True,
                 "message": f"用户 {username} 已解除封禁",

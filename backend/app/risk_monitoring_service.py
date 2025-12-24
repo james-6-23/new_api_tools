@@ -5,7 +5,7 @@ Provides real-time usage leaderboards and per-user usage analysis for moderation
 import time
 from typing import Any, Dict, List, Optional
 
-from .database import DatabaseManager, get_db_manager
+from .database import DatabaseManager, DatabaseEngine, get_db_manager
 from .logger import logger
 
 
@@ -30,27 +30,42 @@ class RiskMonitoringService:
             self._db = get_db_manager()
         return self._db
 
-    def get_leaderboards(self, windows: List[str], limit: int = 10) -> Dict[str, Any]:
+    def get_leaderboards(self, windows: List[str], limit: int = 10, sort_by: str = "requests") -> Dict[str, Any]:
         now = int(time.time())
         data: Dict[str, Any] = {}
         for w in windows:
             seconds = WINDOW_SECONDS.get(w)
             if not seconds:
                 continue
-            data[w] = self.get_leaderboard(window_seconds=seconds, limit=limit, now=now)
+            data[w] = self.get_leaderboard(window_seconds=seconds, limit=limit, now=now, sort_by=sort_by)
         return {"generated_at": now, "windows": data}
 
-    def get_leaderboard(self, window_seconds: int, limit: int = 10, now: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_leaderboard(
+        self,
+        window_seconds: int,
+        limit: int = 10,
+        now: Optional[int] = None,
+        sort_by: str = "requests",
+    ) -> List[Dict[str, Any]]:
         if now is None:
             now = int(time.time())
         start_time = now - window_seconds
+
+        order_by_map = {
+            "requests": "total_requests DESC",
+            "quota": "quota_used DESC",
+            "failure_rate": "failure_rate DESC, total_requests DESC",
+        }
+        order_by = order_by_map.get(sort_by, order_by_map["requests"])
 
         sql = """
             SELECT
                 l.user_id as user_id,
                 COALESCE(MAX(u.display_name), MAX(u.username), MAX(l.username)) as username,
                 COALESCE(MAX(u.status), 0) as user_status,
-                COUNT(*) as request_count,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_requests,
+                (SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) * 1.0) / NULLIF(COUNT(*), 0) as failure_rate,
                 COALESCE(SUM(l.quota), 0) as quota_used,
                 COALESCE(SUM(l.prompt_tokens), 0) as prompt_tokens,
                 COALESCE(SUM(l.completion_tokens), 0) as completion_tokens,
@@ -61,7 +76,7 @@ class RiskMonitoringService:
                 AND l.type IN (2, 5)
                 AND l.user_id IS NOT NULL
             GROUP BY l.user_id
-            ORDER BY request_count DESC
+            ORDER BY """ + order_by + """
             LIMIT :limit
         """
 
@@ -78,7 +93,9 @@ class RiskMonitoringService:
                 "user_id": int(r.get("user_id") or 0),
                 "username": r.get("username") or "",
                 "user_status": int(r.get("user_status") or 0),
-                "request_count": int(r.get("request_count") or 0),
+                "request_count": int(r.get("total_requests") or 0),
+                "failure_requests": int(r.get("failure_requests") or 0),
+                "failure_rate": float(r.get("failure_rate") or 0),
                 "quota_used": int(r.get("quota_used") or 0),
                 "prompt_tokens": int(r.get("prompt_tokens") or 0),
                 "completion_tokens": int(r.get("completion_tokens") or 0),
@@ -93,23 +110,17 @@ class RiskMonitoringService:
 
         self.db.connect()
 
-        user_sql = """
-            SELECT id, username, display_name, email, status, `group`, remark
+        # 根据数据库类型选择正确的引号（group 是保留字）
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+        group_col = '"group"' if is_pg else '`group`'
+
+        user_sql = f"""
+            SELECT id, username, display_name, email, status, {group_col}, remark
             FROM users
             WHERE id = :user_id AND deleted_at IS NULL
             LIMIT 1
         """
-        try:
-            user_rows = self.db.execute(user_sql, {"user_id": user_id})
-        except Exception:
-            # PostgreSQL doesn't allow backticks for reserved words
-            user_sql = """
-                SELECT id, username, display_name, email, status, "group", remark
-                FROM users
-                WHERE id = :user_id AND deleted_at IS NULL
-                LIMIT 1
-            """
-            user_rows = self.db.execute(user_sql, {"user_id": user_id})
+        user_rows = self.db.execute(user_sql, {"user_id": user_id})
 
         user = user_rows[0] if user_rows else None
 

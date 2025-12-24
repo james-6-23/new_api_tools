@@ -101,6 +101,20 @@ class LocalStorage:
                 )
             """)
 
+            # Security audit table (ban/unban, moderation decisions)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS security_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    username TEXT DEFAULT '',
+                    operator TEXT DEFAULT '',
+                    reason TEXT DEFAULT '',
+                    context TEXT DEFAULT '',
+                    created_at INTEGER NOT NULL
+                )
+            """)
+
             # Create indexes
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cache_expires
@@ -109,6 +123,14 @@ class LocalStorage:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_stats_type_time
                 ON stats_snapshots(snapshot_type, created_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_security_audit_time
+                ON security_audit(created_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_security_audit_user
+                ON security_audit(user_id)
             """)
 
             conn.commit()
@@ -239,6 +261,100 @@ class LocalStorage:
                 cursor.execute("DELETE FROM cache")
             conn.commit()
             return cursor.rowcount
+
+    # ==================== Security Audit Methods ====================
+
+    def add_security_audit(
+        self,
+        action: str,
+        user_id: int,
+        username: str = "",
+        operator: str = "",
+        reason: str = "",
+        context: Optional[dict[str, Any]] = None,
+        created_at: Optional[int] = None,
+    ) -> int:
+        """Insert a security audit record and return its row id."""
+        if created_at is None:
+            created_at = int(time.time())
+        context_json = json.dumps(context or {}, ensure_ascii=False)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO security_audit (action, user_id, username, operator, reason, context, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (action, int(user_id), username or "", operator or "", reason or "", context_json, int(created_at)),
+            )
+            conn.commit()
+            return int(cursor.lastrowid or 0)
+
+    def list_security_audits(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        action: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """List security audit records with simple pagination."""
+        page = max(1, int(page))
+        page_size = max(1, min(200, int(page_size)))
+        offset = (page - 1) * page_size
+
+        where = []
+        params: list[Any] = []
+        if action:
+            where.append("action = ?")
+            params.append(action)
+        if user_id is not None:
+            where.append("user_id = ?")
+            params.append(int(user_id))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM security_audit {where_sql}", params)
+            total = int(cursor.fetchone()["cnt"])
+
+            cursor.execute(
+                f"""
+                SELECT id, action, user_id, username, operator, reason, context, created_at
+                FROM security_audit
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, page_size, offset],
+            )
+            rows = cursor.fetchall()
+
+        items: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                ctx = json.loads(r["context"]) if r["context"] else {}
+            except json.JSONDecodeError:
+                ctx = {}
+            items.append(
+                {
+                    "id": int(r["id"]),
+                    "action": r["action"],
+                    "user_id": int(r["user_id"]),
+                    "username": r["username"] or "",
+                    "operator": r["operator"] or "",
+                    "reason": r["reason"] or "",
+                    "context": ctx,
+                    "created_at": int(r["created_at"]),
+                }
+            )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
 
     def cache_cleanup_expired(self) -> int:
         """Remove all expired cache entries."""

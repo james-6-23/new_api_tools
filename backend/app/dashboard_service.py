@@ -395,10 +395,19 @@ class DashboardService:
         if start_time is None:
             start_time = end_time - 86400 * 7  # 7 days ago
 
-        sql = """
+        # 根据数据库类型选择正确的字符串拼接语法
+        from .database import DatabaseEngine
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+        
+        if is_pg:
+            username_fallback = "'User#' || l.user_id::text"
+        else:
+            username_fallback = "CONCAT('User#', l.user_id)"
+
+        sql = f"""
             SELECT
                 l.user_id,
-                COALESCE(u.username, CONCAT('User#', l.user_id)) as username,
+                COALESCE(u.username, {username_fallback}) as username,
                 COUNT(*) as request_count,
                 COALESCE(SUM(l.quota), 0) as quota_used
             FROM logs l
@@ -411,35 +420,11 @@ class DashboardService:
             LIMIT :limit
         """
 
-        # Try MySQL syntax first
-        try:
-            result = self.db.execute(sql, {
-                "start_time": start_time,
-                "end_time": end_time,
-                "limit": limit,
-            })
-        except Exception:
-            # PostgreSQL doesn't support CONCAT the same way
-            sql = """
-                SELECT
-                    l.user_id,
-                    COALESCE(u.username, 'User#' || l.user_id::text) as username,
-                    COUNT(*) as request_count,
-                    COALESCE(SUM(l.quota), 0) as quota_used
-                FROM logs l
-                LEFT JOIN users u ON l.user_id = u.id
-                WHERE l.created_at >= :start_time AND l.created_at <= :end_time
-                    AND l.type = 2
-                    AND l.user_id IS NOT NULL
-                GROUP BY l.user_id, u.username
-                ORDER BY quota_used DESC
-                LIMIT :limit
-            """
-            result = self.db.execute(sql, {
-                "start_time": start_time,
-                "end_time": end_time,
-                "limit": limit,
-            })
+        result = self.db.execute(sql, {
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+        })
 
         return [
             UserRanking(

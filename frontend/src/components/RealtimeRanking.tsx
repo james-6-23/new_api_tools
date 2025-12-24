@@ -8,14 +8,20 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Progress } from './ui/progress'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
+import { Select } from './ui/select'
 
 type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h'
+type SortKey = 'requests' | 'quota' | 'failure_rate'
 
 interface LeaderboardItem {
   user_id: number
   username: string
   user_status: number
   request_count: number
+  failure_requests: number
+  failure_rate: number
   quota_used: number
   prompt_tokens: number
   completion_tokens: number
@@ -49,6 +55,7 @@ interface UserAnalysis {
 }
 
 const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内' }
+const SORT_LABELS: Record<SortKey, string> = { requests: '请求次数', quota: '额度消耗', failure_rate: '失败率' }
 
 function formatNumber(n: number) {
   return n.toLocaleString('zh-CN')
@@ -59,11 +66,26 @@ function formatTime(ts: number) {
   return new Date(ts * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function formatQuota(quota: number) {
+  return `$${(quota / 500000).toFixed(2)}`
+}
+
 function rankBadgeClass(rank: number) {
   if (rank === 1) return 'bg-yellow-500 text-white'
   if (rank === 2) return 'bg-slate-500 text-white'
   if (rank === 3) return 'bg-orange-500 text-white'
   return 'bg-muted text-muted-foreground'
+}
+
+interface BanRecordItem {
+  id: number
+  action: 'ban' | 'unban'
+  user_id: number
+  username: string
+  operator: string
+  reason: string
+  context: Record<string, any>
+  created_at: number
 }
 
 export function RealtimeRanking() {
@@ -72,6 +94,8 @@ export function RealtimeRanking() {
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
   const windows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h', '24h'], [])
+  const [view, setView] = useState<'leaderboards' | 'ban_records'>('leaderboards')
+  const [sortBy, setSortBy] = useState<SortKey>('requests')
   const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [] })
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
@@ -86,6 +110,12 @@ export function RealtimeRanking() {
   const [enableTokens, setEnableTokens] = useState(false)
   const [mutating, setMutating] = useState(false)
 
+  const [records, setRecords] = useState<BanRecordItem[]>([])
+  const [recordsLoading, setRecordsLoading] = useState(false)
+  const [recordsRefreshing, setRecordsRefreshing] = useState(false)
+  const [recordsPage, setRecordsPage] = useState(1)
+  const [recordsTotalPages, setRecordsTotalPages] = useState(1)
+
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
@@ -93,7 +123,7 @@ export function RealtimeRanking() {
 
   const fetchLeaderboards = useCallback(async (showSuccessToast = false) => {
     try {
-      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${windows.join(',')}&limit=10`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${windows.join(',')}&limit=10&sort_by=${sortBy}`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         const windowsData = res.data?.windows || {}
@@ -115,7 +145,28 @@ export function RealtimeRanking() {
     } finally {
       setLoading(false)
     }
-  }, [apiUrl, getAuthHeaders, showToast, windows])
+  }, [apiUrl, getAuthHeaders, showToast, windows, sortBy])
+
+  const fetchBanRecords = useCallback(async (page = 1, showSuccessToast = false) => {
+    setRecordsLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/risk/ban-records?page=${page}&page_size=50`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setRecords(res.data?.items || [])
+        setRecordsPage(res.data?.page || page)
+        setRecordsTotalPages(res.data?.total_pages || 1)
+        if (showSuccessToast) showToast('success', '已刷新')
+      } else {
+        showToast('error', res.message || '获取封禁记录失败')
+      }
+    } catch (e) {
+      console.error('Failed to fetch ban records:', e)
+      showToast('error', '获取封禁记录失败')
+    } finally {
+      setRecordsLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
 
   const openUserDialog = (item: LeaderboardItem, window: WindowKey) => {
     setSelected({ item, window })
@@ -127,13 +178,15 @@ export function RealtimeRanking() {
   }
 
   useEffect(() => {
-    fetchLeaderboards()
-  }, [fetchLeaderboards])
+    if (view === 'leaderboards') fetchLeaderboards()
+    if (view === 'ban_records') fetchBanRecords(1)
+  }, [fetchLeaderboards, fetchBanRecords, view])
 
   useEffect(() => {
+    if (view !== 'leaderboards') return
     const t = setInterval(() => fetchLeaderboards(), 10_000)
     return () => clearInterval(t)
-  }, [fetchLeaderboards])
+  }, [fetchLeaderboards, view])
 
   useEffect(() => {
     const load = async () => {
@@ -160,6 +213,20 @@ export function RealtimeRanking() {
     setRefreshing(false)
   }
 
+  const handleRefreshRecords = async () => {
+    setRecordsRefreshing(true)
+    await fetchBanRecords(recordsPage, true)
+    setRecordsRefreshing(false)
+  }
+
+  const metricLabel = SORT_LABELS[sortBy]
+
+  const renderMetric = (item: LeaderboardItem) => {
+    if (sortBy === 'quota') return formatQuota(item.quota_used)
+    if (sortBy === 'failure_rate') return `${(item.failure_rate * 100).toFixed(2)}%`
+    return formatNumber(item.request_count)
+  }
+
   const doBan = async () => {
     if (!selected) return
     setMutating(true)
@@ -167,13 +234,32 @@ export function RealtimeRanking() {
       const response = await fetch(`${apiUrl}/api/users/${selected.item.user_id}/ban`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ reason: banReason || null, disable_tokens: disableTokens }),
+        body: JSON.stringify({
+          reason: banReason || null,
+          disable_tokens: disableTokens,
+          context: {
+            source: 'risk_center',
+            window: selected.window,
+            generated_at: generatedAt,
+            risk: analysis?.risk || null,
+            summary: analysis ? {
+              total_requests: analysis.summary.total_requests,
+              failure_rate: analysis.summary.failure_rate,
+              empty_rate: analysis.summary.empty_rate,
+              unique_ips: analysis.summary.unique_ips,
+              unique_tokens: analysis.summary.unique_tokens,
+              unique_models: analysis.summary.unique_models,
+              unique_channels: analysis.summary.unique_channels,
+            } : null,
+          },
+        }),
       })
       const res = await response.json()
       if (res.success) {
         showToast('success', res.message || '已封禁')
         setDialogOpen(false)
         fetchLeaderboards()
+        fetchBanRecords(1)
       } else {
         showToast('error', res.message || '封禁失败')
       }
@@ -192,13 +278,23 @@ export function RealtimeRanking() {
       const response = await fetch(`${apiUrl}/api/users/${selected.item.user_id}/unban`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ reason: banReason || null, enable_tokens: enableTokens }),
+        body: JSON.stringify({
+          reason: banReason || null,
+          enable_tokens: enableTokens,
+          context: {
+            source: 'risk_center',
+            window: selected.window,
+            generated_at: generatedAt,
+            risk: analysis?.risk || null,
+          },
+        }),
       })
       const res = await response.json()
       if (res.success) {
         showToast('success', res.message || '已解除封禁')
         setDialogOpen(false)
         fetchLeaderboards()
+        fetchBanRecords(1)
       } else {
         showToast('error', res.message || '解除封禁失败')
       }
@@ -215,69 +311,161 @@ export function RealtimeRanking() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">风控中心</h2>
-          <p className="text-muted-foreground mt-1">实时 Top 10 · 一键分析与封禁决策</p>
-          {generatedAt > 0 && <p className="text-xs text-muted-foreground mt-2">上次更新: {formatTime(generatedAt)}</p>}
+          <p className="text-muted-foreground mt-1">实时 Top 10 · 分析 + 封禁 + 审计</p>
+          {generatedAt > 0 && view === 'leaderboards' && <p className="text-xs text-muted-foreground mt-2">上次更新: {formatTime(generatedAt)}</p>}
         </div>
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
-          <RefreshCw className={(refreshing ? 'animate-spin ' : '') + 'h-4 w-4 mr-2'} />
-          刷新
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          {view === 'leaderboards' && (
+            <div className="w-44">
+              <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)}>
+                <option value="requests">按请求次数</option>
+                <option value="quota">按额度消耗</option>
+                <option value="failure_rate">按失败率</option>
+              </Select>
+            </div>
+          )}
+          {view === 'leaderboards' ? (
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
+              <RefreshCw className={(refreshing ? 'animate-spin ' : '') + 'h-4 w-4 mr-2'} />
+              刷新
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={handleRefreshRecords} disabled={recordsRefreshing} className="h-9">
+              <RefreshCw className={(recordsRefreshing ? 'animate-spin ' : '') + 'h-4 w-4 mr-2'} />
+              刷新
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {windows.map((w) => (
-          <Card key={w} className="rounded-2xl shadow-sm">
+      <Tabs value={view} onValueChange={(v) => setView(v as any)}>
+        <TabsList>
+          <TabsTrigger value="leaderboards">实时排行</TabsTrigger>
+          <TabsTrigger value="ban_records">封禁记录</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="leaderboards">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {windows.map((w) => (
+              <Card key={w} className="rounded-2xl shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">{WINDOW_LABELS[w]}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {loading ? (
+                    <div className="h-48 flex items-center justify-center text-muted-foreground">
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />加载中...
+                    </div>
+                  ) : (data[w]?.length ? (
+                    <div className="max-h-80 overflow-auto pr-2 space-y-2">
+                      {data[w].slice(0, 10).map((item, idx) => {
+                        const name = item.username || `User#${item.user_id}`
+                        const isBanned = item.user_status === 2
+                        return (
+                          <div
+                            key={`${w}-${item.user_id}`}
+                            className={'flex items-center gap-3 rounded-xl px-3 py-2 bg-muted/20 hover:bg-muted/30 transition-colors ' + (isBanned ? 'opacity-60' : '')}
+                          >
+                            <div className={'h-7 w-7 rounded-lg flex items-center justify-center text-sm font-bold ' + rankBadgeClass(idx + 1)}>
+                              {idx + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate">{name}</div>
+                              <div className="text-xs text-muted-foreground truncate">ID: {item.user_id} · IP: {item.unique_ips}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-right">
+                                <div className="font-semibold tabular-nums">{renderMetric(item)}</div>
+                                <div className="text-[10px] text-muted-foreground">{metricLabel}</div>
+                              </div>
+                              <Button
+                                variant={isBanned ? 'secondary' : 'outline'}
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => openUserDialog(item, w)}
+                                title={isBanned ? '查看/解除封禁' : '分析/封禁'}
+                              >
+                                {isBanned ? <ShieldCheck className="h-4 w-4" /> : <ShieldBan className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="ban_records">
+          <Card className="rounded-2xl">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">{WINDOW_LABELS[w]}</CardTitle>
+              <CardTitle className="text-lg">封禁记录（最新）</CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? (
-                <div className="h-48 flex items-center justify-center text-muted-foreground">
+              {recordsLoading ? (
+                <div className="h-56 flex items-center justify-center text-muted-foreground">
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />加载中...
                 </div>
-              ) : (data[w]?.length ? (
-                <div className="max-h-80 overflow-auto pr-2 space-y-2">
-                  {data[w].slice(0, 10).map((item, idx) => {
-                    const name = item.username || `User#${item.user_id}`
-                    const isBanned = item.user_status === 2
-                    return (
-                      <div
-                        key={`${w}-${item.user_id}`}
-                        className={'flex items-center gap-3 rounded-xl px-3 py-2 bg-muted/20 hover:bg-muted/30 transition-colors ' + (isBanned ? 'opacity-60' : '')}
-                      >
-                        <div className={'h-7 w-7 rounded-lg flex items-center justify-center text-sm font-bold ' + rankBadgeClass(idx + 1)}>
-                          {idx + 1}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium truncate">{name}</div>
-                          <div className="text-xs text-muted-foreground truncate">ID: {item.user_id} · IP: {item.unique_ips}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-right">
-                            <div className="font-semibold tabular-nums">{formatNumber(item.request_count)}</div>
-                            <div className="text-[10px] text-muted-foreground">次</div>
-                          </div>
-                          <Button
-                            variant={isBanned ? 'secondary' : 'outline'}
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openUserDialog(item, w)}
-                            title={isBanned ? '查看/解除封禁' : '分析/封禁'}
-                          >
-                            {isBanned ? <ShieldCheck className="h-4 w-4" /> : <ShieldBan className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
               ) : (
-                <div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>
-              ))}
+                <>
+                  <div className="rounded-lg border overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[160px]">时间</TableHead>
+                          <TableHead className="min-w-[80px]">动作</TableHead>
+                          <TableHead className="min-w-[120px]">操作者</TableHead>
+                          <TableHead className="min-w-[160px]">用户</TableHead>
+                          <TableHead>原因</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {records.length ? records.map((r) => (
+                          <TableRow key={r.id}>
+                            <TableCell className="text-sm text-muted-foreground">{formatTime(r.created_at)}</TableCell>
+                            <TableCell>
+                              {r.action === 'ban'
+                                ? <Badge variant="destructive">封禁</Badge>
+                                : <Badge variant="success">解封</Badge>}
+                            </TableCell>
+                            <TableCell className="text-sm">{r.operator || '-'}</TableCell>
+                            <TableCell className="text-sm">
+                              <div className="font-medium">{r.username || `User#${r.user_id}`}</div>
+                              <div className="text-xs text-muted-foreground">ID: {r.user_id}</div>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{r.reason || '-'}</TableCell>
+                          </TableRow>
+                        )) : (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-center text-muted-foreground">暂无记录</TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4">
+                    <div className="text-sm text-muted-foreground">第 {recordsPage} / {recordsTotalPages} 页</div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" disabled={recordsPage <= 1 || recordsLoading} onClick={() => fetchBanRecords(recordsPage - 1)}>
+                        上一页
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={recordsPage >= recordsTotalPages || recordsLoading} onClick={() => fetchBanRecords(recordsPage + 1)}>
+                        下一页
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
-        ))}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl rounded-2xl border border-border/50 bg-background shadow-[10px_10px_30px_rgba(0,0,0,0.12),-10px_-10px_30px_rgba(255,255,255,0.6)] dark:shadow-[10px_10px_30px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.04)]">

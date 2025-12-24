@@ -5,9 +5,10 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi import Request
 from pydantic import BaseModel
 
-from .auth import verify_auth
+from .auth import decode_access_token, verify_auth
 from .logger import logger
 from .user_management_service import (
     ActivityLevel,
@@ -49,12 +50,27 @@ class BanRequest(BaseModel):
     """封禁请求"""
     reason: Optional[str] = None
     disable_tokens: bool = True
+    context: Optional[dict] = None
 
 
 class UnbanRequest(BaseModel):
     """解除封禁请求"""
     reason: Optional[str] = None
     enable_tokens: bool = False
+    context: Optional[dict] = None
+
+
+def _get_operator_label(req: Request) -> str:
+    auth = req.headers.get("Authorization") or ""
+    if auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        token_data = decode_access_token(token)
+        if token_data:
+            return token_data.sub
+        return "jwt"
+    if req.headers.get("X-API-Key"):
+        return "api_key"
+    return "unknown"
 
 
 # API Endpoints
@@ -225,11 +241,19 @@ async def batch_delete_inactive_users(
 async def ban_user(
     user_id: int,
     request: BanRequest,
+    req: Request,
     _: str = Depends(verify_auth),
 ):
     """封禁用户（status=2），可选同时禁用其 tokens。"""
     service = get_user_management_service()
-    result = service.ban_user(user_id=user_id, reason=request.reason, disable_tokens=request.disable_tokens)
+    operator = _get_operator_label(req)
+    result = service.ban_user(
+        user_id=user_id,
+        reason=request.reason,
+        disable_tokens=request.disable_tokens,
+        operator=operator,
+        context=request.context,
+    )
     return DeleteResponse(
         success=result["success"],
         message=result["message"],
@@ -241,11 +265,19 @@ async def ban_user(
 async def unban_user(
     user_id: int,
     request: UnbanRequest,
+    req: Request,
     _: str = Depends(verify_auth),
 ):
     """解除封禁（status=1），可选同时启用其 tokens。"""
     service = get_user_management_service()
-    result = service.unban_user(user_id=user_id, reason=request.reason, enable_tokens=request.enable_tokens)
+    operator = _get_operator_label(req)
+    result = service.unban_user(
+        user_id=user_id,
+        reason=request.reason,
+        enable_tokens=request.enable_tokens,
+        operator=operator,
+        context=request.context,
+    )
     return DeleteResponse(
         success=result["success"],
         message=result["message"],
