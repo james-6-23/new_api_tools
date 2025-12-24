@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select } from './ui/select'
 import { cn } from '../lib/utils'
 
-type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h'
+type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h' | '3d' | '7d'
 type SortKey = 'requests' | 'quota' | 'failure_rate'
 
 interface LeaderboardItem {
@@ -55,7 +55,7 @@ interface UserAnalysis {
   recent_logs: Array<{ id: number; created_at: number; type: number; model_name: string; quota: number; prompt_tokens: number; completion_tokens: number; use_time: number; ip: string; channel_name: string; token_name: string }>
 }
 
-const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内' }
+const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
 const SORT_LABELS: Record<SortKey, string> = { requests: '请求次数', quota: '额度消耗', failure_rate: '失败率' }
 
 function formatNumber(n: number) {
@@ -94,10 +94,13 @@ export function RealtimeRanking() {
   const { showToast } = useToast()
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
-  const windows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h', '24h'], [])
+  const allWindows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h', '24h', '3d', '7d'], [])
+  const windows = useMemo<WindowKey[]>(() => ['1h', '3h', '6h', '12h'], [])
+  const extendedWindows = useMemo<WindowKey[]>(() => ['24h', '3d', '7d'], [])
+  const [selectedWindow, setSelectedWindow] = useState<WindowKey>('24h')
   const [view, setView] = useState<'leaderboards' | 'ban_records'>('leaderboards')
   const [sortBy, setSortBy] = useState<SortKey>('requests')
-  const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [] })
+  const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [], '3d': [], '7d': [] })
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -125,7 +128,7 @@ export function RealtimeRanking() {
 
   const fetchLeaderboards = useCallback(async (showSuccessToast = false) => {
     try {
-      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${windows.join(',')}&limit=10&sort_by=${sortBy}`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${allWindows.join(',')}&limit=10&sort_by=${sortBy}`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         const windowsData = res.data?.windows || {}
@@ -135,6 +138,8 @@ export function RealtimeRanking() {
           '6h': windowsData['6h'] || [],
           '12h': windowsData['12h'] || [],
           '24h': windowsData['24h'] || [],
+          '3d': windowsData['3d'] || [],
+          '7d': windowsData['7d'] || [],
         })
         setGeneratedAt(res.data?.generated_at || 0)
         setCountdown(10)
@@ -148,7 +153,7 @@ export function RealtimeRanking() {
     } finally {
       setLoading(false)
     }
-  }, [apiUrl, getAuthHeaders, showToast, windows, sortBy])
+  }, [apiUrl, getAuthHeaders, showToast, allWindows, sortBy])
 
   const fetchBanRecords = useCallback(async (page = 1, showSuccessToast = false) => {
     setRecordsLoading(true)
@@ -370,14 +375,10 @@ export function RealtimeRanking() {
         <TabsContent value="leaderboards">
           {/* Responsive Grid Layout: 1 col on mobile, 2 cols on tablet/desktop */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {windows.map((w, index) => (
+            {windows.map((w) => (
               <Card 
                 key={w} 
-                className={cn(
-                  "rounded-xl shadow-sm transition-all duration-200 hover:shadow-md",
-                  // Make the 5th item (24h) span full width on medium screens to be symmetrical (2+2+1)
-                  index === 4 && "md:col-span-2"
-                )}
+                className="rounded-xl shadow-sm transition-all duration-200 hover:shadow-md"
               >
                 <CardHeader className="pb-3 border-b bg-muted/20">
                   <div className="flex items-center justify-between">
@@ -385,7 +386,6 @@ export function RealtimeRanking() {
                       <Activity className="h-4 w-4 text-primary" />
                       {WINDOW_LABELS[w]}
                     </CardTitle>
-                    {index === 4 && <span className="text-xs text-muted-foreground">全周期汇总</span>}
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0 px-0">
@@ -422,12 +422,6 @@ export function RealtimeRanking() {
                                 <span>ID: {item.user_id}</span>
                                 <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
                                 <span>IP: {item.unique_ips}</span>
-                                {index === 4 && (
-                                  <>
-                                    <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-                                    <span>失败: {(item.failure_rate * 100).toFixed(1)}%</span>
-                                  </>
-                                )}
                               </div>
                             </div>
 
@@ -463,6 +457,95 @@ export function RealtimeRanking() {
               </Card>
             ))}
           </div>
+
+          {/* 第5个卡片：可选时间段排行榜 (24h/3d/7d) */}
+          <Card className="rounded-xl shadow-sm mt-6">
+            <CardHeader className="pb-3 border-b bg-muted/20">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-primary" />
+                  {WINDOW_LABELS[selectedWindow]}
+                </CardTitle>
+                <Select 
+                  value={selectedWindow} 
+                  onChange={(e) => setSelectedWindow(e.target.value as WindowKey)}
+                  className="w-28 h-8 text-sm"
+                >
+                  {extendedWindows.map((w) => (
+                    <option key={w} value={w}>{WINDOW_LABELS[w]}</option>
+                  ))}
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-0 px-0">
+              {loading ? (
+                <div className="h-48 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />加载中...
+                </div>
+              ) : (data[selectedWindow]?.length ? (
+                <div className="divide-y">
+                  {data[selectedWindow].slice(0, 10).map((item, idx) => {
+                    const name = item.username || `User#${item.user_id}`
+                    const isBanned = item.user_status === 2
+                    return (
+                      <div
+                        key={`selected-${item.user_id}`}
+                        className={cn(
+                          "flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors group",
+                          isBanned && "opacity-60 bg-muted/10"
+                        )}
+                      >
+                        <div className={cn(
+                          "h-6 w-6 rounded flex items-center justify-center text-xs font-bold flex-shrink-0",
+                          rankBadgeClass(idx + 1)
+                        )}>
+                          {idx + 1}
+                        </div>
+                        
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm truncate">{name}</span>
+                            {isBanned && <Badge variant="destructive" className="h-4 px-1 text-[10px]">禁用</Badge>}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-2">
+                            <span>ID: {item.user_id}</span>
+                            <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+                            <span>IP: {item.unique_ips}</span>
+                            <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+                            <span>失败: {(item.failure_rate * 100).toFixed(1)}%</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="font-bold text-sm tabular-nums">{renderMetric(item)}</div>
+                            <div className="text-[10px] text-muted-foreground uppercase">{metricLabel}</div>
+                          </div>
+                          <Button
+                            variant={isBanned ? 'secondary' : 'ghost'}
+                            size="icon"
+                            className={cn(
+                              "h-8 w-8 transition-opacity",
+                              isBanned ? "opacity-100" : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            )}
+                            onClick={() => openUserDialog(item, selectedWindow)}
+                            title={isBanned ? '查看/解除封禁' : '分析/封禁'}
+                          >
+                            {isBanned ? <ShieldCheck className="h-4 w-4" /> : <ShieldBan className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm">
+                  <ShieldCheck className="h-8 w-8 mb-2 opacity-20" />
+                  暂无风险数据
+                </div>
+              ))}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="ban_records">
