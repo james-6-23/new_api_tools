@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
+import { RefreshCw, Trash2, AlertTriangle, Loader2, Clock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Progress } from './ui/progress'
@@ -55,6 +55,7 @@ interface SyncStatus {
   remaining_logs: number
   is_synced: boolean
   is_initializing: boolean
+  needs_initial_sync: boolean
   data_inconsistent: boolean
   needs_reset: boolean
 }
@@ -62,6 +63,9 @@ interface SyncStatus {
 export function Analytics() {
   const { token } = useAuth()
   const { showToast } = useToast()
+
+  // Auto refresh interval in seconds
+  const REFRESH_INTERVAL = 30
 
   const [state, setState] = useState<AnalyticsState | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
@@ -72,6 +76,8 @@ export function Analytics() {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
+  const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
+  const countdownRef = useRef<NodeJS.Timeout | null>(null)
   
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
@@ -153,8 +159,55 @@ export function Analytics() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
+  // Auto process new logs (silent, no toast)
+  const autoProcessLogs = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/analytics/process`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const data = await response.json()
+      if (data.success && data.processed > 0) {
+        // Silently refresh data after processing
+        fetchAnalytics()
+        fetchSyncStatus()
+      }
+    } catch (error) {
+      console.error('Auto process failed:', error)
+    }
+  }, [apiUrl, getAuthHeaders, fetchAnalytics, fetchSyncStatus])
+
+  // Reset countdown to initial value
+  const resetCountdown = useCallback(() => {
+    setCountdown(REFRESH_INTERVAL)
+  }, [REFRESH_INTERVAL])
+
+  // Auto refresh with countdown - also auto process new logs
+  useEffect(() => {
+    // Don't auto-refresh while batch processing or loading
+    if (batchProcessing || loading) return
+
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          // Auto process new logs and refresh
+          autoProcessLogs()
+          return REFRESH_INTERVAL
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+      }
+    }
+  }, [batchProcessing, loading, autoProcessLogs, REFRESH_INTERVAL])
+
   const processLogs = async () => {
     setProcessing(true)
+    resetCountdown() // Reset countdown on manual refresh
     try {
       const response = await fetch(`${apiUrl}/api/analytics/process`, {
         method: 'POST',
@@ -313,9 +366,9 @@ export function Analytics() {
         </Card>
       )}
 
-      {/* Sync Status */}
-      {syncStatus && !syncStatus.is_synced && !syncStatus.data_inconsistent && (
-        <Card className={syncStatus.is_initializing ? 'border-primary bg-primary/5' : 'border-yellow-500 bg-yellow-50'}>
+      {/* Sync Status - only show when needs initial sync or is initializing */}
+      {syncStatus && (syncStatus.needs_initial_sync || syncStatus.is_initializing) && !syncStatus.data_inconsistent && (
+        <Card className={syncStatus.is_initializing ? 'border-primary bg-primary/5' : 'border-yellow-500 bg-yellow-50 dark:border-yellow-600 dark:bg-yellow-950'}>
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <RefreshCw className={`h-5 w-5 mt-0.5 ${syncStatus.is_initializing ? 'text-primary' : 'text-yellow-600'}`} />
@@ -368,7 +421,11 @@ export function Analytics() {
                 {state?.last_processed_at && <span className="ml-2">· 上次更新: {formatTimestamp(state.last_processed_at)}</span>}
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                <span>{countdown}s</span>
+              </div>
               <Button onClick={processLogs} disabled={processing || batchProcessing}>
                 {processing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 处理新日志

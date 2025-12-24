@@ -121,10 +121,19 @@ class DashboardService:
         channel_result = self.db.execute(channel_sql)
         channel_row = channel_result[0] if channel_result else {}
 
-        # Get model count
-        model_sql = "SELECT COUNT(*) as total FROM models WHERE deleted_at IS NULL"
-        model_result = self.db.execute(model_sql)
-        model_count = model_result[0]["total"] if model_result else 0
+        # Get model count from abilities table (unique models across all channels)
+        model_sql = "SELECT COUNT(DISTINCT model) as total FROM abilities"
+        try:
+            model_result = self.db.execute(model_sql)
+            model_count = model_result[0]["total"] if model_result else 0
+        except Exception:
+            # Fallback: try models table if abilities doesn't exist
+            try:
+                model_sql = "SELECT COUNT(*) as total FROM models WHERE deleted_at IS NULL"
+                model_result = self.db.execute(model_sql)
+                model_count = model_result[0]["total"] if model_result else 0
+            except Exception:
+                model_count = 0
 
         # Get redemption counts
         redemption_sql = """

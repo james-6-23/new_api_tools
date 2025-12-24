@@ -661,6 +661,9 @@ class LogAnalyticsService:
         # If in initialization mode, use init_max_log_id for progress
         is_initializing = init_max_log_id > 0
 
+        # Determine if initial sync is needed (never processed any logs)
+        needs_initial_sync = total_processed == 0 and total_logs > 0
+
         # Calculate progress based on actual processed count vs total logs
         progress = 0.0
         remaining = 0
@@ -671,6 +674,10 @@ class LogAnalyticsService:
                 progress = (total_processed / total_logs) * 100
             remaining = max(0, total_logs - total_processed)
 
+        # is_synced: data has been initialized and is reasonably up to date
+        # (processed some logs, not in init mode, no inconsistency)
+        is_synced = total_processed > 0 and not is_initializing and not data_inconsistent and not needs_initial_sync
+
         return {
             "last_log_id": last_log_id,
             "max_log_id": max_log_id,
@@ -679,8 +686,9 @@ class LogAnalyticsService:
             "total_processed": total_processed,
             "progress_percent": round(progress, 2),
             "remaining_logs": remaining,
-            "is_synced": last_log_id >= max_log_id and not is_initializing and not data_inconsistent,
+            "is_synced": is_synced,
             "is_initializing": is_initializing,
+            "needs_initial_sync": needs_initial_sync,
             "data_inconsistent": data_inconsistent,
             "needs_reset": data_inconsistent,
         }
