@@ -60,6 +60,12 @@ class UnbanRequest(BaseModel):
     context: Optional[dict] = None
 
 
+class DisableTokenRequest(BaseModel):
+    """禁用令牌请求"""
+    reason: Optional[str] = None
+    context: Optional[dict] = None
+
+
 def _get_operator_label(req: Request) -> str:
     auth = req.headers.get("Authorization") or ""
     if auth.startswith("Bearer "):
@@ -275,6 +281,29 @@ async def unban_user(
         user_id=user_id,
         reason=request.reason,
         enable_tokens=request.enable_tokens,
+        operator=operator,
+        context=request.context,
+    )
+    return DeleteResponse(
+        success=result["success"],
+        message=result["message"],
+        data=result.get("data"),
+    )
+
+
+@router.post("/tokens/{token_id}/disable", response_model=DeleteResponse)
+async def disable_token(
+    token_id: int,
+    request: DisableTokenRequest,
+    req: Request,
+    _: str = Depends(verify_auth),
+):
+    """禁用单个令牌（status=2）。"""
+    service = get_user_management_service()
+    operator = _get_operator_label(req)
+    result = service.disable_token(
+        token_id=token_id,
+        reason=request.reason,
         operator=operator,
         context=request.context,
     )

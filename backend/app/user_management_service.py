@@ -695,6 +695,80 @@ class UserManagementService:
             logger.db_error(f"解除封禁失败: {e}")
             return {"success": False, "message": f"解除封禁失败: {str(e)}"}
 
+    def disable_token(
+        self,
+        token_id: int,
+        reason: Optional[str] = None,
+        operator: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """禁用单个令牌（设置 status=2）。"""
+        try:
+            self._db.connect()
+
+            # 获取令牌信息
+            token_rows = self._db.execute(
+                """SELECT t.id, t.name, t.user_id, t.status, u.username
+                   FROM tokens t
+                   LEFT JOIN users u ON t.user_id = u.id
+                   WHERE t.id = :token_id AND t.deleted_at IS NULL""",
+                {"token_id": token_id},
+            )
+
+            if not token_rows:
+                return {"success": False, "message": "令牌不存在"}
+
+            token_info = token_rows[0]
+            token_name = token_info.get("name") or f"Token#{token_id}"
+            username = token_info.get("username") or f"User#{token_info.get('user_id')}"
+            current_status = token_info.get("status")
+
+            if current_status == 2:
+                return {"success": False, "message": "令牌已处于禁用状态"}
+
+            # 更新令牌状态
+            result = self._db.execute(
+                "UPDATE tokens SET status = 2 WHERE id = :token_id AND deleted_at IS NULL",
+                {"token_id": token_id},
+            )
+
+            affected = int((result[0] or {}).get("affected_rows", 0) or 0)
+
+            logger.security(
+                "禁用令牌",
+                token_id=token_id,
+                token_name=token_name,
+                user_id=token_info.get("user_id"),
+                username=username,
+                reason=reason or "",
+            )
+
+            self._storage.add_security_audit(
+                action="disable_token",
+                user_id=token_info.get("user_id"),
+                username=username,
+                operator=operator,
+                reason=reason or "",
+                context={
+                    "token_id": token_id,
+                    "token_name": token_name,
+                    **(context or {}),
+                },
+            )
+
+            return {
+                "success": True,
+                "message": f"令牌 {token_name} 已禁用",
+                "data": {
+                    "token_id": token_id,
+                    "token_name": token_name,
+                    "affected": affected,
+                },
+            }
+        except Exception as e:
+            logger.db_error(f"禁用令牌失败: {e}")
+            return {"success": False, "message": f"禁用令牌失败: {str(e)}"}
+
 
 # 全局实例
 _user_management_service: Optional[UserManagementService] = None
