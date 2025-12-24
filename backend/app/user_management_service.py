@@ -210,7 +210,7 @@ class UserManagementService:
 
         # 根据数据库类型选择正确的 SQL（group 是保留字）
         from .database import DatabaseEngine
-        is_pg = self._db._config.engine == DatabaseEngine.POSTGRESQL
+        is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
         group_col = '"group"' if is_pg else '`group`'
 
         base_sql = f"""
@@ -322,7 +322,7 @@ class UserManagementService:
 
         # 根据数据库类型选择正确的 SQL
         from .database import DatabaseEngine
-        is_pg = self._db._config.engine == DatabaseEngine.POSTGRESQL
+        is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
         group_col = 'u."group"' if is_pg else 'u.`group`'
 
         base_sql = f"""
@@ -471,21 +471,13 @@ class UserManagementService:
 
             username = check_result[0].get("username", "")
 
-            # 软删除用户
-            try:
-                delete_sql = "UPDATE users SET deleted_at = NOW() WHERE id = :user_id"
-                self._db.execute(delete_sql, {"user_id": user_id})
-            except Exception:
-                delete_sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = :user_id"
-                self._db.execute(delete_sql, {"user_id": user_id})
+            # 软删除用户 (CURRENT_TIMESTAMP 兼容 MySQL 和 PostgreSQL)
+            delete_sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = :user_id"
+            self._db.execute(delete_sql, {"user_id": user_id})
 
             # 同时软删除用户的 tokens
-            try:
-                token_sql = "UPDATE tokens SET deleted_at = NOW() WHERE user_id = :user_id AND deleted_at IS NULL"
-                self._db.execute(token_sql, {"user_id": user_id})
-            except Exception:
-                token_sql = "UPDATE tokens SET deleted_at = CURRENT_TIMESTAMP WHERE user_id = :user_id AND deleted_at IS NULL"
-                self._db.execute(token_sql, {"user_id": user_id})
+            token_sql = "UPDATE tokens SET deleted_at = CURRENT_TIMESTAMP WHERE user_id = :user_id AND deleted_at IS NULL"
+            self._db.execute(token_sql, {"user_id": user_id})
 
             # 清除统计缓存
             self._storage.cache_delete(STATS_CACHE_KEY)

@@ -270,26 +270,11 @@ class DashboardService:
         end_time = int(time.time())
         start_time = end_time - (days * 86400)
 
-        # Use database-specific date functions
-        # This works for both MySQL and PostgreSQL
-        sql = """
-            SELECT
-                DATE(FROM_UNIXTIME(created_at)) as date,
-                COUNT(*) as request_count,
-                COALESCE(SUM(quota), 0) as quota_used,
-                COUNT(DISTINCT user_id) as unique_users
-            FROM logs
-            WHERE created_at >= :start_time AND created_at <= :end_time
-                AND type = 2
-            GROUP BY DATE(FROM_UNIXTIME(created_at))
-            ORDER BY date ASC
-        """
-
-        # Try MySQL syntax first, fall back to PostgreSQL
-        try:
-            result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
-        except Exception:
-            # PostgreSQL syntax
+        # 根据数据库类型选择正确的日期函数
+        from .database import DatabaseEngine
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+        
+        if is_pg:
             sql = """
                 SELECT
                     DATE(TO_TIMESTAMP(created_at)) as date,
@@ -302,7 +287,21 @@ class DashboardService:
                 GROUP BY DATE(TO_TIMESTAMP(created_at))
                 ORDER BY date ASC
             """
-            result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
+        else:
+            sql = """
+                SELECT
+                    DATE(FROM_UNIXTIME(created_at)) as date,
+                    COUNT(*) as request_count,
+                    COALESCE(SUM(quota), 0) as quota_used,
+                    COUNT(DISTINCT user_id) as unique_users
+                FROM logs
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND type = 2
+                GROUP BY DATE(FROM_UNIXTIME(created_at))
+                ORDER BY date ASC
+            """
+
+        result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
 
         trends = []
         for row in result:
