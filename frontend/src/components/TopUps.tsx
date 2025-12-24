@@ -318,7 +318,18 @@ export function TopUps() {
                             <button
                               onClick={async () => {
                                 try {
-                                  await navigator.clipboard.writeText(record.trade_no)
+                                  if (navigator.clipboard && window.isSecureContext) {
+                                    await navigator.clipboard.writeText(record.trade_no)
+                                  } else {
+                                    const textArea = document.createElement('textarea')
+                                    textArea.value = record.trade_no
+                                    textArea.style.position = 'fixed'
+                                    textArea.style.left = '-9999px'
+                                    document.body.appendChild(textArea)
+                                    textArea.select()
+                                    document.execCommand('copy')
+                                    document.body.removeChild(textArea)
+                                  }
                                   showToast('success', '已复制交易号')
                                 } catch {
                                   showToast('error', '复制失败')
