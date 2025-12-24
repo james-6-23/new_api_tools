@@ -78,9 +78,9 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
       onClick={handleBackdropClick}
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
     >
-      <div className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+      <div className="bg-card rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-4">
+        <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-white/20 rounded-full p-2">
@@ -98,7 +98,7 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
         </div>
 
         {/* Main Copy Buttons */}
-        <div className="px-6 py-4 border-b bg-muted/50 space-y-2">
+        <div className="px-6 py-4 border-b bg-muted/50 space-y-2 flex-shrink-0">
           <Button onClick={copyAllKeys} className="w-full" size="lg">
             <Copy className="h-5 w-5 mr-2" />
             复制全部兑换码
@@ -110,7 +110,7 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
         </div>
 
         {/* Keys List */}
-        <div className="px-6 py-4 max-h-[40vh] overflow-y-auto">
+        <div className="px-6 py-4 flex-1 overflow-y-auto min-h-0">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium">兑换码列表</span>
             <Button variant="ghost" size="sm" onClick={downloadKeys}>
@@ -141,7 +141,7 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-muted/50 border-t flex justify-between items-center">
+        <div className="px-6 py-4 bg-muted/50 border-t flex justify-between items-center flex-shrink-0">
           <p className="text-sm text-muted-foreground">提示：兑换码已自动保存到历史记录</p>
           <Button variant="secondary" onClick={onClose}>关闭</Button>
         </div>
