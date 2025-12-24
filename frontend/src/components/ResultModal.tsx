@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useToast } from './Toast'
-import { CheckCircle, X, Copy, Download } from 'lucide-react'
+import { CheckCircle, X, Copy, Download, ExternalLink } from 'lucide-react'
 import { Button } from './ui/button'
 
 export interface GenerateResult {
@@ -53,6 +53,11 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
 
   const copyAllKeys = () => copyToClipboard(result.keys.join('\n'), '全部兑换码')
 
+  const copyAndGoToLinuxDo = async () => {
+    await copyToClipboard(result.keys.join('\n'), '全部兑换码')
+    window.open('https://cdk.linux.do/dashboard', '_blank')
+  }
+
   const downloadKeys = () => {
     const content = result.keys.join('\n')
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -92,11 +97,15 @@ export function ResultModal({ result, onClose }: ResultModalProps) {
           </div>
         </div>
 
-        {/* Main Copy Button */}
-        <div className="px-6 py-4 border-b bg-muted/50">
+        {/* Main Copy Buttons */}
+        <div className="px-6 py-4 border-b bg-muted/50 space-y-2">
           <Button onClick={copyAllKeys} className="w-full" size="lg">
             <Copy className="h-5 w-5 mr-2" />
             复制全部兑换码
+          </Button>
+          <Button onClick={copyAndGoToLinuxDo} variant="outline" className="w-full" size="lg">
+            <ExternalLink className="h-5 w-5 mr-2" />
+            复制兑换码并前往 LINUX DO 分发站
           </Button>
         </div>
 

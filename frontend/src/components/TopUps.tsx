@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { CreditCard, Loader2, RefreshCw, Copy } from 'lucide-react'
+import { CreditCard, Loader2, RefreshCw, Copy, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -267,6 +267,10 @@ export function TopUps() {
             <CardTitle className="text-lg">充值记录 ({total})</CardTitle>
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
               {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.open('https://credit.linux.do/home', '_blank')}>
+              <ExternalLink className="h-4 w-4 mr-1" />
+              LINUX DO Credit
             </Button>
           </div>
         </CardHeader>
