@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
-import { Progress } from './ui/progress'
+import { cn } from '../lib/utils'
 
 interface SystemOverview {
   total_users: number
@@ -85,7 +85,7 @@ export function Dashboard() {
 
   const fetchModels = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/models?period=${period}&limit=10`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/dashboard/models?period=${period}&limit=8`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) setModels(data.data)
     } catch (error) { console.error('Failed to fetch models:', error) }
@@ -143,9 +143,9 @@ export function Dashboard() {
     showToast('success', '数据已刷新')
   }
 
-  const formatQuota = (quota: number) => `${(quota / 500000).toFixed(2)}`
+  const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
   const formatNumber = (num: number) => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
+    if (num >= 1000000) return `${(num / 1000000).toFixed(2)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
     return num.toString()
   }
@@ -154,143 +154,318 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20">
+      <div className="flex justify-center items-center py-40">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Period Selector & Refresh */}
-      <div className="flex justify-between items-center">
-        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-          {refreshing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-          刷新
-        </Button>
-        <div className="inline-flex rounded-lg border bg-card p-1">
-          {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
-            <Button key={p} variant={period === p ? 'default' : 'ghost'} size="sm" onClick={() => setPeriod(p)}>
-              {p === '24h' ? '24小时' : p === '3d' ? '3天' : p === '7d' ? '7天' : '14天'}
-            </Button>
-          ))}
+    <div className="space-y-8 animate-in fade-in duration-500">
+      {/* Header Actions */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">仪表盘</h2>
+          <p className="text-muted-foreground mt-1">系统运行状态与实时数据概览</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
+            <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
+            刷新
+          </Button>
+          <div className="inline-flex rounded-lg border bg-muted/50 p-1">
+            {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
+              <Button 
+                key={p} 
+                variant={period === p ? 'default' : 'ghost'} 
+                size="sm" 
+                onClick={() => setPeriod(p)}
+                className="h-7 text-xs px-3"
+              >
+                {p === '24h' ? '24小时' : p === '3d' ? '3天' : p === '7d' ? '7天' : '14天'}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* System Overview */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <OverviewCard title="用户总数" value={overview?.total_users || 0} subValue={`活跃: ${overview?.active_users || 0}`} icon={Users} color="blue" />
-        <OverviewCard title="Token总数" value={overview?.total_tokens || 0} subValue={`活跃: ${overview?.active_tokens || 0}`} icon={Key} color="green" />
-        <OverviewCard title="渠道总数" value={overview?.total_channels || 0} subValue={`在线: ${overview?.active_channels || 0}`} icon={Server} color="purple" />
-        <OverviewCard title="模型数量" value={overview?.total_models || 0} icon={Box} color="orange" />
-        <OverviewCard title="兑换码" value={overview?.total_redemptions || 0} subValue={`未使用: ${overview?.unused_redemptions || 0}`} icon={Ticket} color="pink" />
-      </div>
+      {/* System Overview Section */}
+      <section className="space-y-4">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <Database className="w-5 h-5 text-primary" />
+          平台资源
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <StatCard 
+            title="用户总数" 
+            value={overview?.total_users || 0} 
+            subValue={`${overview?.active_users || 0} 活跃`} 
+            icon={Users} 
+            color="blue" 
+          />
+          <StatCard 
+            title="Token总数" 
+            value={overview?.total_tokens || 0} 
+            subValue={`${overview?.active_tokens || 0} 活跃`} 
+            icon={Key} 
+            color="emerald" 
+          />
+          <StatCard 
+            title="渠道总数" 
+            value={overview?.total_channels || 0} 
+            subValue={`${overview?.active_channels || 0} 在线`} 
+            icon={Server} 
+            color="purple" 
+          />
+          <StatCard 
+            title="模型数量" 
+            value={overview?.total_models || 0} 
+            subValue="可用模型"
+            icon={Box} 
+            color="orange" 
+          />
+          <StatCard 
+            title="兑换码" 
+            value={overview?.total_redemptions || 0} 
+            subValue={`${overview?.unused_redemptions || 0} 未用`} 
+            icon={Ticket} 
+            color="pink" 
+          />
+        </div>
+      </section>
 
-      {/* Usage Statistics */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <UsageCard title="请求总数" value={formatNumber(usage?.total_requests || 0)} color="blue" />
-        <UsageCard title="消耗额度" value={formatQuota(usage?.total_quota_used || 0)} color="green" />
-        <UsageCard title="输入Token" value={formatNumber(usage?.total_prompt_tokens || 0)} color="purple" />
-        <UsageCard title="输出Token" value={formatNumber(usage?.total_completion_tokens || 0)} color="orange" />
-        <UsageCard title="平均响应" value={`${usage?.average_response_time || 0}ms`} color="pink" />
-      </div>
+      {/* Usage Statistics Section */}
+      <section className="space-y-4">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <Activity className="w-5 h-5 text-primary" />
+          流量分析 ({getPeriodLabel()})
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <StatCard 
+            title="请求总数" 
+            value={formatNumber(usage?.total_requests || 0)} 
+            icon={BarChart3}
+            color="indigo"
+            variant="compact"
+          />
+          <StatCard 
+            title="消耗额度" 
+            value={formatQuota(usage?.total_quota_used || 0)} 
+            icon={Zap}
+            color="amber"
+            variant="compact"
+          />
+          <StatCard 
+            title="输入Token" 
+            value={formatNumber(usage?.total_prompt_tokens || 0)} 
+            icon={Users} // Reusing Users icon for visual consistency or change to another
+            color="cyan"
+            variant="compact"
+            customLabel="Prompt"
+          />
+          <StatCard 
+            title="输出Token" 
+            value={formatNumber(usage?.total_completion_tokens || 0)} 
+            icon={Users}
+            color="teal"
+            variant="compact"
+            customLabel="Completion"
+          />
+          <StatCard 
+            title="平均响应" 
+            value={`${usage?.average_response_time || 0}ms`} 
+            icon={Clock}
+            color="rose"
+            variant="compact"
+          />
+        </div>
+      </section>
 
-      {/* Charts Row */}
+      {/* Main Charts Area */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle className="text-lg">每日趋势</CardTitle></CardHeader>
+        {/* Daily Trends Chart */}
+        <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-muted-foreground" />
+              每日请求趋势
+            </CardTitle>
+            <CardDescription>{getPeriodLabel()}内的请求量变化</CardDescription>
+          </CardHeader>
           <CardContent>
             {dailyTrends.length > 0 ? (
-              <div className="space-y-4">
-                <div className="h-48 flex items-end space-x-2">
+              <div className="space-y-4 pt-4">
+                <div className="h-56 flex items-end space-x-2 sm:space-x-4">
                   {dailyTrends.map((trend, index) => {
                     const maxRequests = getMaxValue(dailyTrends.map(t => t.request_count))
                     const height = (trend.request_count / maxRequests) * 100
                     return (
-                      <div key={index} className="flex-1 h-full flex flex-col items-center">
-                        <div className="flex-1 w-full flex items-end">
-                          <div className="w-full bg-primary rounded-t transition-all hover:bg-primary/80" style={{ height: `${Math.max(height, 2)}%` }} title={`${trend.request_count} 请求`} />
+                      <div key={index} className="flex-1 h-full flex flex-col items-center group relative">
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center bg-popover text-popover-foreground text-xs rounded shadow-lg p-2 z-10 whitespace-nowrap">
+                          <span className="font-bold">{trend.request_count} 请求</span>
+                          <span className="text-muted-foreground">{trend.date}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground mt-2 truncate w-full text-center">{trend.date.slice(5)}</span>
+                        
+                        <div className="flex-1 w-full flex items-end relative">
+                          <div 
+                            className="w-full bg-primary/80 hover:bg-primary rounded-t-md transition-all duration-300 ease-out group-hover:scale-y-105 origin-bottom" 
+                            style={{ height: `${Math.max(height, 4)}%` }} 
+                          />
+                        </div>
+                        <span className="text-[10px] sm:text-xs text-muted-foreground mt-3 truncate w-full text-center">
+                          {trend.date.slice(5)}
+                        </span>
                       </div>
                     )
                   })}
                 </div>
-                <div className="flex justify-between text-sm text-muted-foreground"><span>请求数</span><span>日期</span></div>
               </div>
-            ) : (<div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>)}
+            ) : (
+              <div className="h-56 flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
+                暂无数据
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-lg">模型使用分布</CardTitle></CardHeader>
+        {/* Model Usage List */}
+        <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Box className="w-5 h-5 text-muted-foreground" />
+              模型使用分布
+            </CardTitle>
+            <CardDescription>{getPeriodLabel()}内 Top 8 活跃模型</CardDescription>
+          </CardHeader>
           <CardContent>
             {models.length > 0 ? (
-              <div className="space-y-3">
-                {models.slice(0, 8).map((model, index) => {
+              <div className="space-y-5">
+                {models.map((model, index) => {
                   const maxRequests = getMaxValue(models.map(m => m.request_count))
                   const percentage = (model.request_count / maxRequests) * 100
-                  const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500', 'bg-yellow-500', 'bg-red-500']
+                  const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500', 'bg-yellow-500', 'bg-rose-500']
                   return (
-                    <div key={index} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-foreground truncate max-w-[200px]" title={model.model_name}>{model.model_name}</span>
-                        <span className="text-muted-foreground">{formatNumber(model.request_count)}</span>
+                    <div key={index} className="space-y-1.5 group">
+                      <div className="flex justify-between text-sm items-center">
+                        <span className="font-medium truncate max-w-[180px] sm:max-w-[250px]" title={model.model_name}>
+                          {model.model_name}
+                        </span>
+                        <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                          <span>{formatNumber(model.request_count)} 请求</span>
+                        </div>
                       </div>
-                      <Progress value={percentage} indicatorClassName={colors[index % colors.length]} />
+                      <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${colors[index % colors.length]}`} 
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
                     </div>
                   )
                 })}
               </div>
-            ) : (<div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>)}
+            ) : (
+              <div className="h-56 flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
+                暂无数据
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
       {/* Analytics Kings */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <KingCard title="🏆 请求王" subtitle={`${getPeriodLabel()}内请求数最多`} icon={Zap} user={analyticsSummary?.request_king} valueLabel="总请求数" value={analyticsSummary?.request_king?.request_count.toLocaleString()} gradient="from-blue-500 to-blue-600" />
-        <KingCard title="👑 额度王" subtitle={`${getPeriodLabel()}内消耗额度最多`} icon={Crown} user={analyticsSummary?.quota_king} valueLabel="总消耗额度" value={analyticsSummary?.quota_king ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} gradient="from-green-500 to-green-600" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <KingCard 
+          title="请求之王" 
+          subtitle={`${getPeriodLabel()}内请求数最多`} 
+          icon={Zap} 
+          user={analyticsSummary?.request_king} 
+          valueLabel="总请求数" 
+          value={analyticsSummary?.request_king?.request_count.toLocaleString()} 
+          gradient="from-blue-600 to-indigo-600"
+          accentColor="text-blue-100"
+        />
+        <KingCard 
+          title="土豪榜首" 
+          subtitle={`${getPeriodLabel()}内消耗额度最多`} 
+          icon={Crown} 
+          user={analyticsSummary?.quota_king} 
+          valueLabel="总消耗额度" 
+          value={analyticsSummary?.quota_king ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} 
+          gradient="from-emerald-600 to-teal-600" 
+          accentColor="text-emerald-100"
+        />
       </div>
     </div>
   )
 }
 
-interface OverviewCardProps {
+// --- Components ---
+
+interface StatCardProps {
   title: string
-  value: number
+  value: number | string
   subValue?: string
   icon: React.ElementType
-  color: 'blue' | 'green' | 'purple' | 'orange' | 'pink'
+  color: string
+  variant?: 'default' | 'compact'
+  customLabel?: string
 }
 
-function OverviewCard({ title, value, subValue, icon: Icon, color }: OverviewCardProps) {
-  const colorClasses = { blue: 'bg-blue-500', green: 'bg-green-500', purple: 'bg-purple-500', orange: 'bg-orange-500', pink: 'bg-pink-500' }
+function StatCard({ title, value, subValue, icon: Icon, color, variant = 'default', customLabel }: StatCardProps) {
+  // Map color names to Tailwind classes
+  const colorMap: Record<string, { bg: string, text: string, ring: string }> = {
+    blue: { bg: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300', text: 'text-blue-600', ring: 'group-hover:ring-blue-200' },
+    green: { bg: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300', text: 'text-green-600', ring: 'group-hover:ring-green-200' },
+    emerald: { bg: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300', text: 'text-emerald-600', ring: 'group-hover:ring-emerald-200' },
+    purple: { bg: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300', text: 'text-purple-600', ring: 'group-hover:ring-purple-200' },
+    orange: { bg: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300', text: 'text-orange-600', ring: 'group-hover:ring-orange-200' },
+    pink: { bg: 'bg-pink-50 text-pink-700 dark:bg-pink-950 dark:text-pink-300', text: 'text-pink-600', ring: 'group-hover:ring-pink-200' },
+    indigo: { bg: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300', text: 'text-indigo-600', ring: 'group-hover:ring-indigo-200' },
+    amber: { bg: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300', text: 'text-amber-600', ring: 'group-hover:ring-amber-200' },
+    cyan: { bg: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300', text: 'text-cyan-600', ring: 'group-hover:ring-cyan-200' },
+    teal: { bg: 'bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300', text: 'text-teal-600', ring: 'group-hover:ring-teal-200' },
+    rose: { bg: 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300', text: 'text-rose-600', ring: 'group-hover:ring-rose-200' },
+  }
+
+  const theme = colorMap[color] || colorMap.blue
+
+  if (variant === 'compact') {
+    return (
+      <Card className={cn("overflow-hidden hover:shadow-md transition-all duration-200 group border-l-4", `border-l-${color}-500`)}>
+        <CardContent className="p-4 flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{customLabel || title}</p>
+            <div className="text-xl font-bold tracking-tight">{value}</div>
+          </div>
+          <div className={cn("p-2 rounded-full", theme.bg)}>
+            <Icon className="w-4 h-4" />
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center">
-          <div className={`${colorClasses[color]} p-3 rounded-lg`}><Icon className="w-6 h-6 text-white" /></div>
-          <div className="ml-4">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold">{value.toLocaleString()}</p>
-            {subValue && <p className="text-xs text-muted-foreground">{subValue}</p>}
+    <Card className="overflow-hidden hover:shadow-md transition-all duration-200 group">
+      <CardContent className="p-5">
+        <div className="flex justify-between items-start">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            <div className="text-2xl font-bold tracking-tight">{value.toLocaleString()}</div>
+          </div>
+          <div className={cn("p-2.5 rounded-xl transition-colors duration-200", theme.bg)}>
+            <Icon className="w-5 h-5" />
           </div>
         </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-interface UsageCardProps { title: string; value: string; color: 'blue' | 'green' | 'purple' | 'orange' | 'pink' }
-
-function UsageCard({ title, value, color }: UsageCardProps) {
-  const borderColors = { blue: 'border-l-blue-500', green: 'border-l-green-500', purple: 'border-l-purple-500', orange: 'border-l-orange-500', pink: 'border-l-pink-500' }
-  return (
-    <Card className={`border-l-4 ${borderColors[color]}`}>
-      <CardContent className="p-4">
-        <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="text-xl font-bold mt-1">{value}</p>
+        {subValue && (
+          <div className="mt-4 flex items-center text-xs">
+            <span className={cn("font-medium px-2 py-0.5 rounded-full bg-secondary", theme.text)}>
+              {subValue}
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -304,33 +479,50 @@ interface KingCardProps {
   valueLabel: string
   value: string | undefined
   gradient: string
+  accentColor: string
 }
 
-function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradient }: KingCardProps) {
+function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradient, accentColor }: KingCardProps) {
   return (
-    <div className={`bg-gradient-to-br ${gradient} rounded-lg shadow-lg p-6 text-white`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-white/80 text-sm font-medium">{title}</p>
-          <p className="text-xs text-white/60 mt-1">{subtitle}</p>
-        </div>
-        <div className="bg-white/20 rounded-full p-3"><Icon className="w-8 h-8" /></div>
+    <div className={`bg-gradient-to-br ${gradient} rounded-xl shadow-lg p-6 text-white relative overflow-hidden group hover:shadow-xl transition-all duration-300`}>
+      {/* Background Pattern */}
+      <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+        <Icon className="w-32 h-32 rotate-12" />
       </div>
+
+      <div className="flex items-center justify-between relative z-10">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon className="w-5 h-5 opacity-90" />
+            <p className="text-lg font-bold tracking-wide">{title}</p>
+          </div>
+          <p className={`text-sm mt-1 ${accentColor} opacity-90`}>{subtitle}</p>
+        </div>
+      </div>
+
       {user ? (
-        <div className="mt-4">
-          <div className="flex items-center">
-            <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center text-xl font-bold">{user.username.charAt(0).toUpperCase()}</div>
+        <div className="mt-6 relative z-10">
+          <div className="flex items-center bg-white/10 p-4 rounded-lg backdrop-blur-sm border border-white/10">
+            <div className="h-12 w-12 rounded-full bg-white text-blue-600 flex items-center justify-center text-xl font-bold shadow-sm">
+              {user.username.charAt(0).toUpperCase()}
+            </div>
             <div className="ml-4">
               <p className="text-xl font-bold">{user.username}</p>
-              <p className="text-white/70 text-sm">ID: {user.user_id}</p>
+              <p className={`text-xs ${accentColor}`}>User ID: {user.user_id}</p>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-white/20">
-            <p className="text-3xl font-bold">{value}</p>
-            <p className="text-white/70 text-sm">{valueLabel}</p>
+          <div className="mt-4 flex justify-between items-end">
+             <div>
+               <p className={`text-xs ${accentColor} mb-1`}>{valueLabel}</p>
+               <p className="text-3xl font-bold tracking-tight">{value}</p>
+             </div>
           </div>
         </div>
-      ) : (<div className="mt-4 text-center py-6 text-white/70">暂无数据</div>)}
+      ) : (
+        <div className="mt-6 h-[108px] flex flex-col items-center justify-center bg-white/5 rounded-lg border border-white/10 backdrop-blur-sm relative z-10">
+          <p className="text-white/60">暂无数据</p>
+        </div>
+      )}
     </div>
   )
 }
