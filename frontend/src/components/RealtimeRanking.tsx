@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2 } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Progress } from './ui/progress'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Select } from './ui/select'
+import { cn } from '../lib/utils'
 
 type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h'
 type SortKey = 'requests' | 'quota' | 'failure_rate'
@@ -71,10 +72,10 @@ function formatQuota(quota: number) {
 }
 
 function rankBadgeClass(rank: number) {
-  if (rank === 1) return 'bg-yellow-500 text-white'
-  if (rank === 2) return 'bg-slate-500 text-white'
-  if (rank === 3) return 'bg-orange-500 text-white'
-  return 'bg-muted text-muted-foreground'
+  if (rank === 1) return 'bg-yellow-500 text-white shadow-sm'
+  if (rank === 2) return 'bg-slate-500 text-white shadow-sm'
+  if (rank === 3) return 'bg-orange-500 text-white shadow-sm'
+  return 'bg-muted text-muted-foreground font-medium'
 }
 
 interface BanRecordItem {
@@ -100,6 +101,7 @@ export function RealtimeRanking() {
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [countdown, setCountdown] = useState(10)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selected, setSelected] = useState<{ item: LeaderboardItem; window: WindowKey } | null>(null)
@@ -135,6 +137,7 @@ export function RealtimeRanking() {
           '24h': windowsData['24h'] || [],
         })
         setGeneratedAt(res.data?.generated_at || 0)
+        setCountdown(10)
         if (showSuccessToast) showToast('success', '已刷新')
       } else {
         showToast('error', res.message || '获取排行榜失败')
@@ -184,8 +187,16 @@ export function RealtimeRanking() {
 
   useEffect(() => {
     if (view !== 'leaderboards') return
-    const t = setInterval(() => fetchLeaderboards(), 10_000)
-    return () => clearInterval(t)
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          fetchLeaderboards()
+          return 10
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
   }, [fetchLeaderboards, view])
 
   useEffect(() => {
@@ -310,28 +321,40 @@ export function RealtimeRanking() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">风控中心</h2>
-          <p className="text-muted-foreground mt-1">实时 Top 10 · 分析 + 封禁 + 审计</p>
-          {generatedAt > 0 && view === 'leaderboards' && <p className="text-xs text-muted-foreground mt-2">上次更新: {formatTime(generatedAt)}</p>}
+          <div className="flex items-center gap-3">
+            <h2 className="text-3xl font-bold tracking-tight">风控中心</h2>
+            {view === 'leaderboards' && (
+              <Badge variant="outline" className="animate-pulse border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20">
+                <div className="w-2 h-2 rounded-full bg-green-500 mr-2" />
+                实时监控中
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground mt-1">实时 Top 10 · 深度分析 · 快速封禁</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {view === 'leaderboards' && (
-            <div className="w-44">
-              <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)}>
-                <option value="requests">按请求次数</option>
-                <option value="quota">按额度消耗</option>
-                <option value="failure_rate">按失败率</option>
-              </Select>
-            </div>
+            <>
+              <div className="text-xs text-muted-foreground flex items-center tabular-nums">
+                <Clock className="w-3 h-3 mr-1" /> {countdown}s 后刷新
+              </div>
+              <div className="w-40">
+                <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)}>
+                  <option value="requests">按请求次数</option>
+                  <option value="quota">按额度消耗</option>
+                  <option value="failure_rate">按失败率</option>
+                </Select>
+              </div>
+            </>
           )}
           {view === 'leaderboards' ? (
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
-              <RefreshCw className={(refreshing ? 'animate-spin ' : '') + 'h-4 w-4 mr-2'} />
+              <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
               刷新
             </Button>
           ) : (
             <Button variant="outline" size="sm" onClick={handleRefreshRecords} disabled={recordsRefreshing} className="h-9">
-              <RefreshCw className={(recordsRefreshing ? 'animate-spin ' : '') + 'h-4 w-4 mr-2'} />
+              <RefreshCw className={cn("h-4 w-4 mr-2", recordsRefreshing && "animate-spin")} />
               刷新
             </Button>
           )}
@@ -345,43 +368,81 @@ export function RealtimeRanking() {
         </TabsList>
 
         <TabsContent value="leaderboards">
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {windows.map((w) => (
-              <Card key={w} className="rounded-2xl shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">{WINDOW_LABELS[w]}</CardTitle>
+          {/* Responsive Grid Layout: 1 col on mobile, 2 cols on tablet/desktop */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {windows.map((w, index) => (
+              <Card 
+                key={w} 
+                className={cn(
+                  "rounded-xl shadow-sm transition-all duration-200 hover:shadow-md",
+                  // Make the 5th item (24h) span full width on medium screens to be symmetrical (2+2+1)
+                  index === 4 && "md:col-span-2"
+                )}
+              >
+                <CardHeader className="pb-3 border-b bg-muted/20">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-primary" />
+                      {WINDOW_LABELS[w]}
+                    </CardTitle>
+                    {index === 4 && <span className="text-xs text-muted-foreground">全周期汇总</span>}
+                  </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-0 px-0">
                   {loading ? (
                     <div className="h-48 flex items-center justify-center text-muted-foreground">
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />加载中...
+                      <Loader2 className="h-5 w-5 mr-2 animate-spin" />加载中...
                     </div>
                   ) : (data[w]?.length ? (
-                    <div className="max-h-80 overflow-auto pr-2 space-y-2">
+                    <div className="divide-y">
                       {data[w].slice(0, 10).map((item, idx) => {
                         const name = item.username || `User#${item.user_id}`
                         const isBanned = item.user_status === 2
                         return (
                           <div
                             key={`${w}-${item.user_id}`}
-                            className={'flex items-center gap-3 rounded-xl px-3 py-2 bg-muted/20 hover:bg-muted/30 transition-colors ' + (isBanned ? 'opacity-60' : '')}
+                            className={cn(
+                              "flex items-center gap-4 px-4 py-3 hover:bg-muted/30 transition-colors group",
+                              isBanned && "opacity-60 bg-muted/10"
+                            )}
                           >
-                            <div className={'h-7 w-7 rounded-lg flex items-center justify-center text-sm font-bold ' + rankBadgeClass(idx + 1)}>
+                            <div className={cn(
+                              "h-6 w-6 rounded flex items-center justify-center text-xs font-bold flex-shrink-0",
+                              rankBadgeClass(idx + 1)
+                            )}>
                               {idx + 1}
                             </div>
+                            
                             <div className="min-w-0 flex-1">
-                              <div className="font-medium truncate">{name}</div>
-                              <div className="text-xs text-muted-foreground truncate">ID: {item.user_id} · IP: {item.unique_ips}</div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-sm truncate">{name}</span>
+                                {isBanned && <Badge variant="destructive" className="h-4 px-1 text-[10px]">禁用</Badge>}
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-2">
+                                <span>ID: {item.user_id}</span>
+                                <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+                                <span>IP: {item.unique_ips}</span>
+                                {index === 4 && (
+                                  <>
+                                    <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+                                    <span>失败: {(item.failure_rate * 100).toFixed(1)}%</span>
+                                  </>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
+
+                            <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <div className="font-semibold tabular-nums">{renderMetric(item)}</div>
-                                <div className="text-[10px] text-muted-foreground">{metricLabel}</div>
+                                <div className="font-bold text-sm tabular-nums">{renderMetric(item)}</div>
+                                <div className="text-[10px] text-muted-foreground uppercase">{metricLabel}</div>
                               </div>
                               <Button
-                                variant={isBanned ? 'secondary' : 'outline'}
+                                variant={isBanned ? 'secondary' : 'ghost'}
                                 size="icon"
-                                className="h-8 w-8"
+                                className={cn(
+                                  "h-8 w-8 transition-opacity",
+                                  isBanned ? "opacity-100" : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                )}
                                 onClick={() => openUserDialog(item, w)}
                                 title={isBanned ? '查看/解除封禁' : '分析/封禁'}
                               >
@@ -393,7 +454,10 @@ export function RealtimeRanking() {
                       })}
                     </div>
                   ) : (
-                    <div className="h-48 flex items-center justify-center text-muted-foreground">暂无数据</div>
+                    <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm">
+                      <ShieldCheck className="h-8 w-8 mb-2 opacity-20" />
+                      暂无风险数据
+                    </div>
                   ))}
                 </CardContent>
               </Card>
@@ -402,64 +466,66 @@ export function RealtimeRanking() {
         </TabsContent>
 
         <TabsContent value="ban_records">
-          <Card className="rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">封禁记录（最新）</CardTitle>
+          <Card className="rounded-xl shadow-sm">
+            <CardHeader className="pb-3 border-b">
+              <CardTitle className="text-lg">封禁审计记录</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {recordsLoading ? (
-                <div className="h-56 flex items-center justify-center text-muted-foreground">
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />加载中...
+                <div className="h-64 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-6 w-6 mr-2 animate-spin" />加载中...
                 </div>
               ) : (
                 <>
-                  <div className="rounded-lg border overflow-auto">
+                  <div className="overflow-auto">
                     <Table>
                       <TableHeader>
-                        <TableRow>
-                          <TableHead className="min-w-[160px]">时间</TableHead>
-                          <TableHead className="min-w-[80px]">动作</TableHead>
-                          <TableHead className="min-w-[120px]">操作者</TableHead>
-                          <TableHead className="min-w-[160px]">用户</TableHead>
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableHead className="w-[180px]">时间</TableHead>
+                          <TableHead className="w-[100px]">动作</TableHead>
+                          <TableHead className="w-[150px]">操作者</TableHead>
+                          <TableHead className="w-[200px]">用户</TableHead>
                           <TableHead>原因</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {records.length ? records.map((r) => (
                           <TableRow key={r.id}>
-                            <TableCell className="text-sm text-muted-foreground">{formatTime(r.created_at)}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground font-mono">{formatTime(r.created_at)}</TableCell>
                             <TableCell>
                               {r.action === 'ban'
-                                ? <Badge variant="destructive">封禁</Badge>
-                                : <Badge variant="success">解封</Badge>}
+                                ? <Badge variant="destructive" className="font-normal">封禁</Badge>
+                                : <Badge variant="success" className="font-normal">解封</Badge>}
                             </TableCell>
                             <TableCell className="text-sm">{r.operator || '-'}</TableCell>
                             <TableCell className="text-sm">
                               <div className="font-medium">{r.username || `User#${r.user_id}`}</div>
                               <div className="text-xs text-muted-foreground">ID: {r.user_id}</div>
                             </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{r.reason || '-'}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground max-w-md truncate" title={r.reason}>{r.reason || '-'}</TableCell>
                           </TableRow>
                         )) : (
                           <TableRow>
-                            <TableCell colSpan={5} className="text-center text-muted-foreground">暂无记录</TableCell>
+                            <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">暂无记录</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
                     </Table>
                   </div>
 
-                  <div className="flex items-center justify-between mt-4">
-                    <div className="text-sm text-muted-foreground">第 {recordsPage} / {recordsTotalPages} 页</div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" disabled={recordsPage <= 1 || recordsLoading} onClick={() => fetchBanRecords(recordsPage - 1)}>
-                        上一页
-                      </Button>
-                      <Button variant="outline" size="sm" disabled={recordsPage >= recordsTotalPages || recordsLoading} onClick={() => fetchBanRecords(recordsPage + 1)}>
-                        下一页
-                      </Button>
+                  {recordsTotalPages > 1 && (
+                    <div className="flex items-center justify-between p-4 border-t">
+                      <div className="text-sm text-muted-foreground">第 {recordsPage} / {recordsTotalPages} 页</div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" disabled={recordsPage <= 1 || recordsLoading} onClick={() => fetchBanRecords(recordsPage - 1)}>
+                          上一页
+                        </Button>
+                        <Button variant="outline" size="sm" disabled={recordsPage >= recordsTotalPages || recordsLoading} onClick={() => fetchBanRecords(recordsPage + 1)}>
+                          下一页
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -467,167 +533,215 @@ export function RealtimeRanking() {
         </TabsContent>
       </Tabs>
 
+      {/* Optimized Analysis Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl rounded-2xl border border-border/50 bg-background shadow-[10px_10px_30px_rgba(0,0,0,0.12),-10px_-10px_30px_rgba(255,255,255,0.6)] dark:shadow-[10px_10px_30px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.04)]">
-          <DialogHeader>
-            <DialogTitle>用户使用分析</DialogTitle>
-            <DialogDescription>
-              {selected ? `窗口：${WINDOW_LABELS[selected.window]} · 用户ID：${selected.item.user_id}` : ''}
-            </DialogDescription>
+        <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          {/* Fixed Header */}
+          <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
+            <div className="flex justify-between items-start pr-6">
+              <div>
+                <DialogTitle className="text-xl">用户行为分析</DialogTitle>
+                <DialogDescription className="mt-1.5 flex items-center gap-2">
+                  <Badge variant="outline">{selected ? WINDOW_LABELS[selected.window] : '-'}</Badge>
+                  <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
 
-          {analysisLoading ? (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />加载中...
-            </div>
-          ) : analysis ? (
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">RPM: {analysis.risk.requests_per_minute.toFixed(1)}</Badge>
-                <Badge variant="secondary">均额/次: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}</Badge>
-                {analysis.risk.risk_flags.map((f) => (
-                  <Badge key={f} variant="destructive">{f}</Badge>
-                ))}
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-y-auto p-5 min-h-0 bg-background">
+            {analysisLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Loader2 className="h-8 w-8 mb-4 animate-spin text-primary/50" />
+                <p>正在分析海量日志...</p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Card className="rounded-xl">
-                  <CardContent className="p-3">
-                    <div className="text-xs text-muted-foreground">请求数</div>
-                    <div className="text-xl font-bold tabular-nums">{formatNumber(analysis.summary.total_requests)}</div>
-                  </CardContent>
-                </Card>
-                <Card className="rounded-xl">
-                  <CardContent className="p-3">
-                    <div className="text-xs text-muted-foreground">失败率</div>
-                    <div className="text-xl font-bold tabular-nums">{(analysis.summary.failure_rate * 100).toFixed(2)}%</div>
-                  </CardContent>
-                </Card>
-                <Card className="rounded-xl">
-                  <CardContent className="p-3">
-                    <div className="text-xs text-muted-foreground">空回复率</div>
-                    <div className="text-xl font-bold tabular-nums">{(analysis.summary.empty_rate * 100).toFixed(2)}%</div>
-                  </CardContent>
-                </Card>
-                <Card className="rounded-xl">
-                  <CardContent className="p-3">
-                    <div className="text-xs text-muted-foreground">独立IP</div>
-                    <div className="text-xl font-bold tabular-nums">{formatNumber(analysis.summary.unique_ips)}</div>
-                  </CardContent>
-                </Card>
-              </div>
+            ) : analysis ? (
+              <div className="space-y-6">
+                {/* Risk Overview Tags */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    RPM: {analysis.risk.requests_per_minute.toFixed(1)}
+                  </Badge>
+                  <Badge variant="secondary" className="px-3 py-1 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                    均额: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}
+                  </Badge>
+                  {analysis.risk.risk_flags.length > 0 ? (
+                    analysis.risk.risk_flags.map((f) => (
+                      <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
+                        <AlertTriangle className="w-3 h-3 mr-1" /> {f}
+                      </Badge>
+                    ))
+                  ) : (
+                    <Badge variant="success" className="px-3 py-1 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
+                      <ShieldCheck className="w-3 h-3 mr-1" /> 无明显异常
+                    </Badge>
+                  )}
+                </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <Card className="rounded-xl">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">模型分布（Top 10）</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {analysis.top_models.length ? (
-                      analysis.top_models.map((m) => {
+                {/* Core Metrics Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Card className="bg-muted/20 border-none shadow-sm">
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">请求总数</div>
+                      <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.total_requests)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className={cn("border-none shadow-sm", analysis.summary.failure_rate > 0.5 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/20")}>
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">失败率</div>
+                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.failure_rate > 0.5 && "text-red-600")}>
+                        {(analysis.summary.failure_rate * 100).toFixed(1)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className={cn("border-none shadow-sm", analysis.summary.empty_rate > 0.5 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/20")}>
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">空回复率</div>
+                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.empty_rate > 0.5 && "text-yellow-600")}>
+                        {(analysis.summary.empty_rate * 100).toFixed(1)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-muted/20 border-none shadow-sm">
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">IP 来源</div>
+                      <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.unique_ips)}</div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Distributions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground">模型偏好 (Top 5)</h4>
+                    {analysis.top_models.slice(0, 5).length ? (
+                      analysis.top_models.slice(0, 5).map((m) => {
                         const pct = analysis.summary.total_requests ? (m.requests / analysis.summary.total_requests) * 100 : 0
                         return (
-                          <div key={m.model_name} className="space-y-1">
-                            <div className="flex justify-between text-sm">
-                              <span className="truncate max-w-[220px]" title={m.model_name}>{m.model_name}</span>
-                              <span className="text-muted-foreground tabular-nums">{formatNumber(m.requests)}</span>
+                          <div key={m.model_name} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="font-medium truncate max-w-[180px]">{m.model_name}</span>
+                              <span className="text-muted-foreground">{formatNumber(m.requests)} ({pct.toFixed(0)}%)</span>
                             </div>
-                            <Progress value={pct} />
+                            <Progress value={pct} className="h-1.5" />
                           </div>
                         )
                       })
-                    ) : (
-                      <div className="text-sm text-muted-foreground">暂无数据</div>
-                    )}
-                  </CardContent>
-                </Card>
+                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
+                  </div>
 
-                <Card className="rounded-xl">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">IP 分布（Top 10）</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {analysis.top_ips.length ? (
-                      analysis.top_ips.map((ip) => (
-                        <div key={ip.ip} className="flex items-center justify-between text-sm">
-                          <span className="truncate max-w-[240px]" title={ip.ip}>{ip.ip}</span>
-                          <span className="text-muted-foreground tabular-nums">{formatNumber(ip.requests)}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">暂无数据</div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card className="rounded-xl">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">最近请求（最新 10 条）</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {analysis.recent_logs.slice(0, 10).map((l) => (
-                    <div key={l.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-1 rounded-lg bg-muted/20 px-3 py-2">
-                      <div className="text-sm truncate">
-                        <span className="text-muted-foreground mr-2">#{l.id}</span>
-                        <span className="font-medium">{l.model_name || '-'}</span>
-                        <span className="text-muted-foreground ml-2">{l.type === 5 ? '失败' : '成功'}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground flex gap-3 flex-wrap">
-                        <span>{formatTime(l.created_at)}</span>
-                        {l.ip && <span>IP: {l.ip}</span>}
-                        {l.channel_name && <span>渠道: {l.channel_name}</span>}
-                        {l.use_time ? <span>耗时: {l.use_time}ms</span> : null}
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              <div className="space-y-2">
-                <div className="text-sm text-muted-foreground">封禁原因（可选）</div>
-                <Input value={banReason} onChange={(e) => setBanReason(e.target.value)} placeholder="例如：疑似刷量/异常IP/高失败率…" />
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl bg-muted/20 px-4 py-3">
-                <div className="text-sm">
-                  当前状态：
-                  <span className={'ml-2 font-medium ' + (analysis.user.status === 2 ? 'text-destructive' : 'text-green-600')}>
-                    {analysis.user.status === 2 ? '禁用' : '正常'}
-                  </span>
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground">来源 IP (Top 5)</h4>
+                    {analysis.top_ips.slice(0, 5).length ? (
+                      analysis.top_ips.slice(0, 5).map((ip) => {
+                        const pct = analysis.summary.total_requests ? (ip.requests / analysis.summary.total_requests) * 100 : 0
+                        return (
+                          <div key={ip.ip} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="font-medium truncate">{ip.ip}</span>
+                              <span className="text-muted-foreground">{formatNumber(ip.requests)} ({pct.toFixed(0)}%)</span>
+                            </div>
+                            <Progress value={pct} className="h-1.5" />
+                          </div>
+                        )
+                      })
+                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
+                  </div>
                 </div>
-                {analysis.user.status === 2 ? (
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
-                    <input type="checkbox" checked={enableTokens} onChange={(e) => setEnableTokens(e.target.checked)} />
-                    同时启用 tokens
-                  </label>
+
+                {/* Recent Logs Table */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>
+                  <div className="rounded-lg border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="h-8 bg-muted/50 hover:bg-muted/50">
+                          <TableHead className="h-8 text-xs w-[140px]">时间</TableHead>
+                          <TableHead className="h-8 text-xs w-[60px]">状态</TableHead>
+                          <TableHead className="h-8 text-xs">模型</TableHead>
+                          <TableHead className="h-8 text-xs text-right">耗时</TableHead>
+                          <TableHead className="h-8 text-xs text-right w-[120px]">IP</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {analysis.recent_logs.slice(0, 10).map((l) => (
+                          <TableRow key={l.id} className="h-8 hover:bg-muted/30">
+                            <TableCell className="py-1.5 text-xs text-muted-foreground whitespace-nowrap">{formatTime(l.created_at)}</TableCell>
+                            <TableCell className="py-1.5 text-xs">
+                              {l.type === 5 ? <span className="text-red-500 font-medium">失败</span> : <span className="text-green-500">成功</span>}
+                            </TableCell>
+                            <TableCell className="py-1.5 text-xs font-medium truncate max-w-[150px]" title={l.model_name}>{l.model_name}</TableCell>
+                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground">{l.use_time}ms</TableCell>
+                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground font-mono">{l.ip}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                暂无分析数据
+              </div>
+            )}
+          </div>
+
+          {/* Fixed Footer */}
+          <div className="p-5 border-t bg-muted/10 flex-shrink-0 space-y-4">
+            <div className="flex items-center gap-3">
+              <Input 
+                value={banReason} 
+                onChange={(e) => setBanReason(e.target.value)} 
+                placeholder="填写操作原因（可选）..." 
+                className="flex-1"
+              />
+              {analysis?.user.status === 2 ? (
+                <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
+                  <input type="checkbox" checked={enableTokens} onChange={(e) => setEnableTokens(e.target.checked)} className="rounded border-gray-300" />
+                  同时启用Tokens
+                </label>
+              ) : (
+                <label className="flex items-center gap-2 text-sm text-muted-foreground whitespace-nowrap cursor-pointer">
+                  <input type="checkbox" checked={disableTokens} onChange={(e) => setDisableTokens(e.target.checked)} className="rounded border-gray-300" />
+                  同时禁用Tokens
+                </label>
+              )}
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <span>当前状态:</span>
+                {analysis ? (
+                  analysis.user.status === 2 ? (
+                    <Badge variant="destructive">已禁用</Badge>
+                  ) : (
+                    <Badge variant="success">正常</Badge>
+                  )
                 ) : (
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground select-none">
-                    <input type="checkbox" checked={disableTokens} onChange={(e) => setDisableTokens(e.target.checked)} />
-                    同时禁用 tokens
-                  </label>
+                  <span className="text-muted-foreground">-</span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
+                {analysis?.user.status === 2 ? (
+                  <Button onClick={doUnban} disabled={mutating || analysisLoading} className="min-w-28 bg-green-600 hover:bg-green-700">
+                    {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
+                    解除封禁
+                  </Button>
+                ) : (
+                  <Button variant="destructive" onClick={doBan} disabled={mutating || analysisLoading} className="min-w-28">
+                    {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldBan className="h-4 w-4 mr-2" />}
+                    立即封禁
+                  </Button>
                 )}
               </div>
             </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">暂无分析数据</div>
-          )}
-
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
-            {analysis?.user.status === 2 ? (
-              <Button onClick={doUnban} disabled={mutating || analysisLoading} className="min-w-28">
-                {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
-                解除封禁
-              </Button>
-            ) : (
-              <Button variant="destructive" onClick={doBan} disabled={mutating || analysisLoading} className="min-w-28">
-                {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldBan className="h-4 w-4 mr-2" />}
-                封禁
-              </Button>
-            )}
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
   )
 }
+

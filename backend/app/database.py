@@ -219,6 +219,106 @@ class DatabaseManager:
             self._connected = False
             logger.info("Database connection closed")
 
+    def ensure_indexes(self) -> None:
+        """
+        Create recommended indexes if they don't exist.
+        These indexes improve query performance for risk monitoring and analytics.
+        Safe to run multiple times - checks before creating.
+        """
+        from .logger import logger as app_logger
+        
+        is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
+        
+        # Define indexes: (index_name, table_name, columns)
+        # Based on analysis of common query patterns in the system
+        indexes = [
+            # logs table - most queried table
+            ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),  # Risk monitoring, analytics
+            ("idx_logs_user_created", "logs", ["user_id", "created_at"]),  # User analysis queries
+            ("idx_logs_type_created", "logs", ["type", "created_at"]),  # Dashboard stats by type
+            
+            # users table
+            ("idx_users_deleted_status", "users", ["deleted_at", "status"]),  # User listing with soft delete
+            ("idx_users_request_count", "users", ["request_count"]),  # Sorting by request count
+            
+            # tokens table
+            ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),  # Token queries by user
+            
+            # top_ups table
+            ("idx_topups_create_time", "top_ups", ["create_time"]),  # Top-up listing sorted by time
+            ("idx_topups_user_id", "top_ups", ["user_id"]),  # Top-ups by user
+            
+            # redemptions table
+            ("idx_redemptions_created_deleted", "redemptions", ["created_time", "deleted_at"]),  # Redemption listing
+        ]
+        
+        created_count = 0
+        skipped_count = 0
+        
+        for index_name, table_name, columns in indexes:
+            try:
+                # Check if index already exists
+                if is_pg:
+                    check_sql = """
+                        SELECT 1 FROM pg_indexes 
+                        WHERE indexname = :index_name
+                    """
+                else:
+                    check_sql = """
+                        SELECT 1 FROM information_schema.statistics 
+                        WHERE table_schema = DATABASE() 
+                        AND table_name = :table_name 
+                        AND index_name = :index_name
+                        LIMIT 1
+                    """
+                
+                result = self.execute(check_sql, {"index_name": index_name, "table_name": table_name})
+                
+                if result:
+                    # Index already exists
+                    skipped_count += 1
+                    continue
+                
+                # Check if table exists before creating index
+                if is_pg:
+                    table_check_sql = """
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_name = :table_name
+                        LIMIT 1
+                    """
+                else:
+                    table_check_sql = """
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = DATABASE() 
+                        AND table_name = :table_name
+                        LIMIT 1
+                    """
+                
+                table_exists = self.execute(table_check_sql, {"table_name": table_name})
+                if not table_exists:
+                    # Table doesn't exist, skip this index
+                    continue
+                
+                # Create index
+                columns_str = ", ".join(columns)
+                if is_pg:
+                    create_sql = f'CREATE INDEX "{index_name}" ON {table_name} ({columns_str})'
+                else:
+                    create_sql = f'CREATE INDEX `{index_name}` ON {table_name} ({columns_str})'
+                
+                self.execute(create_sql)
+                created_count += 1
+                app_logger.system(f"创建索引: {index_name} ON {table_name}")
+                
+            except Exception as e:
+                # Log but don't fail - index creation is optional optimization
+                app_logger.warning(f"创建索引失败 {index_name}: {e}", category="数据库")
+        
+        if created_count > 0:
+            app_logger.system(f"索引初始化完成，新建 {created_count} 个索引")
+        else:
+            app_logger.system(f"索引检查完成，{skipped_count} 个索引已存在")
+
 
 # Global database manager instance
 _db_manager: Optional[DatabaseManager] = None

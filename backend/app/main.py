@@ -114,6 +114,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.system("NewAPI Middleware Tool 启动中...")
 
+    # 初始化数据库索引（优化查询性能）
+    try:
+        from .database import get_db_manager
+        db = get_db_manager()
+        db.connect()
+        db.ensure_indexes()
+    except Exception as e:
+        logger.warning(f"索引初始化跳过: {e}", category="数据库")
+
     # 启动后台日志同步任务
     sync_task = asyncio.create_task(background_log_sync())
 
