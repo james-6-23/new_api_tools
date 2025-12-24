@@ -245,16 +245,24 @@ export function UserManagement() {
   }, [fetchUsers])
 
   const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
-  const formatTimestamp = (ts: number | null) => {
-    if (!ts) return '从未'
-    return new Date(ts * 1000).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
+
+  // 格式化最后请求时间
+  // 快速模式下 last_request_time 为 null，根据 request_count 判断
+  const formatLastRequest = (user: UserInfo) => {
+    if (user.last_request_time) {
+      return new Date(user.last_request_time * 1000).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    }
+    // 快速模式：无精确时间
+    if (user.request_count > 0) {
+      return <span className="text-muted-foreground">有请求记录</span>
+    }
+    return <span className="text-muted-foreground">从未</span>
   }
 
   const getActivityBadge = (level: string) => {
@@ -475,7 +483,7 @@ export function UserManagement() {
                       <TableCell className="text-right font-mono text-sm">{formatQuota(user.quota)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">{formatQuota(user.used_quota)}</TableCell>
                       <TableCell className="text-right">{user.request_count.toLocaleString()}</TableCell>
-                      <TableCell className="text-sm whitespace-nowrap">{formatTimestamp(user.last_request_time)}</TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">{formatLastRequest(user)}</TableCell>
                       <TableCell>{getActivityBadge(user.activity_level)}</TableCell>
                       <TableCell>
                         <Button

@@ -65,6 +65,7 @@ export function Analytics() {
 
   const [state, setState] = useState<AnalyticsState | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const [displayProgress, setDisplayProgress] = useState(0) // 平滑显示的进度
   const [requestRanking, setRequestRanking] = useState<UserRanking[]>([])
   const [quotaRanking, setQuotaRanking] = useState<UserRanking[]>([])
   const [modelStats, setModelStats] = useState<ModelStats[]>([])
@@ -92,6 +93,32 @@ export function Analytics() {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
   }), [token])
+
+  // 平滑进度动画：在实际进度和显示进度之间插值
+  useEffect(() => {
+    if (!syncStatus || !batchProcessing) {
+      setDisplayProgress(syncStatus?.progress_percent || 0)
+      return
+    }
+
+    const targetProgress = syncStatus.progress_percent
+    if (displayProgress >= targetProgress) {
+      setDisplayProgress(targetProgress)
+      return
+    }
+
+    // 每 50ms 增加一点进度，模拟平滑过渡
+    const interval = setInterval(() => {
+      setDisplayProgress(prev => {
+        const diff = targetProgress - prev
+        if (diff <= 0.1) return targetProgress
+        // 每次增加差值的 10%，实现缓动效果
+        return prev + Math.max(0.1, diff * 0.1)
+      })
+    }, 50)
+
+    return () => clearInterval(interval)
+  }, [syncStatus?.progress_percent, batchProcessing, displayProgress])
 
   const fetchSyncStatus = useCallback(async () => {
     try {
@@ -295,11 +322,11 @@ export function Analytics() {
                   {syncStatus.is_initializing
                     ? `初始化截止点: #${syncStatus.init_cutoff_id}，已处理到 #${syncStatus.last_log_id}`
                     : `数据库共有 ${formatNumber(syncStatus.total_logs_in_db)} 条日志，已处理 ${formatNumber(syncStatus.total_processed)} 条`
-                  } ({syncStatus.progress_percent}%)
+                  } ({displayProgress.toFixed(2)}%)
                 </p>
                 <div className="mt-3">
                   <Progress 
-                    value={syncStatus.progress_percent} 
+                    value={displayProgress} 
                     className="h-2"
                     indicatorClassName={syncStatus.is_initializing ? 'bg-primary' : 'bg-yellow-500'}
                   />
