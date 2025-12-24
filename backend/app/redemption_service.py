@@ -74,6 +74,19 @@ class PaginatedResult:
 
 
 @dataclass
+class RedemptionStatistics:
+    """Statistics for redemption codes."""
+    total_count: int
+    unused_count: int
+    used_count: int
+    expired_count: int
+    total_quota: int
+    unused_quota: int
+    used_quota: int
+    expired_quota: int
+
+
+@dataclass
 class GenerateResult:
     """Result of code generation."""
     keys: List[str]
@@ -472,6 +485,62 @@ class RedemptionService:
             return None
         
         return RedemptionCode.from_db_row(rows[0])
+
+    def get_statistics(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> RedemptionStatistics:
+        """
+        Get redemption code statistics.
+        
+        Args:
+            start_date: Optional start date filter (ISO 8601 or YYYY-MM-DD).
+            end_date: Optional end date filter (ISO 8601 or YYYY-MM-DD).
+            
+        Returns:
+            RedemptionStatistics object.
+        """
+        where_clauses = ["deleted_at IS NULL"]
+        query_params: dict[str, Any] = {}
+        
+        if start_date:
+            start_ts = self._parse_date_to_timestamp(start_date)
+            where_clauses.append("created_time >= :start_time")
+            query_params["start_time"] = start_ts
+        
+        if end_date:
+            end_ts = self._parse_date_to_timestamp(end_date, end_of_day=True)
+            where_clauses.append("created_time <= :end_time")
+            query_params["end_time"] = end_ts
+            
+        where_sql = " AND ".join(where_clauses)
+        current_time = int(time.time())
+        query_params["current_time"] = current_time
+
+        sql = f"""
+            SELECT 
+                COUNT(*) as total_count,
+                SUM(CASE WHEN redeemed_time = 0 AND (expired_time = 0 OR expired_time >= :current_time) THEN 1 ELSE 0 END) as unused_count,
+                SUM(CASE WHEN redeemed_time > 0 THEN 1 ELSE 0 END) as used_count,
+                SUM(CASE WHEN redeemed_time = 0 AND expired_time > 0 AND expired_time < :current_time THEN 1 ELSE 0 END) as expired_count,
+                COALESCE(SUM(quota), 0) as total_quota,
+                COALESCE(SUM(CASE WHEN redeemed_time = 0 AND (expired_time = 0 OR expired_time >= :current_time) THEN quota ELSE 0 END), 0) as unused_quota,
+                COALESCE(SUM(CASE WHEN redeemed_time > 0 THEN quota ELSE 0 END), 0) as used_quota,
+                COALESCE(SUM(CASE WHEN redeemed_time = 0 AND expired_time > 0 AND expired_time < :current_time THEN quota ELSE 0 END), 0) as expired_quota
+            FROM redemptions
+            WHERE {where_sql}
+        """
+        
+        rows = self.db.execute(sql, query_params)
+        row = rows[0] if rows else {}
+        
+        return RedemptionStatistics(
+            total_count=int(row.get("total_count", 0)),
+            unused_count=int(row.get("unused_count", 0)),
+            used_count=int(row.get("used_count", 0)),
+            expired_count=int(row.get("expired_count", 0)),
+            total_quota=int(row.get("total_quota", 0)),
+            unused_quota=int(row.get("unused_quota", 0)),
+            used_quota=int(row.get("used_quota", 0)),
+            expired_quota=int(row.get("expired_quota", 0)),
+        )
 
 
 # Global service instance

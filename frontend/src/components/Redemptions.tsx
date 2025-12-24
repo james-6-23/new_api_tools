@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { Trash2, Copy, Ticket, Loader2, RefreshCw, Filter, Search, Calendar, Tag, AlertCircle } from 'lucide-react'
+import { Trash2, Copy, Ticket, Loader2, RefreshCw, Filter, Search, Calendar, Tag, AlertCircle, CheckCircle2, XCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { Select } from './ui/select'
 import { Input } from './ui/input'
+import { StatCard } from './StatCard'
 import { cn } from '../lib/utils'
 
 interface RedemptionCode {
@@ -21,6 +22,17 @@ interface RedemptionCode {
   used_user_id: number
   expired_time: number
   status: 'unused' | 'used' | 'expired'
+}
+
+interface RedemptionStatistics {
+  total_count: number
+  unused_count: number
+  used_count: number
+  expired_count: number
+  total_quota: number
+  unused_quota: number
+  used_quota: number
+  expired_quota: number
 }
 
 interface PaginatedResponse {
@@ -38,7 +50,9 @@ export function Redemptions() {
   const { token } = useAuth()
 
   const [codes, setCodes] = useState<RedemptionCode[]>([])
+  const [statistics, setStatistics] = useState<RedemptionStatistics | null>(null)
   const [loading, setLoading] = useState(true)
+  const [statsLoading, setStatsLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
@@ -57,6 +71,20 @@ export function Redemptions() {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
   }), [token])
+
+  const fetchStatistics = useCallback(async () => {
+    setStatsLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (startDate) params.append('start_date', startDate)
+      if (endDate) params.append('end_date', endDate)
+      const response = await fetch(`${apiUrl}/api/redemptions/statistics?${params.toString()}`, { headers: getAuthHeaders() })
+      const data = await response.json()
+      if (data.success) setStatistics(data.data)
+    } catch (error) {
+      console.error('Failed to fetch statistics:', error)
+    } finally { setStatsLoading(false) }
+  }, [apiUrl, getAuthHeaders, startDate, endDate])
 
   const fetchCodes = useCallback(async () => {
     setLoading(true)
@@ -86,6 +114,7 @@ export function Redemptions() {
   }, [apiUrl, getAuthHeaders, page, pageSize, nameFilter, statusFilter, startDate, endDate, showToast])
 
   useEffect(() => { fetchCodes() }, [fetchCodes])
+  useEffect(() => { fetchStatistics() }, [fetchStatistics])
   useEffect(() => { setPage(1) }, [nameFilter, statusFilter, startDate, endDate])
 
   const formatTimestamp = (ts: number) => {
@@ -112,7 +141,7 @@ export function Redemptions() {
       if (deleteDialog.type === 'single' && deleteDialog.id) {
         const response = await fetch(`${apiUrl}/api/redemptions/${deleteDialog.id}`, { method: 'DELETE', headers: getAuthHeaders() })
         const data = await response.json()
-        if (data.success) { showToast('success', '删除成功'); fetchCodes() }
+        if (data.success) { showToast('success', '删除成功'); fetchCodes(); fetchStatistics(); }
         else showToast('error', data.error?.message || '删除失败')
       } else if (deleteDialog.type === 'batch') {
         const response = await fetch(`${apiUrl}/api/redemptions/batch`, {
@@ -121,7 +150,7 @@ export function Redemptions() {
           body: JSON.stringify({ ids: Array.from(selectedIds) }),
         })
         const data = await response.json()
-        if (data.success) { showToast('success', `成功删除 ${selectedIds.size} 个兑换码`); setSelectedIds(new Set()); fetchCodes() }
+        if (data.success) { showToast('success', `成功删除 ${selectedIds.size} 个兑换码`); setSelectedIds(new Set()); fetchCodes(); fetchStatistics(); }
         else showToast('error', data.error?.message || '删除失败')
       }
     } catch (error) {
@@ -135,7 +164,7 @@ export function Redemptions() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await fetchCodes()
+    await Promise.all([fetchCodes(), fetchStatistics()])
     setRefreshing(false)
     showToast('success', '数据已刷新')
   }
@@ -180,6 +209,51 @@ export function Redemptions() {
           )}
         </div>
       </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard 
+          title="未使用" 
+          value={statsLoading ? '-' : `${statistics?.unused_count || 0} 个`}
+          subValue={statsLoading ? '-' : `${formatQuota(statistics?.unused_quota || 0)}`}
+          icon={CheckCircle2} 
+          color="green" 
+          className="border-l-4 border-l-green-500"
+          onClick={() => setStatusFilter('unused')}
+        />
+        <StatCard 
+          title="已使用" 
+          value={statsLoading ? '-' : `${statistics?.used_count || 0} 个`}
+          subValue={statsLoading ? '-' : `${formatQuota(statistics?.used_quota || 0)}`}
+          icon={Ticket} 
+          color="blue" 
+          className="border-l-4 border-l-blue-500"
+          onClick={() => setStatusFilter('used')}
+        />
+        <StatCard 
+          title="已过期" 
+          value={statsLoading ? '-' : `${statistics?.expired_count || 0} 个`}
+          subValue={statsLoading ? '-' : `${formatQuota(statistics?.expired_quota || 0)}`}
+          icon={XCircle} 
+          color="red" 
+          className="border-l-4 border-l-red-500"
+          onClick={() => setStatusFilter('expired')}
+        />
+      </div>
+
+      {/* Total Stats Summary */}
+      <Card className="bg-muted/30 border-dashed">
+        <CardContent className="p-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">总兑换码:</span>
+            <span className="font-semibold">{statsLoading ? '-' : statistics?.total_count || 0} 个</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground">总额度价值:</span>
+            <span className="font-semibold text-primary">{statsLoading ? '-' : formatQuota(statistics?.total_quota || 0)}</span>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card>

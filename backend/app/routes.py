@@ -90,6 +90,24 @@ class BatchDeleteRequest(BaseModel):
     ids: List[int] = Field(..., min_length=1, description="要删除的兑换码 ID 列表")
 
 
+class RedemptionStatisticsData(BaseModel):
+    """Data model for redemption statistics."""
+    total_count: int
+    unused_count: int
+    used_count: int
+    expired_count: int
+    total_quota: int
+    unused_quota: int
+    used_quota: int
+    expired_quota: int
+
+
+class StatisticsResponse(BaseModel):
+    """Response model for redemption statistics."""
+    success: bool
+    data: RedemptionStatisticsData
+
+
 # API Endpoints
 
 @router.post("/redemptions/generate", response_model=GenerateResponse)
@@ -139,6 +157,39 @@ async def generate_redemption_codes(request: GenerateRequest, _: str = Depends(v
             ) if result.success else None,
         )
         
+    except ValueError as e:
+        raise InvalidParamsError(message=str(e))
+
+
+@router.get("/redemptions/statistics", response_model=StatisticsResponse)
+async def get_redemption_statistics(
+    start_date: Optional[str] = Query(default=None, description="起始日期 (ISO 8601)"),
+    end_date: Optional[str] = Query(default=None, description="结束日期 (ISO 8601)"),
+    _: str = Depends(verify_auth),
+):
+    """
+    获取兑换码统计数据。
+    
+    - **start_date**: 起始日期
+    - **end_date**: 结束日期
+    """
+    try:
+        service = get_redemption_service()
+        stats = service.get_statistics(start_date, end_date)
+        
+        return StatisticsResponse(
+            success=True,
+            data=RedemptionStatisticsData(
+                total_count=stats.total_count,
+                unused_count=stats.unused_count,
+                used_count=stats.used_count,
+                expired_count=stats.expired_count,
+                total_quota=stats.total_quota,
+                unused_quota=stats.unused_quota,
+                used_quota=stats.used_quota,
+                expired_quota=stats.expired_quota,
+            ),
+        )
     except ValueError as e:
         raise InvalidParamsError(message=str(e))
 
