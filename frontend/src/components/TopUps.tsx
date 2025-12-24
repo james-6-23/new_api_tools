@@ -128,7 +128,7 @@ export function TopUps() {
   }
 
   const formatTimestamp = (ts: number) => ts ? new Date(ts * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'
-  const formatAmount = (amount: number) => `${(amount / 500000).toFixed(2)}`
+  const formatAmount = (amount: number) => amount.toFixed(2)
   const formatMoney = (money: number) => `¥${money.toFixed(2)}`
 
   const inputClass = "w-full px-3 py-2 border rounded-lg bg-background border-input focus:ring-2 focus:ring-primary focus:border-primary text-sm"

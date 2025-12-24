@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, List, Optional
 
-from .database import DatabaseManager, get_db_manager
+from .database import DatabaseManager, DatabaseEngine, get_db_manager
 from .expiration_calculator import ExpireMode, calculate_expiration
 from .key_generator import KeyGenerator, get_key_generator
 from .quota_calculator import QuotaMode, calculate_fixed_quota, calculate_random_quota
@@ -181,6 +181,13 @@ class RedemptionService:
         if self._key_generator is None:
             self._key_generator = get_key_generator()
         return self._key_generator
+
+    @property
+    def _key_col(self) -> str:
+        """Get properly quoted 'key' column name based on database engine."""
+        if self.db.config.engine == DatabaseEngine.POSTGRESQL:
+            return '"key"'
+        return '`key`'
     
     def generate_codes(self, params: GenerateParams) -> GenerateResult:
         """
@@ -224,9 +231,9 @@ class RedemptionService:
         
         try:
             # Execute batch insert
-            insert_sql = """
+            insert_sql = f"""
                 INSERT INTO redemptions
-                (user_id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time)
+                (user_id, {self._key_col}, name, quota, created_time, redeemed_time, used_user_id, expired_time)
                 VALUES (:user_id, :key, :name, :quota, :created_time, :redeemed_time, :used_user_id, :expired_time)
             """
             
@@ -292,10 +299,10 @@ class RedemptionService:
             values.append(
                 f"(1, '{key}', '{name}', {quotas[i]}, {created_time}, 0, 0, {expired_time})"
             )
-        
+
         sql = (
             "INSERT INTO redemptions "
-            "(user_id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time) "
+            f"(user_id, {self._key_col}, name, quota, created_time, redeemed_time, used_user_id, expired_time) "
             "VALUES\n" + ",\n".join(values) + ";"
         )
         return sql
@@ -358,7 +365,7 @@ class RedemptionService:
         
         # Get items
         select_sql = f"""
-            SELECT id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time
+            SELECT id, {self._key_col} as key, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE {where_sql}
             ORDER BY created_time DESC
@@ -440,15 +447,15 @@ class RedemptionService:
     def get_code_by_id(self, id: int) -> Optional[RedemptionCode]:
         """
         Get a single redemption code by ID.
-        
+
         Args:
             id: Redemption code ID.
-            
+
         Returns:
             RedemptionCode if found, None otherwise.
         """
-        sql = """
-            SELECT id, `key`, name, quota, created_time, redeemed_time, used_user_id, expired_time
+        sql = f"""
+            SELECT id, {self._key_col} as key, name, quota, created_time, redeemed_time, used_user_id, expired_time
             FROM redemptions
             WHERE id = :id AND deleted_at IS NULL
         """
