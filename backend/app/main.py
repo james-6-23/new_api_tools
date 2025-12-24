@@ -140,6 +140,13 @@ async def background_log_sync():
         try:
             service = get_log_analytics_service()
 
+            # 检查是否需要初始化同步，未初始化时跳过自动同步
+            sync_status = service.get_sync_status()
+            if sync_status.get("needs_initial_sync") or sync_status.get("is_initializing"):
+                # 未初始化，跳过自动同步，等待用户手动触发
+                await asyncio.sleep(300)
+                continue
+
             # 检查数据一致性
             service.check_and_auto_reset()
 

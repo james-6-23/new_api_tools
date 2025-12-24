@@ -183,10 +183,16 @@ export function Analytics() {
     setCountdown(REFRESH_INTERVAL)
   }, [REFRESH_INTERVAL])
 
-  // Auto refresh with countdown - only auto process new logs when synced
+  // Auto refresh with countdown - only when initialized (synced)
   useEffect(() => {
-    // Don't auto-refresh while batch processing or loading
+    // Don't auto-refresh while batch processing, loading, or not initialized
     if (batchProcessing || loading) return
+    
+    // 未初始化时不启动自动同步
+    if (syncStatus?.needs_initial_sync || syncStatus?.is_initializing) {
+      setCountdown(0) // 不显示倒计时
+      return
+    }
 
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
@@ -210,7 +216,7 @@ export function Analytics() {
         clearInterval(countdownRef.current)
       }
     }
-  }, [batchProcessing, loading, autoProcessLogs, fetchAnalytics, fetchSyncStatus, syncStatus?.is_synced, REFRESH_INTERVAL])
+  }, [batchProcessing, loading, autoProcessLogs, fetchAnalytics, fetchSyncStatus, syncStatus?.is_synced, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, REFRESH_INTERVAL])
 
   const processLogs = async () => {
     setProcessing(true)
@@ -429,10 +435,13 @@ export function Analytics() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Clock className="h-4 w-4" />
-                <span>{countdown}s</span>
-              </div>
+              {/* 只有初始化完成后才显示倒计时 */}
+              {syncStatus && !syncStatus.needs_initial_sync && !syncStatus.is_initializing && countdown > 0 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>{countdown}s</span>
+                </div>
+              )}
               <Button onClick={processLogs} disabled={processing || batchProcessing}>
                 {processing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 处理新日志
