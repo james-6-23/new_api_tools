@@ -104,6 +104,8 @@ class UserManagementService:
         从数据库获取用户活跃度统计
 
         使用高效的单次查询统计所有活跃度级别。
+        - 活跃/不活跃/非常不活跃：通过 JOIN logs 表获取最后请求时间判断
+        - 从未请求：使用 users.request_count = 0 判断（与用户列表逻辑一致）
         """
         now = int(time.time())
         active_cutoff = now - ACTIVE_THRESHOLD
@@ -112,18 +114,25 @@ class UserManagementService:
         try:
             self._db.connect()
 
-            # 使用子查询 + 条件聚合，一次查询完成
+            # 先统计从未请求的用户数（使用 request_count 字段，与用户列表一致）
+            never_sql = """
+                SELECT COUNT(*) as cnt FROM users
+                WHERE deleted_at IS NULL AND request_count = 0
+            """
+            never_result = self._db.execute(never_sql, {})
+            never_count = int(never_result[0]["cnt"]) if never_result else 0
+
+            # 统计有请求的用户的活跃度分布
             stats_sql = """
                 SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN last_req >= :active_cutoff THEN 1 ELSE 0 END) as active,
                     SUM(CASE WHEN last_req < :active_cutoff AND last_req >= :inactive_cutoff THEN 1 ELSE 0 END) as inactive,
-                    SUM(CASE WHEN last_req < :inactive_cutoff THEN 1 ELSE 0 END) as very_inactive,
-                    SUM(CASE WHEN last_req IS NULL THEN 1 ELSE 0 END) as never_req
+                    SUM(CASE WHEN last_req < :inactive_cutoff THEN 1 ELSE 0 END) as very_inactive
                 FROM (
                     SELECT u.id, MAX(l.created_at) as last_req
                     FROM users u
-                    LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
+                    INNER JOIN logs l ON u.id = l.user_id AND l.type = 2
                     WHERE u.deleted_at IS NULL
                     GROUP BY u.id
                 ) user_activity
@@ -136,12 +145,13 @@ class UserManagementService:
 
             if result and result[0]:
                 row = result[0]
+                active_count = int(row.get("total") or 0)
                 return ActivityStats(
-                    total_users=int(row.get("total") or 0),
+                    total_users=active_count + never_count,
                     active_users=int(row.get("active") or 0),
                     inactive_users=int(row.get("inactive") or 0),
                     very_inactive_users=int(row.get("very_inactive") or 0),
-                    never_requested=int(row.get("never_req") or 0),
+                    never_requested=never_count,
                 )
         except Exception as e:
             logger.db_error(f"获取活跃度统计失败: {e}")

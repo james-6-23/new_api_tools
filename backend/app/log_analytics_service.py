@@ -12,7 +12,8 @@ from .logger import logger
 
 # Constants
 BATCH_SIZE = 1000  # Number of logs to process per batch
-LOG_TYPE_CONSUMPTION = 2  # type=2 is consumption/usage log
+LOG_TYPE_CONSUMPTION = 2  # type=2 is consumption/usage log (success)
+LOG_TYPE_FAILURE = 5  # type=5 is failure log (request failed)
 
 
 @dataclass
@@ -28,11 +29,12 @@ class UserRanking:
 class ModelStats:
     """Model statistics data."""
     model_name: str
-    total_requests: int
-    success_count: int
-    empty_count: int  # completion_tokens = 0
-    success_rate: float  # percentage
-    empty_rate: float  # percentage
+    total_requests: int  # success + failure requests
+    success_count: int  # type=2 requests
+    failure_count: int  # type=5 requests
+    empty_count: int  # completion_tokens = 0 (within success)
+    success_rate: float  # percentage: success / total
+    empty_rate: float  # percentage: empty / success
 
 
 @dataclass
@@ -85,10 +87,17 @@ class LogAnalyticsService:
                     model_name TEXT PRIMARY KEY,
                     total_requests INTEGER DEFAULT 0,
                     success_count INTEGER DEFAULT 0,
+                    failure_count INTEGER DEFAULT 0,
                     empty_count INTEGER DEFAULT 0,
                     updated_at INTEGER NOT NULL
                 )
             """)
+
+            # Migration: add failure_count column if not exists
+            cursor.execute("PRAGMA table_info(model_stats)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "failure_count" not in columns:
+                cursor.execute("ALTER TABLE model_stats ADD COLUMN failure_count INTEGER DEFAULT 0")
 
             conn.commit()
 
@@ -133,13 +142,13 @@ class LogAnalyticsService:
         last_log_id = self._get_state("last_log_id", 0)
         total_processed = self._get_state("total_processed", 0)
 
-        # Fetch new logs from main database
+        # Fetch new logs from main database (both success type=2 and failure type=5)
         sql = """
             SELECT
                 id, user_id, username, model_name, quota,
                 prompt_tokens, completion_tokens, type
             FROM logs
-            WHERE id > :last_id AND type = :log_type
+            WHERE id > :last_id AND type IN (:type_success, :type_failure)
             ORDER BY id ASC
             LIMIT :limit
         """
@@ -148,7 +157,8 @@ class LogAnalyticsService:
             self._db.connect()
             logs = self._db.execute(sql, {
                 "last_id": last_log_id,
-                "log_type": LOG_TYPE_CONSUMPTION,
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
                 "limit": BATCH_SIZE,
             })
         except Exception as e:
@@ -186,19 +196,26 @@ class LogAnalyticsService:
                 user_stats[user_id]["quota_used"] += quota
 
             # Aggregate model statistics
+            log_type = int(log.get("type") or 0)
             if model_name not in model_stats:
                 model_stats[model_name] = {
                     "total_requests": 0,
                     "success_count": 0,
+                    "failure_count": 0,
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            # Success = quota > 0 OR has any tokens (for embedding models)
-            # Empty = no input and no output tokens (真正的空请求)
-            if quota > 0 or prompt_tokens > 0 or completion_tokens > 0:
+
+            # Success/Failure based on log type
+            if log_type == LOG_TYPE_CONSUMPTION:
+                # type=2: successful request
                 model_stats[model_name]["success_count"] += 1
-            else:
-                model_stats[model_name]["empty_count"] += 1
+                # Empty = no output tokens (空回复)
+                if completion_tokens == 0:
+                    model_stats[model_name]["empty_count"] += 1
+            elif log_type == LOG_TYPE_FAILURE:
+                # type=5: failed request
+                model_stats[model_name]["failure_count"] += 1
 
         # Update SQLite with aggregated data
         now = int(time.time())
@@ -226,17 +243,19 @@ class LogAnalyticsService:
             # Update model statistics
             for model_name, stats in model_stats.items():
                 cursor.execute("""
-                    INSERT INTO model_stats (model_name, total_requests, success_count, empty_count, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO model_stats (model_name, total_requests, success_count, failure_count, empty_count, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(model_name) DO UPDATE SET
                         total_requests = model_stats.total_requests + excluded.total_requests,
                         success_count = model_stats.success_count + excluded.success_count,
+                        failure_count = model_stats.failure_count + excluded.failure_count,
                         empty_count = model_stats.empty_count + excluded.empty_count,
                         updated_at = excluded.updated_at
                 """, (
                     model_name,
                     stats["total_requests"],
                     stats["success_count"],
+                    stats["failure_count"],
                     stats["empty_count"],
                     now,
                 ))
@@ -323,6 +342,9 @@ class LogAnalyticsService:
         """
         Get model statistics including success rate and empty response rate.
 
+        Success rate = success_count / total_requests (type=2 / (type=2 + type=5))
+        Empty rate = empty_count / success_count (empty responses within successful requests)
+
         Args:
             limit: Number of models to return.
 
@@ -332,7 +354,7 @@ class LogAnalyticsService:
         with self._storage._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT model_name, total_requests, success_count, empty_count
+                SELECT model_name, total_requests, success_count, failure_count, empty_count
                 FROM model_stats
                 ORDER BY total_requests DESC
                 LIMIT ?
@@ -344,15 +366,19 @@ class LogAnalyticsService:
             model_name = row[0]
             total = row[1]
             success = row[2]
-            empty = row[3]
+            failure = row[3] or 0
+            empty = row[4]
 
+            # Success rate = success / total (type=2 / (type=2 + type=5))
             success_rate = (success / total * 100) if total > 0 else 0.0
-            empty_rate = (empty / total * 100) if total > 0 else 0.0
+            # Empty rate = empty / success (空回复占成功请求的比例)
+            empty_rate = (empty / success * 100) if success > 0 else 0.0
 
             result.append(ModelStats(
                 model_name=model_name,
                 total_requests=total,
                 success_count=success,
+                failure_count=failure,
                 empty_count=empty,
                 success_rate=round(success_rate, 2),
                 empty_rate=round(empty_rate, 2),
@@ -399,15 +425,18 @@ class LogAnalyticsService:
 
     def get_total_logs_count(self) -> int:
         """
-        Get total count of consumption logs in the main database.
+        Get total count of logs (success + failure) in the main database.
 
         Returns:
-            Total number of logs with type=2.
+            Total number of logs with type=2 or type=5.
         """
-        sql = "SELECT COUNT(*) as cnt FROM logs WHERE type = :log_type"
+        sql = "SELECT COUNT(*) as cnt FROM logs WHERE type IN (:type_success, :type_failure)"
         try:
             self._db.connect()
-            result = self._db.execute(sql, {"log_type": LOG_TYPE_CONSUMPTION})
+            result = self._db.execute(sql, {
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
+            })
             return int(result[0]["cnt"]) if result else 0
         except Exception as e:
             logger.db_error(f"获取日志总数失败: {e}")
@@ -418,12 +447,15 @@ class LogAnalyticsService:
         Get the maximum log ID in the main database.
 
         Returns:
-            Maximum log ID.
+            Maximum log ID for type=2 or type=5.
         """
-        sql = "SELECT MAX(id) as max_id FROM logs WHERE type = :log_type"
+        sql = "SELECT MAX(id) as max_id FROM logs WHERE type IN (:type_success, :type_failure)"
         try:
             self._db.connect()
-            result = self._db.execute(sql, {"log_type": LOG_TYPE_CONSUMPTION})
+            result = self._db.execute(sql, {
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
+            })
             return int(result[0]["max_id"]) if result and result[0]["max_id"] else 0
         except Exception as e:
             logger.db_error(f"获取最大日志ID失败: {e}")
@@ -525,13 +557,13 @@ class LogAnalyticsService:
         last_log_id = self._get_state("last_log_id", 0)
         total_processed = self._get_state("total_processed", 0)
 
-        # Fetch new logs with cutoff
+        # Fetch new logs with cutoff (both success type=2 and failure type=5)
         sql = """
             SELECT
                 id, user_id, username, model_name, quota,
                 prompt_tokens, completion_tokens, type
             FROM logs
-            WHERE id > :last_id AND id <= :max_id AND type = :log_type
+            WHERE id > :last_id AND id <= :max_id AND type IN (:type_success, :type_failure)
             ORDER BY id ASC
             LIMIT :limit
         """
@@ -541,7 +573,8 @@ class LogAnalyticsService:
             logs = self._db.execute(sql, {
                 "last_id": last_log_id,
                 "max_id": max_log_id,
-                "log_type": LOG_TYPE_CONSUMPTION,
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
                 "limit": BATCH_SIZE,
             })
         except Exception as e:
@@ -577,19 +610,27 @@ class LogAnalyticsService:
                 user_stats[user_id]["request_count"] += 1
                 user_stats[user_id]["quota_used"] += quota
 
+            # Aggregate model statistics
+            log_type = int(log.get("type") or 0)
             if model_name not in model_stats:
                 model_stats[model_name] = {
                     "total_requests": 0,
                     "success_count": 0,
+                    "failure_count": 0,
                     "empty_count": 0,
                 }
             model_stats[model_name]["total_requests"] += 1
-            # Success = quota > 0 OR has any tokens (for embedding models)
-            # Empty = no input and no output tokens (真正的空请求)
-            if quota > 0 or prompt_tokens > 0 or completion_tokens > 0:
+
+            # Success/Failure based on log type
+            if log_type == LOG_TYPE_CONSUMPTION:
+                # type=2: successful request
                 model_stats[model_name]["success_count"] += 1
-            else:
-                model_stats[model_name]["empty_count"] += 1
+                # Empty = no output tokens (空回复)
+                if completion_tokens == 0:
+                    model_stats[model_name]["empty_count"] += 1
+            elif log_type == LOG_TYPE_FAILURE:
+                # type=5: failed request
+                model_stats[model_name]["failure_count"] += 1
 
         # Update SQLite
         now = int(time.time())
@@ -609,14 +650,15 @@ class LogAnalyticsService:
 
             for model_name, stats in model_stats.items():
                 cursor.execute("""
-                    INSERT INTO model_stats (model_name, total_requests, success_count, empty_count, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO model_stats (model_name, total_requests, success_count, failure_count, empty_count, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(model_name) DO UPDATE SET
                         total_requests = model_stats.total_requests + excluded.total_requests,
                         success_count = model_stats.success_count + excluded.success_count,
+                        failure_count = model_stats.failure_count + excluded.failure_count,
                         empty_count = model_stats.empty_count + excluded.empty_count,
                         updated_at = excluded.updated_at
-                """, (model_name, stats["total_requests"], stats["success_count"], stats["empty_count"], now))
+                """, (model_name, stats["total_requests"], stats["success_count"], stats["failure_count"], stats["empty_count"], now))
 
             conn.commit()
 

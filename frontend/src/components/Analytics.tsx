@@ -34,6 +34,7 @@ interface ModelStats {
   model_name: string
   total_requests: number
   success_count: number
+  failure_count: number
   empty_count: number
   success_rate: number
   empty_rate: number
@@ -535,6 +536,7 @@ export function Analytics() {
                   <TableHead>模型</TableHead>
                   <TableHead className="text-right">总请求</TableHead>
                   <TableHead className="text-right">成功数</TableHead>
+                  <TableHead className="text-right">失败数</TableHead>
                   <TableHead className="text-right">空回复数</TableHead>
                   <TableHead className="text-right">成功率</TableHead>
                   <TableHead className="text-right">空回复率</TableHead>
@@ -545,7 +547,8 @@ export function Analytics() {
                   <TableRow key={model.model_name}>
                     <TableCell className="font-medium max-w-xs truncate" title={model.model_name}>{model.model_name}</TableCell>
                     <TableCell className="text-right">{model.total_requests.toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{model.success_count.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-green-600">{model.success_count.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-red-600">{model.failure_count.toLocaleString()}</TableCell>
                     <TableCell className="text-right">{model.empty_count.toLocaleString()}</TableCell>
                     <TableCell className="text-right">
                       <span className={model.success_rate >= 95 ? 'text-green-600' : model.success_rate >= 80 ? 'text-yellow-600' : 'text-red-600'}>

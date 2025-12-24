@@ -29,6 +29,7 @@ class ModelStatsItem(BaseModel):
     model_name: str
     total_requests: int
     success_count: int
+    failure_count: int
     empty_count: int
     success_rate: float
     empty_rate: float
@@ -197,8 +198,8 @@ async def get_model_statistics(
     获取模型统计数据。
 
     返回模型的请求数、成功率和空回复率。
-    - 成功率 = 有输出token的请求数 / 总请求数
-    - 空回复率 = 输出token为0的请求数 / 总请求数
+    - 成功率 = type=2请求数 / (type=2 + type=5)总请求数
+    - 空回复率 = 空回复数 / 成功请求数
     """
     service = get_log_analytics_service()
     stats = service.get_model_statistics(limit=limit)
@@ -210,6 +211,7 @@ async def get_model_statistics(
                 model_name=s.model_name,
                 total_requests=s.total_requests,
                 success_count=s.success_count,
+                failure_count=s.failure_count,
                 empty_count=s.empty_count,
                 success_rate=s.success_rate,
                 empty_rate=s.empty_rate,
