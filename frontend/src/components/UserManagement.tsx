@@ -35,6 +35,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog'
+import { StatCard } from './StatCard'
+import { cn } from '../lib/utils'
 
 interface ActivityStats {
   total_users: number
@@ -337,94 +339,77 @@ export function UserManagement() {
     }
   }
 
-  if (loading && !users.length) {
-    return (
-      <div className="flex justify-center items-center py-20">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">用户管理</h2>
+          <p className="text-muted-foreground mt-1">查看和管理所有用户及其状态</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading} className="h-9">
+          <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
+          刷新
+        </Button>
+      </div>
+
       {/* Activity Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="cursor-pointer hover:border-green-500 transition-colors" onClick={() => { setActivityFilter('active'); setPage(1) }}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <UserCheck className="h-5 w-5 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">活跃用户</p>
-                <p className="text-2xl font-bold text-green-600">{stats?.active_users || 0}</p>
-                <p className="text-xs text-muted-foreground">7天内有请求</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer hover:border-yellow-500 transition-colors" onClick={() => { setActivityFilter('inactive'); setPage(1) }}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-100 rounded-lg">
-                <Clock className="h-5 w-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">不活跃用户</p>
-                <p className="text-2xl font-bold text-yellow-600">{stats?.inactive_users || 0}</p>
-                <p className="text-xs text-muted-foreground">7-30天内有请求</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer hover:border-red-500 transition-colors" onClick={() => { setActivityFilter('very_inactive'); setPage(1) }}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-100 rounded-lg">
-                <UserX className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">非常不活跃</p>
-                <p className="text-2xl font-bold text-red-600">{stats?.very_inactive_users || 0}</p>
-                <p className="text-xs text-muted-foreground">超过30天无请求</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="cursor-pointer hover:border-gray-500 transition-colors" onClick={() => { setActivityFilter('never'); setPage(1) }}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gray-100 rounded-lg">
-                <Users className="h-5 w-5 text-gray-600" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">从未请求</p>
-                <p className="text-2xl font-bold text-gray-600">{stats?.never_requested || 0}</p>
-                <p className="text-xs text-muted-foreground">注册后未使用</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <StatCard
+          title="活跃用户"
+          value={stats?.active_users || 0}
+          subValue="7天内有请求"
+          icon={UserCheck}
+          color="green"
+          onClick={() => { setActivityFilter('active'); setPage(1) }}
+          className={cn(activityFilter === 'active' && "ring-2 ring-primary ring-offset-2")}
+        />
+        <StatCard
+          title="不活跃用户"
+          value={stats?.inactive_users || 0}
+          subValue="7-30天内有请求"
+          icon={Clock}
+          color="yellow"
+          onClick={() => { setActivityFilter('inactive'); setPage(1) }}
+          className={cn(activityFilter === 'inactive' && "ring-2 ring-primary ring-offset-2")}
+        />
+        <StatCard
+          title="非常不活跃"
+          value={stats?.very_inactive_users || 0}
+          subValue="超过30天无请求"
+          icon={UserX}
+          color="red"
+          onClick={() => { setActivityFilter('very_inactive'); setPage(1) }}
+          className={cn(activityFilter === 'very_inactive' && "ring-2 ring-primary ring-offset-2")}
+        />
+        <StatCard
+          title="从未请求"
+          value={stats?.never_requested || 0}
+          subValue="注册后未使用"
+          icon={Users}
+          color="gray"
+          onClick={() => { setActivityFilter('never'); setPage(1) }}
+          className={cn(activityFilter === 'never' && "ring-2 ring-primary ring-offset-2")}
+        />
       </div>
 
       {/* Batch Delete Actions */}
-      <Card className="border-orange-200 bg-orange-50">
+      <Card className="border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-orange-600" />
+              <div className="p-2 bg-orange-100 dark:bg-orange-900 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
               <div>
-                <h3 className="font-medium text-orange-800">批量清理不活跃用户</h3>
-                <p className="text-sm text-orange-600">删除后不可恢复，请谨慎操作</p>
+                <h3 className="font-medium text-orange-800 dark:text-orange-200">批量清理不活跃用户</h3>
+                <p className="text-sm text-orange-600 dark:text-orange-400">删除后不可恢复，请谨慎操作</p>
               </div>
             </div>
             <div className="flex gap-3">
               <Button
                 variant="outline"
-                className="border-orange-300 text-orange-700 hover:bg-orange-100"
+                className="border-orange-300 text-orange-700 hover:bg-orange-100 hover:text-orange-800 dark:border-orange-800 dark:text-orange-300 dark:hover:bg-orange-900"
                 onClick={() => previewBatchDelete('very_inactive')}
                 disabled={deletingVeryInactive || !stats?.very_inactive_users}
               >
@@ -433,7 +418,7 @@ export function UserManagement() {
               </Button>
               <Button
                 variant="outline"
-                className="border-gray-300 text-gray-700 hover:bg-gray-100"
+                className="border-gray-300 text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                 onClick={() => previewBatchDelete('never')}
                 disabled={deletingNever || !stats?.never_requested}
               >
@@ -447,91 +432,92 @@ export function UserManagement() {
 
       {/* Search and Filter */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span>用户列表 <span className="text-sm font-normal text-muted-foreground">共 {total} 个用户</span></span>
-              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
-                {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              </Button>
-            </div>
-            {activityFilter !== 'all' && (
-              <Button variant="ghost" size="sm" onClick={() => { setActivityFilter('all'); setPage(1) }}>
-                清除筛选
-              </Button>
-            )}
-          </CardTitle>
+        <CardHeader className="pb-3">
+           <CardTitle className="text-base font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4" />
+                用户列表
+                <span className="ml-2 text-sm font-normal text-muted-foreground">共 {total} 个</span>
+              </div>
+              {activityFilter !== 'all' && (
+                <Button variant="ghost" size="sm" onClick={() => { setActivityFilter('all'); setPage(1) }} className="h-8 text-xs">
+                  清除筛选: {activityFilter === 'active' ? '活跃' : activityFilter === 'inactive' ? '不活跃' : activityFilter === 'very_inactive' ? '非常不活跃' : '从未请求'}
+                </Button>
+              )}
+           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-4 mb-4">
             <div className="flex-1 flex gap-2">
-              <Input
-                placeholder="搜索用户名或邮箱..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyPress={handleKeyPress}
-                className="max-w-sm"
-              />
-              <Button onClick={handleSearch}>
-                <Search className="h-4 w-4 mr-2" />
-                搜索
-              </Button>
+              <div className="relative flex-1 max-w-sm">
+                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                 <Input
+                   placeholder="搜索用户名或邮箱..."
+                   value={searchInput}
+                   onChange={(e) => setSearchInput(e.target.value)}
+                   onKeyPress={handleKeyPress}
+                   className="pl-9"
+                 />
+              </div>
+              <Button onClick={handleSearch}>搜索</Button>
             </div>
-            <Select value={activityFilter} onChange={(e) => { setActivityFilter(e.target.value); setPage(1) }}>
-              <option value="all">全部</option>
-              <option value="active">活跃</option>
-              <option value="inactive">不活跃</option>
-              <option value="very_inactive">非常不活跃</option>
-              <option value="never">从未请求</option>
-            </Select>
+            <div className="w-full sm:w-48">
+              <Select value={activityFilter} onChange={(e) => { setActivityFilter(e.target.value); setPage(1) }}>
+                <option value="all">所有状态</option>
+                <option value="active">活跃用户</option>
+                <option value="inactive">不活跃用户</option>
+                <option value="very_inactive">非常不活跃</option>
+                <option value="never">从未请求</option>
+              </Select>
+            </div>
           </div>
 
           {/* Users Table */}
-          {loading ? (
+          {loading && !users.length ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : users.length > 0 ? (
             <div className="rounded-md border">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/50">
                   <TableRow>
                     <TableHead className="w-16">ID</TableHead>
-                    <TableHead>用户名</TableHead>
-                    <TableHead>邮箱</TableHead>
-                    <TableHead>角色</TableHead>
+                    <TableHead>用户</TableHead>
+                    <TableHead className="hidden md:table-cell">邮箱</TableHead>
+                    <TableHead className="hidden sm:table-cell">角色</TableHead>
                     <TableHead>状态</TableHead>
-                    <TableHead className="text-right">额度</TableHead>
-                    <TableHead className="text-right">已用</TableHead>
-                    <TableHead className="text-right">请求次数</TableHead>
-                    <TableHead>最后请求时间</TableHead>
+                    <TableHead className="text-right">额度 (USD)</TableHead>
+                    <TableHead className="text-right hidden sm:table-cell">已用</TableHead>
+                    <TableHead className="text-right hidden md:table-cell">请求数</TableHead>
+                    <TableHead className="hidden lg:table-cell">最后请求</TableHead>
                     <TableHead>活跃度</TableHead>
                     <TableHead className="w-20">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users.map((user) => (
-                    <TableRow key={user.id}>
-                      <TableCell className="font-mono text-sm">{user.id}</TableCell>
+                    <TableRow key={user.id} className="hover:bg-muted/50">
+                      <TableCell className="font-mono text-xs text-muted-foreground">{user.id}</TableCell>
                       <TableCell>
-                        <div>
-                          <div className="font-medium">{user.username}</div>
-                          {user.display_name && <div className="text-xs text-muted-foreground">{user.display_name}</div>}
+                        <div className="flex flex-col">
+                          <span className="font-medium">{user.username}</span>
+                          {user.display_name && <span className="text-xs text-muted-foreground">{user.display_name}</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{user.email || '-'}</TableCell>
-                      <TableCell className="text-sm">{getRoleName(user.role)}</TableCell>
+                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{user.email || '-'}</TableCell>
+                      <TableCell className="hidden sm:table-cell text-xs">{getRoleName(user.role)}</TableCell>
                       <TableCell>{getStatusBadge(user.status)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">{formatQuota(user.quota)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{formatQuota(user.used_quota)}</TableCell>
-                      <TableCell className="text-right">{user.request_count.toLocaleString()}</TableCell>
-                      <TableCell className="text-sm whitespace-nowrap">{formatLastRequest(user)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm hidden sm:table-cell">{formatQuota(user.used_quota)}</TableCell>
+                      <TableCell className="text-right hidden md:table-cell">{user.request_count.toLocaleString()}</TableCell>
+                      <TableCell className="hidden lg:table-cell text-xs whitespace-nowrap">{formatLastRequest(user)}</TableCell>
                       <TableCell>{getActivityBadge(user.activity_level)}</TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-8 w-8 p-0"
                           onClick={() => deleteUser(user.id, user.username)}
                           disabled={deleting}
                         >
@@ -544,16 +530,17 @@ export function UserManagement() {
               </Table>
             </div>
           ) : (
-            <div className="py-12 text-center text-muted-foreground">
-              {search || activityFilter !== 'all' ? '没有找到符合条件的用户' : '暂无用户数据'}
+            <div className="py-20 text-center text-muted-foreground bg-muted/10 rounded-lg border border-dashed">
+              <Users className="mx-auto h-10 w-10 mb-3 opacity-20" />
+              <p>{search || activityFilter !== 'all' ? '没有找到符合条件的用户' : '暂无用户数据'}</p>
             </div>
           )}
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="flex items-center justify-between mt-4 px-2">
               <p className="text-sm text-muted-foreground">
-                第 {page} 页，共 {totalPages} 页
+                第 {page} / {totalPages} 页
               </p>
               <div className="flex gap-2">
                 <Button

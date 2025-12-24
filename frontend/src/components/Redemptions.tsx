@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { Trash2, Copy, Ticket, Loader2, RefreshCw } from 'lucide-react'
+import { Trash2, Copy, Ticket, Loader2, RefreshCw, Filter, Search, Calendar, Tag, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { Select } from './ui/select'
+import { Input } from './ui/input'
+import { cn } from '../lib/utils'
 
 interface RedemptionCode {
   id: number
@@ -157,37 +159,79 @@ export function Redemptions() {
     } catch { showToast('error', '复制失败') }
   }
 
-  const inputClass = "w-full px-3 py-2 border rounded-lg bg-background border-input focus:ring-2 focus:ring-primary focus:border-primary text-sm"
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">兑换码管理</h2>
+          <p className="text-muted-foreground mt-1">查询、管理或批量删除兑换码</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading} className="h-9">
+            <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
+            刷新
+          </Button>
+          {selectedIds.size > 0 && (
+            <Button variant="destructive" size="sm" onClick={() => setDeleteDialog({ open: true, type: 'batch' })} className="h-9">
+              <Trash2 className="h-4 w-4 mr-2" />
+              删除选中 ({selectedIds.size})
+            </Button>
+          )}
+        </div>
+      </div>
+
       {/* Filters */}
       <Card>
-        <CardContent className="p-4">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <Filter className="w-4 h-4" />
+            筛选条件
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">名称</label>
-              <input type="text" value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="搜索名称..." className={inputClass} />
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">名称搜索</label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  type="text" 
+                  value={nameFilter} 
+                  onChange={(e) => setNameFilter(e.target.value)} 
+                  placeholder="搜索兑换码名称..." 
+                  className="pl-9" 
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">状态</label>
-              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
-                <option value="">全部</option>
-                <option value="unused">未使用</option>
-                <option value="used">已使用</option>
-                <option value="expired">已过期</option>
-              </Select>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">状态</label>
+              <div className="relative">
+                <Tag className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground z-10" />
+                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)} className="pl-9">
+                  <option value="">全部状态</option>
+                  <option value="unused">未使用</option>
+                  <option value="used">已使用</option>
+                  <option value="expired">已过期</option>
+                </Select>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">开始日期</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">开始日期</label>
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="pl-9" />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">结束日期</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputClass} />
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">结束日期</label>
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="pl-9" />
+              </div>
             </div>
             <div className="flex items-end">
-              <Button variant="secondary" className="w-full" onClick={() => { setNameFilter(''); setStatusFilter(''); setStartDate(''); setEndDate('') }}>
+              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => { setNameFilter(''); setStatusFilter(''); setStartDate(''); setEndDate('') }}>
                 清除筛选
               </Button>
             </div>
@@ -197,90 +241,113 @@ export function Redemptions() {
 
       {/* Table */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between py-4">
-          <div className="flex items-center gap-3">
-            <CardTitle className="text-lg">兑换码管理 ({total})</CardTitle>
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading}>
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            </Button>
-          </div>
-          {selectedIds.size > 0 && (
-            <Button variant="destructive" size="sm" onClick={() => setDeleteDialog({ open: true, type: 'batch' })}>
-              <Trash2 className="h-4 w-4 mr-1" />
-              删除选中 ({selectedIds.size})
-            </Button>
-          )}
-        </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex justify-center items-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div className="flex justify-center items-center py-20">
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
             </div>
           ) : codes.length === 0 ? (
-            <div className="text-center py-12">
-              <Ticket className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-2 text-sm font-medium">暂无兑换码</h3>
-              <p className="mt-1 text-sm text-muted-foreground">去生成器页面添加兑换码</p>
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="bg-muted/50 p-4 rounded-full mb-4">
+                <Ticket className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h3 className="text-lg font-medium">暂无兑换码</h3>
+              <p className="text-muted-foreground mt-1 max-w-sm">
+                当前没有找到任何兑换码。请尝试调整筛选条件或前往生成器创建新的兑换码。
+              </p>
             </div>
           ) : (
-            <>
+            <div className="rounded-md border-t border-b sm:border-0">
               <Table>
-                <TableHeader>
+                <TableHeader className="bg-muted/50">
                   <TableRow>
-                    <TableHead className="w-12">
-                      <input type="checkbox" checked={selectedIds.size === codes.length && codes.length > 0} onChange={(e) => handleSelectAll(e.target.checked)} className="rounded border-input" />
+                    <TableHead className="w-12 text-center">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.size === codes.length && codes.length > 0} 
+                        onChange={(e) => handleSelectAll(e.target.checked)} 
+                        className="rounded border-input w-4 h-4 align-middle" 
+                      />
                     </TableHead>
                     <TableHead>兑换码</TableHead>
                     <TableHead>名称</TableHead>
-                    <TableHead>额度</TableHead>
+                    <TableHead>额度 (USD)</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>创建时间</TableHead>
                     <TableHead>过期时间</TableHead>
-                    <TableHead className="w-16">操作</TableHead>
+                    <TableHead className="w-16 text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {codes.map((code) => (
-                    <TableRow key={code.id}>
-                      <TableCell>
-                        <input type="checkbox" checked={selectedIds.has(code.id)} onChange={(e) => handleSelectOne(code.id, e.target.checked)} className="rounded border-input" />
+                    <TableRow key={code.id} className="hover:bg-muted/50">
+                      <TableCell className="text-center">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedIds.has(code.id)} 
+                          onChange={(e) => handleSelectOne(code.id, e.target.checked)} 
+                          className="rounded border-input w-4 h-4 align-middle" 
+                        />
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <code className="text-sm font-mono">{code.key}</code>
-                          <button onClick={() => copyToClipboard(code.key)} className="text-muted-foreground hover:text-primary p-1">
-                            <Copy className="h-4 w-4" />
+                        <div className="flex items-center gap-2 group">
+                          <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{code.key}</code>
+                          <button 
+                            onClick={() => copyToClipboard(code.key)} 
+                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-opacity"
+                            title="复制"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </TableCell>
-                      <TableCell>{code.name}</TableCell>
+                      <TableCell className="font-medium text-sm">{code.name}</TableCell>
                       <TableCell className="font-medium text-green-600">{formatQuota(code.quota)}</TableCell>
                       <TableCell>
-                        <Badge variant={code.status === 'unused' ? 'success' : code.status === 'used' ? 'default' : 'secondary'}>
+                        <Badge variant={code.status === 'unused' ? 'success' : code.status === 'used' ? 'secondary' : 'destructive'}>
                           {code.status === 'unused' ? '未使用' : code.status === 'used' ? '已使用' : '已过期'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{formatTimestamp(code.created_time)}</TableCell>
-                      <TableCell className="text-muted-foreground">{code.expired_time > 0 ? formatTimestamp(code.expired_time) : '永不过期'}</TableCell>
-                      <TableCell>
-                        <button onClick={() => setDeleteDialog({ open: true, type: 'single', id: code.id })} className="text-destructive hover:text-destructive/80 p-1">
+                      <TableCell className="text-xs text-muted-foreground">{formatTimestamp(code.created_time)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {code.expired_time > 0 ? (
+                           <div className="flex items-center gap-1">
+                             {code.expired_time * 1000 < Date.now() && <AlertCircle className="w-3 h-3 text-red-500" />}
+                             {formatTimestamp(code.expired_time)}
+                           </div>
+                        ) : '永不过期'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => setDeleteDialog({ open: true, type: 'single', id: code.id })} 
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        >
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-
-              {/* Pagination */}
-              <div className="px-4 py-3 border-t flex items-center justify-between">
-                <div className="text-sm text-muted-foreground">共 {total} 条记录，第 {page} / {totalPages} 页</div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>上一页</Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>下一页</Button>
-                </div>
+            </div>
+          )}
+          
+          {/* Pagination */}
+          {total > 0 && (
+            <div className="px-4 py-4 border-t flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                显示 {codes.length} 条，共 {total} 条
               </div>
-            </>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>上一页</Button>
+                <div className="flex items-center px-2 text-sm font-medium">
+                  {page} / {totalPages}
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>下一页</Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

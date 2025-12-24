@@ -4,7 +4,8 @@ import { useToast } from './Toast'
 import { GeneratorForm, GenerateFormData } from './GeneratorForm'
 import { ResultModal, GenerateResult } from './ResultModal'
 import { addHistoryItem, HistoryItem } from './History'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
+import { Sparkles } from 'lucide-react'
 
 interface ApiResponse {
   success: boolean
@@ -106,10 +107,22 @@ export function Generator() {
   }
 
   return (
-    <>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Header */}
+      <div>
+        <h2 className="text-3xl font-bold tracking-tight">生成器</h2>
+        <p className="text-muted-foreground mt-1">批量生成新的额度兑换码</p>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle>添加兑换码</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-primary" />
+            配置参数
+          </CardTitle>
+          <CardDescription>
+            填写以下信息以生成兑换码，生成后的兑换码可以在"兑换码管理"中查看。
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <GeneratorForm onSubmit={handleSubmit} isLoading={isLoading} />
@@ -119,6 +132,6 @@ export function Generator() {
       {showModal && result && (
         <ResultModal result={result} onClose={() => { setShowModal(false); setResult(null) }} />
       )}
-    </>
+    </div>
   )
 }
