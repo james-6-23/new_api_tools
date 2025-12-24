@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { CreditCard, Loader2, RefreshCw } from 'lucide-react'
+import { CreditCard, Loader2, RefreshCw, Copy } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -307,7 +307,23 @@ export function TopUps() {
                       </TableCell>
                       <TableCell className="font-medium text-green-600">{formatAmount(record.amount)}</TableCell>
                       <TableCell className="font-medium">{formatMoney(record.money)}</TableCell>
-                      <TableCell className="font-mono text-muted-foreground">{record.trade_no}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-muted-foreground">{record.trade_no}</span>
+                          {record.trade_no && (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(record.trade_no)
+                                showToast('success', '已复制交易号')
+                              }}
+                              className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+                              title="复制交易号"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{record.payment_method}</TableCell>
                       <TableCell>
                         <Badge variant={record.status === 'success' ? 'success' : record.status === 'pending' ? 'warning' : 'destructive'}>
