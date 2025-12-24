@@ -77,8 +77,14 @@ class TopUpStatistics:
     total_amount: int
     total_money: float
     success_count: int
+    success_amount: int
+    success_money: float
     pending_count: int
+    pending_amount: int
+    pending_money: float
     failed_count: int
+    failed_amount: int
+    failed_money: float
 
 
 @dataclass
@@ -241,7 +247,11 @@ class TopUpService:
                 COALESCE(SUM(amount), 0) as total_amount,
                 COALESCE(SUM(money), 0) as total_money,
                 SUM(CASE WHEN LOWER(status) IN ('success', 'completed') OR status = '1' THEN 1 ELSE 0 END) as success_count,
-                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN 1 ELSE 0 END) as failed_count
+                SUM(CASE WHEN LOWER(status) IN ('success', 'completed') OR status = '1' THEN amount ELSE 0 END) as success_amount,
+                SUM(CASE WHEN LOWER(status) IN ('success', 'completed') OR status = '1' THEN money ELSE 0 END) as success_money,
+                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN 1 ELSE 0 END) as failed_count,
+                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN amount ELSE 0 END) as failed_amount,
+                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN money ELSE 0 END) as failed_money
             FROM top_ups
             WHERE {where_sql}
         """
@@ -253,14 +263,30 @@ class TopUpService:
         success_count = int(row.get("success_count", 0) or 0)
         failed_count = int(row.get("failed_count", 0) or 0)
         pending_count = total_count - success_count - failed_count
+        
+        total_amount = int(row.get("total_amount", 0) or 0)
+        success_amount = int(row.get("success_amount", 0) or 0)
+        failed_amount = int(row.get("failed_amount", 0) or 0)
+        pending_amount = total_amount - success_amount - failed_amount
+        
+        total_money = float(row.get("total_money", 0) or 0)
+        success_money = float(row.get("success_money", 0) or 0)
+        failed_money = float(row.get("failed_money", 0) or 0)
+        pending_money = total_money - success_money - failed_money
 
         return TopUpStatistics(
             total_count=total_count,
-            total_amount=int(row.get("total_amount", 0) or 0),
-            total_money=float(row.get("total_money", 0) or 0),
+            total_amount=total_amount,
+            total_money=total_money,
             success_count=success_count,
+            success_amount=success_amount,
+            success_money=success_money,
             pending_count=pending_count,
+            pending_amount=pending_amount,
+            pending_money=pending_money,
             failed_count=failed_count,
+            failed_amount=failed_amount,
+            failed_money=failed_money,
         )
 
     def get_payment_methods(self) -> List[str]:

@@ -26,8 +26,14 @@ interface TopUpStatistics {
   total_amount: number
   total_money: number
   success_count: number
+  success_amount: number
+  success_money: number
   pending_count: number
+  pending_amount: number
+  pending_money: number
   failed_count: number
+  failed_amount: number
+  failed_money: number
 }
 
 interface PaginatedResponse {
@@ -136,13 +142,80 @@ export function TopUps() {
   return (
     <div className="space-y-6">
       {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard title="总充值次数" value={statsLoading ? '-' : `${statistics?.total_count || 0}`} color="blue" />
-        <StatCard title="总充值额度" value={statsLoading ? '-' : formatAmount(statistics?.total_amount || 0)} color="purple" />
-        <StatCard title="成功" value={statsLoading ? '-' : `${statistics?.success_count || 0}`} color="green" />
-        <StatCard title="待处理" value={statsLoading ? '-' : `${statistics?.pending_count || 0}`} color="yellow" />
-        <StatCard title="失败" value={statsLoading ? '-' : `${statistics?.failed_count || 0}`} color="red" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* 成功统计 */}
+        <Card className="border-l-4 border-l-green-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">成功充值</p>
+                <p className="text-2xl font-bold text-green-600">{statsLoading ? '-' : `${statistics?.success_count || 0} 笔`}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">额度</p>
+                <p className="text-lg font-semibold">{statsLoading ? '-' : formatAmount(statistics?.success_amount || 0)}</p>
+                <p className="text-sm text-green-600">{statsLoading ? '-' : formatMoney(statistics?.success_money || 0)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* 待处理统计 */}
+        <Card className="border-l-4 border-l-yellow-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">待处理</p>
+                <p className="text-2xl font-bold text-yellow-600">{statsLoading ? '-' : `${statistics?.pending_count || 0} 笔`}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">额度</p>
+                <p className="text-lg font-semibold">{statsLoading ? '-' : formatAmount(statistics?.pending_amount || 0)}</p>
+                <p className="text-sm text-yellow-600">{statsLoading ? '-' : formatMoney(statistics?.pending_money || 0)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* 失败统计 */}
+        <Card className="border-l-4 border-l-red-500">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">失败</p>
+                <p className="text-2xl font-bold text-red-600">{statsLoading ? '-' : `${statistics?.failed_count || 0} 笔`}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">额度</p>
+                <p className="text-lg font-semibold">{statsLoading ? '-' : formatAmount(statistics?.failed_amount || 0)}</p>
+                <p className="text-sm text-red-600">{statsLoading ? '-' : formatMoney(statistics?.failed_money || 0)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* 总计统计 */}
+      <Card className="bg-muted/30">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-6">
+              <div>
+                <p className="text-sm text-muted-foreground">总充值次数</p>
+                <p className="text-xl font-bold">{statsLoading ? '-' : `${statistics?.total_count || 0} 笔`}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">总充值额度</p>
+                <p className="text-xl font-bold">{statsLoading ? '-' : formatAmount(statistics?.total_amount || 0)}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">总充值金额</p>
+                <p className="text-xl font-bold text-primary">{statsLoading ? '-' : formatMoney(statistics?.total_money || 0)}</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card>
@@ -260,30 +333,6 @@ export function TopUps() {
           )}
         </CardContent>
       </Card>
-    </div>
-  )
-}
-
-
-interface StatCardProps {
-  title: string
-  value: string
-  color: 'blue' | 'green' | 'yellow' | 'red' | 'purple'
-}
-
-function StatCard({ title, value, color }: StatCardProps) {
-  const colorClasses = {
-    blue: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
-    green: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',
-    yellow: 'bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300',
-    red: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
-    purple: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
-  }
-
-  return (
-    <div className={`rounded-lg p-4 ${colorClasses[color]}`}>
-      <p className="text-sm font-medium opacity-80">{title}</p>
-      <p className="text-2xl font-bold">{value}</p>
     </div>
   )
 }

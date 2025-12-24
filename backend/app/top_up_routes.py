@@ -158,8 +158,14 @@ async def get_top_up_statistics(
                 "total_amount": stats.total_amount,
                 "total_money": stats.total_money,
                 "success_count": stats.success_count,
+                "success_amount": stats.success_amount,
+                "success_money": stats.success_money,
                 "pending_count": stats.pending_count,
+                "pending_amount": stats.pending_amount,
+                "pending_money": stats.pending_money,
                 "failed_count": stats.failed_count,
+                "failed_amount": stats.failed_amount,
+                "failed_money": stats.failed_money,
             },
         )
 
