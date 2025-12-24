@@ -208,21 +208,16 @@ class UserManagementService:
         """
         offset = (page - 1) * page_size
 
-        # 基础查询 - 只查 users 表
-        base_sql = """
-            SELECT
-                id, username, display_name, email,
-                role, status, quota, used_quota,
-                request_count, `group`
-            FROM users
-            WHERE deleted_at IS NULL
-        """
+        # 根据数据库类型选择正确的 SQL（group 是保留字）
+        from .database import DatabaseEngine
+        is_pg = self._db._config.engine == DatabaseEngine.POSTGRESQL
+        group_col = '"group"' if is_pg else '`group`'
 
-        base_sql_pg = """
+        base_sql = f"""
             SELECT
                 id, username, display_name, email,
                 role, status, quota, used_quota,
-                request_count, "group"
+                request_count, {group_col}
             FROM users
             WHERE deleted_at IS NULL
         """
@@ -264,13 +259,8 @@ class UserManagementService:
         try:
             self._db.connect()
 
-            # 尝试 MySQL
-            try:
-                full_sql = base_sql + where_sql + order_sql + limit_sql
-                result = self._db.execute(full_sql, params)
-            except Exception:
-                full_sql = base_sql_pg + where_sql + order_sql + limit_sql
-                result = self._db.execute(full_sql, params)
+            full_sql = base_sql + where_sql + order_sql + limit_sql
+            result = self._db.execute(full_sql, params)
 
             # 总数
             count_sql = f"SELECT COUNT(*) as cnt FROM users WHERE deleted_at IS NULL{where_sql}"
@@ -330,23 +320,16 @@ class UserManagementService:
         inactive_cutoff = now - INACTIVE_THRESHOLD
         offset = (page - 1) * page_size
 
-        # 基础查询
-        base_sql = """
-            SELECT
-                u.id, u.username, u.display_name, u.email,
-                u.role, u.status, u.quota, u.used_quota,
-                u.request_count, u.`group`,
-                MAX(l.created_at) as last_request_time
-            FROM users u
-            LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
-            WHERE u.deleted_at IS NULL
-        """
+        # 根据数据库类型选择正确的 SQL
+        from .database import DatabaseEngine
+        is_pg = self._db._config.engine == DatabaseEngine.POSTGRESQL
+        group_col = 'u."group"' if is_pg else 'u.`group`'
 
-        base_sql_pg = """
+        base_sql = f"""
             SELECT
                 u.id, u.username, u.display_name, u.email,
                 u.role, u.status, u.quota, u.used_quota,
-                u.request_count, u."group",
+                u.request_count, {group_col},
                 MAX(l.created_at) as last_request_time
             FROM users u
             LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
@@ -369,8 +352,7 @@ class UserManagementService:
         if where_clauses:
             where_sql = " AND " + " AND ".join(where_clauses)
 
-        group_by = " GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, u.`group`"
-        group_by_pg = ' GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, u."group"'
+        group_by = f" GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, {group_col}"
 
         # 活跃度筛选
         having_clause = ""
@@ -381,7 +363,7 @@ class UserManagementService:
         elif activity_filter == ActivityLevel.VERY_INACTIVE:
             having_clause = " HAVING MAX(l.created_at) < :inactive_cutoff"
 
-        # 排序
+        # 排序 - 根据数据库类型选择 NULL 排序语法
         order_column = "last_request_time"
         if order_by == "username":
             order_column = "u.username"
@@ -392,20 +374,18 @@ class UserManagementService:
         elif order_by == "request_count":
             order_column = "u.request_count"
 
-        order_clause = f" ORDER BY {order_column} {'DESC' if order_dir.upper() == 'DESC' else 'ASC'} NULLS LAST"
-        order_clause_mysql = f" ORDER BY {order_column} IS NULL, {order_column} {'DESC' if order_dir.upper() == 'DESC' else 'ASC'}"
+        order_dir_str = 'DESC' if order_dir.upper() == 'DESC' else 'ASC'
+        if is_pg:
+            order_clause = f" ORDER BY {order_column} {order_dir_str} NULLS LAST"
+        else:
+            order_clause = f" ORDER BY {order_column} IS NULL, {order_column} {order_dir_str}"
         limit_clause = " LIMIT :limit OFFSET :offset"
 
         try:
             self._db.connect()
 
-            # 尝试 MySQL 语法
-            try:
-                full_sql = base_sql + where_sql + group_by + having_clause + order_clause_mysql + limit_clause
-                result = self._db.execute(full_sql, params)
-            except Exception:
-                full_sql = base_sql_pg + where_sql + group_by_pg + having_clause + order_clause + limit_clause
-                result = self._db.execute(full_sql, params)
+            full_sql = base_sql + where_sql + group_by + having_clause + order_clause + limit_clause
+            result = self._db.execute(full_sql, params)
 
             # 总数
             count_sql = f"""
