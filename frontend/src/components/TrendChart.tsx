@@ -51,8 +51,8 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
   }
 
   return (
-    <Card className="col-span-1 shadow-sm hover:shadow-md transition-all duration-300 border-border/50 h-[350px] flex flex-col">
-      <CardHeader className="pb-2 flex-shrink-0">
+    <Card className="shadow-sm hover:shadow-md transition-all duration-300 border-border/50 flex flex-col h-full overflow-hidden">
+      <CardHeader className="pb-0 shrink-0">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -65,7 +65,6 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
               {period === '24h' ? '24小时' : period === '3d' ? '近3天' : period === '7d' ? '近7天' : '近14天'}数据概览
             </CardDescription>
           </div>
-          {/* Optional: Summary Stat */}
           <div className="text-right hidden sm:block">
              <div className="text-2xl font-bold text-primary">
                {data.reduce((acc, curr) => acc + curr.request_count, 0).toLocaleString()}
@@ -74,9 +73,9 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 flex flex-col justify-end pb-6">
+      <CardContent className="flex-1 flex flex-col justify-end pb-16 min-h-[350px]">
         {processedData.length > 0 ? (
-          <div className="relative h-[220px] w-full select-none pl-8 border-b border-border/50">
+          <div className="relative h-[240px] w-full select-none pl-8 border-b border-border/50 shrink-0">
             {/* Background Grid */}
             <div className="absolute inset-0 flex flex-col justify-between text-xs text-muted-foreground/30 pointer-events-none">
               {gridLines.reverse().map((val, i) => (

@@ -291,12 +291,14 @@ export function Dashboard() {
 
 
       {/* Main Charts Area */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Daily Trends Chart */}
-        <TrendChart data={dailyTrends} period={period} loading={loading} />
+        <div className="flex flex-col h-full">
+          <TrendChart data={dailyTrends} period={period} loading={loading} />
+        </div>
 
         {/* Model Usage List */}
-        <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200">
+        <Card className="col-span-1 shadow-sm hover:shadow-md transition-shadow duration-200 flex flex-col h-full">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Box className="w-5 h-5 text-muted-foreground" />
@@ -304,26 +306,24 @@ export function Dashboard() {
             </CardTitle>
             <CardDescription>{getPeriodLabel()}内 Top 8 活跃模型</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 overflow-hidden">
             {models.length > 0 ? (
-              <div className="space-y-5">
+              <div className="h-full flex flex-col justify-around min-h-[300px] py-2">
                 {models.map((model, index) => {
                   const maxRequests = getMaxValue(models.map(m => m.request_count))
                   const percentage = (model.request_count / maxRequests) * 100
                   const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500', 'bg-yellow-500', 'bg-rose-500']
                   return (
-                    <div key={index} className="space-y-1.5 group">
-                      <div className="flex justify-between text-sm items-center">
-                        <span className="font-medium truncate max-w-[180px] sm:max-w-[250px]" title={model.model_name}>
+                    <div key={index} className="space-y-1 group">
+                      <div className="flex justify-between text-xs sm:text-sm items-center">
+                        <span className="font-medium truncate max-w-[150px] sm:max-w-[200px]" title={model.model_name}>
                           {model.model_name}
                         </span>
-                        <div className="flex items-center gap-2 text-muted-foreground text-xs">
-                          <span>{formatNumber(model.request_count)} 请求</span>
-                        </div>
+                        <span className="text-muted-foreground tabular-nums">{formatNumber(model.request_count)}</span>
                       </div>
-                      <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                      <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
                         <div 
-                          className={`h-full rounded-full transition-all duration-500 ${colors[index % colors.length]}`} 
+                          className={`h-full rounded-full transition-all duration-700 ease-out ${colors[index % colors.length]}`} 
                           style={{ width: `${percentage}%` }}
                         />
                       </div>
@@ -332,7 +332,7 @@ export function Dashboard() {
                 })}
               </div>
             ) : (
-              <div className="h-56 flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
+              <div className="h-full min-h-[300px] flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
                 暂无数据
               </div>
             )}
