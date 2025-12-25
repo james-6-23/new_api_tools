@@ -70,6 +70,8 @@ RECOMMENDED_INDEXES = [
     ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
     # Risk monitoring indexes
     ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
+    # Analytics optimization - for incremental log processing
+    ("idx_logs_id_type", "logs", ["id", "type"]),
 ]
 
 
@@ -109,8 +111,8 @@ class DatabaseManager:
         return create_engine(
             connection_url,
             poolclass=QueuePool,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=3,  # Reduced: keep minimal connections
+            max_overflow=5,  # Reduced: limit max connections to 8 total
             pool_timeout=30,
             pool_recycle=1800,  # Recycle connections after 30 minutes
             pool_pre_ping=True,  # Verify connection before use
@@ -321,44 +323,64 @@ class DatabaseManager:
         Create recommended indexes if they don't exist.
         These indexes improve query performance for risk monitoring and analytics.
         Safe to run multiple times - checks before creating.
+        
+        WARNING: This method can be slow on large tables. Use ensure_indexes_async_safe()
+        for background execution.
         """
+        self._do_ensure_indexes(log_progress=False)
+
+    def ensure_indexes_async_safe(self) -> None:
+        """
+        Create indexes with progress logging and delays between each index.
+        Designed to be called from a background thread to avoid blocking.
+        Creates indexes one by one with small delays to reduce database load.
+        """
+        self._do_ensure_indexes(log_progress=True, delay_between=1.0)
+
+    def _do_ensure_indexes(self, log_progress: bool = False, delay_between: float = 0) -> None:
+        """
+        Internal method to create indexes.
+        
+        Args:
+            log_progress: If True, log each index creation attempt.
+            delay_between: Seconds to wait between index creations (reduces DB load).
+        """
+        import time as time_module
         from .logger import logger as app_logger
         
         is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
         
         # Define indexes: (index_name, table_name, columns)
-        # Based on analysis of common query patterns in the system
+        # Ordered by priority - most important indexes first
         indexes = [
-            # logs table - most queried table
-            ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),  # Risk monitoring, analytics
-            ("idx_logs_user_created", "logs", ["user_id", "created_at"]),  # User analysis queries
-            ("idx_logs_type_created", "logs", ["type", "created_at"]),  # Dashboard stats by type
+            # High priority: analytics sync (most frequently used)
+            ("idx_logs_id_type", "logs", ["id", "type"]),  # Incremental log processing
+            
+            # Medium priority: risk monitoring
+            ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
+            ("idx_logs_type_created", "logs", ["type", "created_at"]),
+            ("idx_logs_user_created", "logs", ["user_id", "created_at"]),
 
-            # IP monitoring indexes (from RECOMMENDED_INDEXES)
-            ("idx_logs_ip_created", "logs", ["ip", "created_at"]),  # IP analysis base index
-            ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),  # Shared IP detection
-            ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),  # Multi-IP user detection
-            ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),  # Multi-IP token detection
+            # Lower priority: IP monitoring (can be created later)
+            ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
+            ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
+            ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),
+            ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
 
-            # users table
-            ("idx_users_deleted_status", "users", ["deleted_at", "status"]),  # User listing with soft delete
-            ("idx_users_request_count", "users", ["request_count"]),  # Sorting by request count
-
-            # tokens table
-            ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),  # Token queries by user
-
-            # top_ups table
-            ("idx_topups_create_time", "top_ups", ["create_time"]),  # Top-up listing sorted by time
-            ("idx_topups_user_id", "top_ups", ["user_id"]),  # Top-ups by user
-
-            # redemptions table
-            ("idx_redemptions_created_deleted", "redemptions", ["created_time", "deleted_at"]),  # Redemption listing
+            # Other tables (usually small, fast to index)
+            ("idx_users_deleted_status", "users", ["deleted_at", "status"]),
+            ("idx_users_request_count", "users", ["request_count"]),
+            ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),
+            ("idx_topups_create_time", "top_ups", ["create_time"]),
+            ("idx_topups_user_id", "top_ups", ["user_id"]),
+            ("idx_redemptions_created_deleted", "redemptions", ["created_time", "deleted_at"]),
         ]
         
         created_count = 0
         skipped_count = 0
+        total = len(indexes)
         
-        for index_name, table_name, columns in indexes:
+        for i, (index_name, table_name, columns) in enumerate(indexes):
             try:
                 # Check if index already exists
                 if is_pg:
@@ -378,11 +400,10 @@ class DatabaseManager:
                 result = self.execute(check_sql, {"index_name": index_name, "table_name": table_name})
                 
                 if result:
-                    # Index already exists
                     skipped_count += 1
                     continue
                 
-                # Check if table exists before creating index
+                # Check if table exists
                 if is_pg:
                     table_check_sql = """
                         SELECT 1 FROM information_schema.tables 
@@ -399,27 +420,108 @@ class DatabaseManager:
                 
                 table_exists = self.execute(table_check_sql, {"table_name": table_name})
                 if not table_exists:
-                    # Table doesn't exist, skip this index
                     continue
                 
-                # Create index
+                # Log progress before creating (can be slow)
+                if log_progress:
+                    app_logger.system(f"创建索引 ({i+1}/{total}): {index_name} ON {table_name}...")
+                
+                # Create index - use CONCURRENTLY for PostgreSQL to avoid locking
                 columns_str = ", ".join(columns)
                 if is_pg:
-                    create_sql = f'CREATE INDEX "{index_name}" ON {table_name} ({columns_str})'
+                    # CONCURRENTLY allows reads/writes during index creation
+                    create_sql = f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{index_name}" ON {table_name} ({columns_str})'
                 else:
+                    # MySQL: use ALGORITHM=INPLACE for online DDL when possible
                     create_sql = f'CREATE INDEX `{index_name}` ON {table_name} ({columns_str})'
                 
                 self.execute(create_sql)
                 created_count += 1
-                app_logger.system(f"创建索引: {index_name} ON {table_name}")
+                
+                if log_progress:
+                    app_logger.system(f"索引创建完成: {index_name}")
+                
+                # Delay between index creations to reduce load
+                if delay_between > 0 and i < total - 1:
+                    time_module.sleep(delay_between)
                 
             except Exception as e:
-                # Log but don't fail - index creation is optional optimization
-                app_logger.warning(f"创建索引失败 {index_name}: {e}", category="数据库")
+                # Log but don't fail
+                if log_progress:
+                    app_logger.warning(f"创建索引失败 {index_name}: {e}", category="数据库")
         
         if created_count > 0:
-            app_logger.system(f"索引初始化完成，新建 {created_count} 个索引")
-        else:
+            app_logger.system(f"索引初始化完成，新建 {created_count} 个，跳过 {skipped_count} 个已存在")
+        elif skipped_count > 0:
+            app_logger.system(f"索引检查完成，{skipped_count} 个索引已存在")
+
+    def get_index_status(self) -> dict[str, Any]:
+        """
+        Get status of all recommended indexes.
+        
+        Returns:
+            Dictionary with index status information.
+        """
+        is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
+        
+        # All indexes we manage
+        indexes = [
+            ("idx_logs_id_type", "logs"),
+            ("idx_logs_created_user_type", "logs"),
+            ("idx_logs_type_created", "logs"),
+            ("idx_logs_user_created", "logs"),
+            ("idx_logs_ip_created", "logs"),
+            ("idx_logs_created_ip_token", "logs"),
+            ("idx_logs_created_user_ip", "logs"),
+            ("idx_logs_token_created_ip", "logs"),
+            ("idx_users_deleted_status", "users"),
+            ("idx_users_request_count", "users"),
+            ("idx_tokens_user_deleted", "tokens"),
+            ("idx_topups_create_time", "top_ups"),
+            ("idx_topups_user_id", "top_ups"),
+            ("idx_redemptions_created_deleted", "redemptions"),
+        ]
+        
+        status = {}
+        existing_count = 0
+        missing_count = 0
+        
+        for index_name, table_name in indexes:
+            try:
+                if is_pg:
+                    check_sql = "SELECT 1 FROM pg_indexes WHERE indexname = :index_name"
+                else:
+                    check_sql = """
+                        SELECT 1 FROM information_schema.statistics 
+                        WHERE table_schema = DATABASE() 
+                        AND table_name = :table_name 
+                        AND index_name = :index_name
+                        LIMIT 1
+                    """
+                
+                result = self.execute(check_sql, {"index_name": index_name, "table_name": table_name})
+                exists = bool(result)
+                status[index_name] = {"exists": exists, "table": table_name}
+                
+                if exists:
+                    existing_count += 1
+                else:
+                    missing_count += 1
+            except Exception:
+                status[index_name] = {"exists": False, "table": table_name, "error": True}
+                missing_count += 1
+        
+        return {
+            "indexes": status,
+            "total": len(indexes),
+            "existing": existing_count,
+            "missing": missing_count,
+            "all_ready": missing_count == 0,
+        }
+        
+        if created_count > 0:
+            app_logger.system(f"索引初始化完成，新建 {created_count} 个，跳过 {skipped_count} 个已存在")
+        elif skipped_count > 0:
             app_logger.system(f"索引检查完成，{skipped_count} 个索引已存在")
 
 

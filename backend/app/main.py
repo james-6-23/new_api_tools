@@ -114,27 +114,59 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.system("NewAPI Middleware Tool 启动中...")
 
-    # 初始化数据库索引（优化查询性能）
+    # 初始化数据库连接（不阻塞启动）
     try:
         from .database import get_db_manager
         db = get_db_manager()
         db.connect()
-        db.ensure_indexes()
     except Exception as e:
-        logger.warning(f"索引初始化跳过: {e}", category="数据库")
+        logger.warning(f"数据库连接失败: {e}", category="数据库")
 
     # 启动后台日志同步任务
     sync_task = asyncio.create_task(background_log_sync())
+    
+    # 启动后台索引创建任务（不阻塞应用启动）
+    index_task = asyncio.create_task(background_ensure_indexes())
 
     yield
 
     # 停止后台任务
     sync_task.cancel()
+    index_task.cancel()
     try:
         await sync_task
     except asyncio.CancelledError:
         pass
+    try:
+        await index_task
+    except asyncio.CancelledError:
+        pass
     logger.system("NewAPI Middleware Tool 已关闭")
+
+
+async def background_ensure_indexes():
+    """
+    Background task to create indexes without blocking app startup.
+    Creates indexes one by one with delays to minimize database load.
+    """
+    # Wait for app to fully start before creating indexes
+    await asyncio.sleep(10)
+    
+    try:
+        from .database import get_db_manager
+        db = get_db_manager()
+        
+        logger.system("开始后台索引检查...")
+        
+        # Run index creation in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, db.ensure_indexes_async_safe)
+        
+        logger.system("后台索引检查完成")
+    except asyncio.CancelledError:
+        logger.system("索引创建任务已取消")
+    except Exception as e:
+        logger.warning(f"后台索引创建失败: {e}", category="数据库")
 
 
 async def background_log_sync():

@@ -74,28 +74,27 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pb-4">
+      <CardContent className="pb-16">
         {processedData.length > 0 ? (
-          <div className="relative h-[250px] w-full mt-4 select-none pl-6">
+          <div className="relative h-[220px] w-full mt-8 select-none pl-8 border-b border-border/50">
             {/* Background Grid */}
             <div className="absolute inset-0 flex flex-col justify-between text-xs text-muted-foreground/30 pointer-events-none">
               {gridLines.reverse().map((val, i) => (
                 <div key={i} className="flex items-center w-full relative">
-                  <span className="absolute -left-8 w-6 text-right text-[10px]">{val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}</span>
+                  <span className="absolute -left-8 w-7 text-right text-[10px]">{val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}</span>
                   <div className="w-full h-[1px] bg-border/40 border-dashed border-t border-muted-foreground/20"></div>
                 </div>
               ))}
             </div>
 
             {/* Chart Area */}
-            <div className="absolute inset-0 ml-0 flex items-end justify-between gap-2 sm:gap-4 pl-2 z-10">
+            <div className="absolute inset-0 ml-0 flex items-end justify-between gap-0.5 sm:gap-1 pl-2 z-10">
               {processedData.map((item, index) => {
                  // Determine if we should show the label
                  const total = processedData.length;
-                 const showLabel = 
-                    (total <= 10) || // Show all if few items
-                    (total <= 24 && index % 4 === 0) || // Every 4th for up to 24 items (e.g. 24h view)
-                    (index % Math.ceil(total / 6) === 0); // Dynamic for larger sets
+                 const isHourly = !!item.hour;
+                 // Always show if hourly, otherwise use adaptive logic
+                 const showLabel = isHourly || (total <= 12) || (index % 2 === 0) || (index === total - 1);
 
                  return (
                   <div
@@ -114,22 +113,19 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
 
                     {/* Bar */}
                     <div 
-                      className="relative w-full max-w-[40px] flex items-end transition-all duration-500 ease-out"
+                      className="relative w-full flex items-end transition-all duration-500 ease-out"
                       style={{ height: '100%' }}
                     >
                        <div 
                           className={cn(
-                            "w-full rounded-t-sm transition-all duration-300 relative",
-                            "bg-gradient-to-t from-primary/60 to-primary/90",
-                            "hover:from-primary/80 hover:to-primary hover:shadow-[0_0_20px_-5px_rgba(var(--primary),0.5)]",
-                            "after:content-[''] after:absolute after:inset-0 after:bg-white/10 after:opacity-0 hover:after:opacity-100 after:transition-opacity"
+                            "w-full rounded-t-[1px] transition-all duration-300 relative",
+                            "bg-gradient-to-t from-primary/70 to-primary",
+                            hoveredIndex === index ? "opacity-100 scale-x-110 shadow-[0_0_10px_rgba(var(--primary),0.2)]" : "opacity-80"
                           )}
                           style={{ 
                             height: `${Math.max(item.height, 2)}%`,
                           }}
                        >
-                          {/* Top Cap/Highlight */}
-                          <div className="absolute top-0 inset-x-0 h-[2px] bg-white/30 rounded-t-sm"></div>
                        </div>
                     </div>
 
@@ -169,8 +165,9 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
 
                     {/* X-Axis Label */}
                     <div className={cn(
-                      "absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] sm:text-xs text-muted-foreground font-medium whitespace-nowrap transition-opacity duration-200",
-                      showLabel ? "opacity-70" : "opacity-0 group-hover:opacity-100"
+                      "absolute top-full mt-2 left-1/2 text-[9px] text-muted-foreground font-medium transition-all duration-200",
+                      isHourly ? "rotate-[45deg] origin-top-left ml-1 whitespace-nowrap" : "-translate-x-1/2",
+                      showLabel ? "opacity-70" : "opacity-0"
                     )}>
                       {item.displayDate}
                     </div>

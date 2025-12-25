@@ -135,6 +135,28 @@ class EnsureIndexesResponse(BaseModel):
     message: str
 
 
+class IndexStatusResponse(BaseModel):
+    success: bool
+    data: dict
+
+
+@router.get("/index-status", response_model=IndexStatusResponse)
+async def get_index_status(
+    _: str = Depends(verify_auth),
+):
+    """Get status of all recommended indexes."""
+    from .database import get_db_manager
+    
+    db = get_db_manager()
+    db.connect()
+    
+    try:
+        status = db.get_index_status()
+        return IndexStatusResponse(success=True, data=status)
+    except Exception as e:
+        raise InvalidParamsError(message=f"获取索引状态失败: {str(e)}")
+
+
 @router.post("/ensure-indexes", response_model=EnsureIndexesResponse)
 async def ensure_indexes(
     _: str = Depends(verify_auth),

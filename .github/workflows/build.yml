@@ -1,5 +1,5 @@
 # GitHub Actions CI/CD Workflow for NewAPI Middleware Tool
-# 构建并推送 All-in-One Docker 镜像
+# 构建并推送 All-in-One Docker 镜像 (支持 amd64 和 arm64)
 
 name: Build and Push Docker Image
 
@@ -38,6 +38,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
@@ -70,4 +75,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64

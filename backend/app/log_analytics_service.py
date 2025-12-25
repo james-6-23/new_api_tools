@@ -11,9 +11,22 @@ from .local_storage import get_local_storage
 from .logger import logger
 
 # Constants
-BATCH_SIZE = 1000  # Number of logs to process per batch
 LOG_TYPE_CONSUMPTION = 2  # type=2 is consumption/usage log (success)
 LOG_TYPE_FAILURE = 5  # type=5 is failure log (request failed)
+
+# Dynamic batch size thresholds
+# Based on total logs count, adjust batch size for optimal performance
+BATCH_CONFIG = {
+    # (min_logs, max_logs): (batch_size, max_iterations)
+    (0, 10000): (1000, 20),           # Small: 1K/batch, max 20K/call
+    (10000, 100000): (2000, 50),      # Medium: 2K/batch, max 100K/call
+    (100000, 1000000): (5000, 100),   # Large: 5K/batch, max 500K/call
+    (1000000, 10000000): (10000, 150), # Very large: 10K/batch, max 1.5M/call
+    (10000000, float('inf')): (20000, 200),  # Huge: 20K/batch, max 4M/call
+}
+
+DEFAULT_BATCH_SIZE = 5000
+DEFAULT_MAX_ITERATIONS = 100
 
 
 @dataclass
@@ -134,13 +147,16 @@ class LogAnalyticsService:
     def process_new_logs(self) -> Dict[str, Any]:
         """
         Process new logs incrementally.
-        Fetches BATCH_SIZE logs from the main database and updates local statistics.
+        Uses dynamic batch size based on total logs count.
 
         Returns:
             Processing result with count of processed logs.
         """
         last_log_id = self._get_state("last_log_id", 0)
         total_processed = self._get_state("total_processed", 0)
+        
+        # Get dynamic batch size
+        batch_size, _ = self._get_dynamic_batch_config()
 
         # Fetch new logs from main database (both success type=2 and failure type=5)
         sql = """
@@ -159,7 +175,7 @@ class LogAnalyticsService:
                 "last_id": last_log_id,
                 "type_success": LOG_TYPE_CONSUMPTION,
                 "type_failure": LOG_TYPE_FAILURE,
-                "limit": BATCH_SIZE,
+                "limit": batch_size,
             })
         except Exception as e:
             logger.db_error(f"获取日志失败: {e}")
@@ -432,56 +448,151 @@ class LogAnalyticsService:
         logger.analytics("分析数据已重置")
         return {"success": True, "message": "Analytics data reset successfully"}
 
-    def get_total_logs_count(self) -> int:
+    def _get_dynamic_batch_config(self, total_logs: int = 0) -> tuple[int, int]:
+        """
+        Get dynamic batch size and max iterations based on total logs count.
+        
+        Args:
+            total_logs: Total number of logs to process. If 0, will fetch from cache.
+            
+        Returns:
+            Tuple of (batch_size, max_iterations)
+        """
+        if total_logs <= 0:
+            total_logs = self.get_total_logs_count()
+        
+        for (min_logs, max_logs), (batch_size, max_iter) in BATCH_CONFIG.items():
+            if min_logs <= total_logs < max_logs:
+                return batch_size, max_iter
+        
+        return DEFAULT_BATCH_SIZE, DEFAULT_MAX_ITERATIONS
+
+    def get_total_logs_count(self, use_cache: bool = True) -> int:
         """
         Get total count of logs (success + failure) in the main database.
+        Uses cached value to avoid expensive COUNT(*) on large tables.
+
+        Args:
+            use_cache: If True, return cached value if available and fresh (within 5 minutes).
 
         Returns:
             Total number of logs with type=2 or type=5.
         """
-        sql = "SELECT COUNT(*) as cnt FROM logs WHERE type IN (:type_success, :type_failure)"
+        cache_key = "cached_total_logs_count"
+        cache_time_key = "cached_total_logs_count_time"
+        cache_ttl = 300  # 5 minutes
+
+        if use_cache:
+            cached_count = self._get_state(cache_key, 0)
+            cached_time = self._get_state(cache_time_key, 0)
+            now = int(time.time())
+            if cached_count > 0 and (now - cached_time) < cache_ttl:
+                return cached_count
+
+        # Use approximate count for MySQL/PostgreSQL to avoid full table scan
+        # This is much faster than COUNT(*) on large tables
         try:
             self._db.connect()
+            
+            # Try to get approximate count first (fast)
+            if self._db.config.engine.value == "mysql":
+                # MySQL: use information_schema for approximate count
+                approx_sql = """
+                    SELECT TABLE_ROWS as cnt 
+                    FROM information_schema.TABLES 
+                    WHERE TABLE_SCHEMA = :db_name AND TABLE_NAME = 'logs'
+                """
+                result = self._db.execute(approx_sql, {"db_name": self._db.config.database})
+                if result and result[0].get("cnt"):
+                    count = int(result[0]["cnt"])
+                    # Cache the result
+                    self._set_state(cache_key, count)
+                    self._set_state(cache_time_key, int(time.time()))
+                    return count
+            elif self._db.config.engine.value == "postgresql":
+                # PostgreSQL: use pg_stat_user_tables for approximate count
+                approx_sql = """
+                    SELECT n_live_tup as cnt 
+                    FROM pg_stat_user_tables 
+                    WHERE relname = 'logs'
+                """
+                result = self._db.execute(approx_sql, {})
+                if result and result[0].get("cnt"):
+                    count = int(result[0]["cnt"])
+                    self._set_state(cache_key, count)
+                    self._set_state(cache_time_key, int(time.time()))
+                    return count
+
+            # Fallback: exact count (slow on large tables, but cached)
+            sql = "SELECT COUNT(*) as cnt FROM logs WHERE type IN (:type_success, :type_failure)"
             result = self._db.execute(sql, {
                 "type_success": LOG_TYPE_CONSUMPTION,
                 "type_failure": LOG_TYPE_FAILURE,
             })
-            return int(result[0]["cnt"]) if result else 0
+            count = int(result[0]["cnt"]) if result else 0
+            self._set_state(cache_key, count)
+            self._set_state(cache_time_key, int(time.time()))
+            return count
         except Exception as e:
             logger.db_error(f"获取日志总数失败: {e}")
-            return 0
+            # Return cached value on error
+            return self._get_state(cache_key, 0)
 
-    def get_max_log_id(self) -> int:
+    def get_max_log_id(self, use_cache: bool = True) -> int:
         """
         Get the maximum log ID in the main database.
+        Uses cached value to avoid expensive query on large tables.
+
+        Args:
+            use_cache: If True, return cached value if available and fresh (within 60 seconds).
 
         Returns:
             Maximum log ID for type=2 or type=5.
         """
-        sql = "SELECT MAX(id) as max_id FROM logs WHERE type IN (:type_success, :type_failure)"
+        cache_key = "cached_max_log_id"
+        cache_time_key = "cached_max_log_id_time"
+        cache_ttl = 60  # 1 minute (shorter TTL for max_id as it changes more frequently)
+
+        if use_cache:
+            cached_id = self._get_state(cache_key, 0)
+            cached_time = self._get_state(cache_time_key, 0)
+            now = int(time.time())
+            if cached_id > 0 and (now - cached_time) < cache_ttl:
+                return cached_id
+
+        # MAX(id) on primary key is fast, but we still cache it
+        # to reduce database load under high concurrency
+        sql = "SELECT MAX(id) as max_id FROM logs"
         try:
             self._db.connect()
-            result = self._db.execute(sql, {
-                "type_success": LOG_TYPE_CONSUMPTION,
-                "type_failure": LOG_TYPE_FAILURE,
-            })
-            return int(result[0]["max_id"]) if result and result[0]["max_id"] else 0
+            result = self._db.execute(sql, {})
+            max_id = int(result[0]["max_id"]) if result and result[0]["max_id"] else 0
+            self._set_state(cache_key, max_id)
+            self._set_state(cache_time_key, int(time.time()))
+            return max_id
         except Exception as e:
             logger.db_error(f"获取最大日志ID失败: {e}")
-            return 0
+            return self._get_state(cache_key, 0)
 
     def batch_process(
         self,
-        max_iterations: int = 100,
-        batch_size: int = BATCH_SIZE,
+        max_iterations: Optional[int] = None,
+        batch_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Process multiple batches of logs continuously.
         Useful for initial sync of large log datasets.
+        
+        Batch size and iterations are dynamically adjusted based on total logs:
+        - < 10K logs: 1K/batch, max 20 iterations
+        - 10K-100K: 2K/batch, max 50 iterations  
+        - 100K-1M: 5K/batch, max 100 iterations
+        - 1M-10M: 10K/batch, max 150 iterations
+        - > 10M: 20K/batch, max 200 iterations
 
         Args:
-            max_iterations: Maximum number of batches to process (default 100).
-            batch_size: Number of logs per batch (default 1000).
+            max_iterations: Override max iterations (optional, uses dynamic config if None).
+            batch_size: Override batch size (optional, uses dynamic config if None).
 
         Returns:
             Processing result with total processed count and progress info.
@@ -491,16 +602,30 @@ class LogAnalyticsService:
         iterations = 0
 
         # Get or set the initialization cutoff point
-        # This ensures we only process logs up to this point during initial sync
         init_max_log_id = self._get_state("init_max_log_id", 0)
         if init_max_log_id == 0:
             # First time batch processing - set the cutoff point
-            init_max_log_id = self.get_max_log_id()
+            init_max_log_id = self.get_max_log_id(use_cache=False)
             self._set_state("init_max_log_id", init_max_log_id)
             logger.analytics("设置初始化截止点", cutoff_id=init_max_log_id)
 
-        while iterations < max_iterations:
-            result = self._process_logs_with_cutoff(init_max_log_id)
+        # Get dynamic batch config based on total logs
+        total_logs = self.get_total_logs_count()
+        dynamic_batch_size, dynamic_max_iter = self._get_dynamic_batch_config(total_logs)
+        
+        # Use provided values or dynamic defaults
+        actual_batch_size = batch_size if batch_size is not None else dynamic_batch_size
+        actual_max_iter = max_iterations if max_iterations is not None else dynamic_max_iter
+        
+        logger.analytics(
+            "开始批量处理",
+            total_logs=total_logs,
+            batch_size=actual_batch_size,
+            max_iterations=actual_max_iter
+        )
+
+        while iterations < actual_max_iter:
+            result = self._process_logs_with_cutoff(init_max_log_id, actual_batch_size)
 
             if not result.get("success"):
                 break
@@ -543,6 +668,7 @@ class LogAnalyticsService:
             "success": True,
             "total_processed": total_processed,
             "iterations": iterations,
+            "batch_size": actual_batch_size,
             "elapsed_seconds": round(elapsed_time, 2),
             "logs_per_second": round(total_processed / elapsed_time, 1) if elapsed_time > 0 else 0,
             "progress_percent": round(progress, 2),
@@ -552,13 +678,14 @@ class LogAnalyticsService:
             "completed": completed,
         }
 
-    def _process_logs_with_cutoff(self, max_log_id: int) -> Dict[str, Any]:
+    def _process_logs_with_cutoff(self, max_log_id: int, batch_size: int = DEFAULT_BATCH_SIZE) -> Dict[str, Any]:
         """
         Process logs with a cutoff ID limit.
         Only processes logs with id <= max_log_id.
 
         Args:
             max_log_id: Maximum log ID to process.
+            batch_size: Number of logs to fetch per batch.
 
         Returns:
             Processing result.
@@ -566,7 +693,8 @@ class LogAnalyticsService:
         last_log_id = self._get_state("last_log_id", 0)
         total_processed = self._get_state("total_processed", 0)
 
-        # Fetch new logs with cutoff (both success type=2 and failure type=5)
+        # Optimized query: use FORCE INDEX hint for MySQL, or rely on idx_logs_id_type
+        # The key optimization is using id range scan which is very fast on primary key
         sql = """
             SELECT
                 id, user_id, username, model_name, quota,
@@ -584,7 +712,7 @@ class LogAnalyticsService:
                 "max_id": max_log_id,
                 "type_success": LOG_TYPE_CONSUMPTION,
                 "type_failure": LOG_TYPE_FAILURE,
-                "limit": BATCH_SIZE,
+                "limit": batch_size,
             })
         except Exception as e:
             logger.db_error(f"获取日志失败: {e}")
@@ -604,7 +732,6 @@ class LogAnalyticsService:
             username = log.get("username") or f"User#{user_id}"
             model_name = log.get("model_name") or "unknown"
             quota = int(log.get("quota") or 0)
-            prompt_tokens = int(log.get("prompt_tokens") or 0)
             completion_tokens = int(log.get("completion_tokens") or 0)
 
             new_last_log_id = max(new_last_log_id, log_id)
@@ -641,13 +768,18 @@ class LogAnalyticsService:
                 # type=5: failed request
                 model_stats[model_name]["failure_count"] += 1
 
-        # Update SQLite
+        # Batch update SQLite for better performance
         now = int(time.time())
         with self._storage._get_connection() as conn:
             cursor = conn.cursor()
 
-            for user_id, stats in user_stats.items():
-                cursor.execute("""
+            # Use executemany for batch inserts (much faster than individual inserts)
+            user_data = [
+                (user_id, stats["username"], stats["request_count"], stats["quota_used"], now)
+                for user_id, stats in user_stats.items()
+            ]
+            if user_data:
+                cursor.executemany("""
                     INSERT INTO user_rankings (user_id, username, request_count, quota_used, updated_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
@@ -655,10 +787,15 @@ class LogAnalyticsService:
                         request_count = user_rankings.request_count + excluded.request_count,
                         quota_used = user_rankings.quota_used + excluded.quota_used,
                         updated_at = excluded.updated_at
-                """, (user_id, stats["username"], stats["request_count"], stats["quota_used"], now))
+                """, user_data)
 
-            for model_name, stats in model_stats.items():
-                cursor.execute("""
+            model_data = [
+                (model_name, stats["total_requests"], stats["success_count"], 
+                 stats["failure_count"], stats["empty_count"], now)
+                for model_name, stats in model_stats.items()
+            ]
+            if model_data:
+                cursor.executemany("""
                     INSERT INTO model_stats (model_name, total_requests, success_count, failure_count, empty_count, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(model_name) DO UPDATE SET
@@ -667,7 +804,7 @@ class LogAnalyticsService:
                         failure_count = model_stats.failure_count + excluded.failure_count,
                         empty_count = model_stats.empty_count + excluded.empty_count,
                         updated_at = excluded.updated_at
-                """, (model_name, stats["total_requests"], stats["success_count"], stats["failure_count"], stats["empty_count"], now))
+                """, model_data)
 
             conn.commit()
 
