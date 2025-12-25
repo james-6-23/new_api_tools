@@ -296,7 +296,9 @@ export function RealtimeRanking() {
 
   const [ipWindow, setIpWindow] = useState<WindowKey>('24h')
   const [ipLoading, setIpLoading] = useState(false)
-  const [ipRefreshing, setIpRefreshing] = useState(false)
+  const [ipRefreshing, setIpRefreshing] = useState<{ all: boolean; shared: boolean; tokens: boolean; users: boolean }>({
+    all: false, shared: false, tokens: false, users: false
+  })
 
   // User IP details dialog
   const [userIpsDialogOpen, setUserIpsDialogOpen] = useState(false)
@@ -419,9 +421,12 @@ export function RealtimeRanking() {
     }
   }, [apiUrl, getAuthHeaders])
 
-  const fetchIPData = useCallback(async (showSuccessToast = false) => {
+  const fetchIPData = useCallback(async (showSuccessToast = false, resetPage = false) => {
     setIpLoading(true)
-    setIpPage({ shared: 1, tokens: 1, users: 1 })
+    // Only reset page when explicitly requested (e.g., window change), not on refresh
+    if (resetPage) {
+      setIpPage({ shared: 1, tokens: 1, users: 1 })
+    }
     try {
       const [statsRes, sharedRes, tokensRes, usersRes] = await Promise.all([
         fetch(`${apiUrl}/api/ip/stats`, { headers: getAuthHeaders() }),
@@ -603,11 +608,11 @@ export function RealtimeRanking() {
     if (view === 'leaderboards') fetchLeaderboards()
     if (view === 'banned_list') fetchBannedUsers(1)
     if (view === 'audit_logs') fetchBanRecords(1)
-    if (view === 'ip_monitoring') fetchIPData()
+    if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on view change
   }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, view])
 
   useEffect(() => {
-    if (view === 'ip_monitoring') fetchIPData()
+    if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on window change
   }, [ipWindow, fetchIPData, view])
 
   useEffect(() => {
@@ -655,10 +660,62 @@ export function RealtimeRanking() {
     setRecordsRefreshing(false)
   }
 
+  // 刷新所有 IP 数据
   const handleRefreshIP = async () => {
-    setIpRefreshing(true)
+    setIpRefreshing(prev => ({ ...prev, all: true }))
     await fetchIPData(true)
-    setIpRefreshing(false)
+    setIpRefreshing(prev => ({ ...prev, all: false }))
+  }
+
+  // 单独刷新共享 IP 列表
+  const handleRefreshSharedIps = async () => {
+    setIpRefreshing(prev => ({ ...prev, shared: true }))
+    try {
+      const response = await fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setSharedIps(res.data?.items || [])
+        showToast('success', '已刷新')
+      }
+    } catch (e) {
+      showToast('error', '刷新失败')
+    } finally {
+      setIpRefreshing(prev => ({ ...prev, shared: false }))
+    }
+  }
+
+  // 单独刷新多 IP 令牌列表
+  const handleRefreshMultiIpTokens = async () => {
+    setIpRefreshing(prev => ({ ...prev, tokens: true }))
+    try {
+      const response = await fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setMultiIpTokens(res.data?.items || [])
+        showToast('success', '已刷新')
+      }
+    } catch (e) {
+      showToast('error', '刷新失败')
+    } finally {
+      setIpRefreshing(prev => ({ ...prev, tokens: false }))
+    }
+  }
+
+  // 单独刷新多 IP 用户列表
+  const handleRefreshMultiIpUsers = async () => {
+    setIpRefreshing(prev => ({ ...prev, users: true }))
+    try {
+      const response = await fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setMultiIpUsers(res.data?.items || [])
+        showToast('success', '已刷新')
+      }
+    } catch (e) {
+      showToast('error', '刷新失败')
+    } finally {
+      setIpRefreshing(prev => ({ ...prev, users: false }))
+    }
   }
 
   const toggleSharedIpExpand = (ip: string) => {
@@ -1424,9 +1481,9 @@ export function RealtimeRanking() {
                   ))}
                 </Select>
               </div>
-              <Button variant="outline" size="sm" onClick={handleRefreshIP} disabled={ipRefreshing} className="h-9">
-                <RefreshCw className={cn("h-4 w-4 mr-2", ipRefreshing && "animate-spin")} />
-                刷新
+              <Button variant="outline" size="sm" onClick={handleRefreshIP} disabled={ipRefreshing.all} className="h-9">
+                <RefreshCw className={cn("h-4 w-4 mr-2", ipRefreshing.all && "animate-spin")} />
+                全部刷新
               </Button>
             </div>
 
@@ -1528,11 +1585,11 @@ export function RealtimeRanking() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={handleRefreshIP}
-                        disabled={ipRefreshing}
+                        onClick={handleRefreshSharedIps}
+                        disabled={ipRefreshing.shared}
                         title="刷新"
                       >
-                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing.shared && "animate-spin")} />
                       </Button>
                     </div>
                   </CardHeader>
@@ -1571,7 +1628,18 @@ export function RealtimeRanking() {
                                     <div key={t.token_id} className="flex items-center justify-between text-sm bg-muted/40 rounded-lg px-3 py-2 border border-border/40">
                                       <div className="flex items-center gap-2">
                                         <span className="font-semibold text-primary/80">{t.token_name || `Token#${t.token_id}`}</span>
-                                        <span className="text-muted-foreground text-xs bg-background/50 px-1.5 py-0.5 rounded">({t.username || t.user_id})</span>
+                                        <div
+                                          className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit group/user"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            openUserAnalysisFromIP(t.user_id, t.username)
+                                          }}
+                                        >
+                                          <div className="w-4 h-4 rounded-full bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold text-[10px] border border-blue-500/20 group-hover/user:bg-blue-500/20">
+                                            {t.username[0]?.toUpperCase()}
+                                          </div>
+                                          <span className="text-xs font-semibold whitespace-nowrap">{t.username || t.user_id}</span>
+                                        </div>
                                       </div>
                                       <div className="flex items-center gap-1.5 opacity-80">
                                         <span className="text-foreground font-bold tabular-nums font-mono text-xs">{formatNumber(t.request_count)}</span>
@@ -1618,11 +1686,11 @@ export function RealtimeRanking() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={handleRefreshIP}
-                        disabled={ipRefreshing}
+                        onClick={handleRefreshMultiIpTokens}
+                        disabled={ipRefreshing.tokens}
                         title="刷新"
                       >
-                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing.tokens && "animate-spin")} />
                       </Button>
                     </div>
                   </CardHeader>
@@ -1635,7 +1703,7 @@ export function RealtimeRanking() {
                               <TableHead className="w-[200px] text-[11px] uppercase tracking-wider py-3 px-4 text-muted-foreground font-bold">令牌信息</TableHead>
                               <TableHead className="w-[80px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">IP 数量</TableHead>
                               <TableHead className="w-[150px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">所属用户</TableHead>
-                              <TableHead className="w-[100px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">请求总量</TableHead>
+                              <TableHead className="w-[100px] text-right text-[11px] uppercase tracking-wider py-3 pr-4 text-muted-foreground font-bold">请求总量</TableHead>
                               <TableHead className="w-[100px] text-center text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">操作</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -1713,8 +1781,8 @@ export function RealtimeRanking() {
                                       </div>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                         {item.ips.map((ip) => (
-                                          <div key={ip.ip} className="flex items-center justify-between text-[11px] bg-background/50 rounded-md px-3 py-1.5 border border-border/40 hover:border-primary/20 transition-colors">
-                                            <code className="font-mono text-foreground font-semibold">{ip.ip}</code>
+                                          <div key={ip.ip} className="flex items-center justify-between text-xs bg-background/50 rounded-md px-3 py-2 border border-border/40 hover:border-primary/20 transition-colors">
+                                            <code className="font-mono text-foreground font-semibold text-xs">{ip.ip}</code>
                                             <div className="flex items-center gap-1.5">
                                               <span className="text-primary font-bold tabular-nums font-mono">{formatNumber(ip.request_count)}</span>
                                               <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tighter opacity-60">reqs</span>
@@ -1763,11 +1831,11 @@ export function RealtimeRanking() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={handleRefreshIP}
-                        disabled={ipRefreshing}
+                        onClick={handleRefreshMultiIpUsers}
+                        disabled={ipRefreshing.users}
                         title="刷新"
                       >
-                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing.users && "animate-spin")} />
                       </Button>
                     </div>
                   </CardHeader>
@@ -1777,10 +1845,10 @@ export function RealtimeRanking() {
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/50 hover:bg-muted/50 border-b">
-                              <TableHead className="w-[180px] text-[11px] uppercase tracking-wider py-3 px-4 text-muted-foreground font-bold">用户详情</TableHead>
-                              <TableHead className="w-[80px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">IP 数量</TableHead>
+                              <TableHead className="w-[200px] text-[11px] uppercase tracking-wider py-3 px-4 text-muted-foreground font-bold">用户详情</TableHead>
+                              <TableHead className="w-[60px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">IP 数量</TableHead>
                               <TableHead className="w-[100px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">请求总量</TableHead>
-                              <TableHead className="hidden md:table-cell text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold max-w-[320px]">常用 IP 分布</TableHead>
+                              <TableHead className="hidden md:table-cell text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">常用 IP 分布</TableHead>
                               <TableHead className="w-[80px] text-center text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">操作</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -1796,7 +1864,7 @@ export function RealtimeRanking() {
                                       {item.username[0]?.toUpperCase()}
                                     </div>
                                     <div className="flex flex-col leading-tight">
-                                      <span className="font-bold text-sm truncate max-w-[100px]">{item.username || item.user_id}</span>
+                                      <span className="font-bold text-sm whitespace-nowrap">{item.username || item.user_id}</span>
                                       <span className="text-[9px] opacity-60 font-mono mt-0.5 leading-none">ID: {item.user_id}</span>
                                     </div>
                                   </div>
@@ -1819,10 +1887,10 @@ export function RealtimeRanking() {
                                     <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Total Requests</span>
                                   </div>
                                 </TableCell>
-                                <TableCell className="hidden md:table-cell py-2.5 max-w-[320px]">
+                                <TableCell className="hidden md:table-cell py-2.5">
                                   <div className="flex flex-wrap gap-1.5">
                                     {item.top_ips.slice(0, 2).map((ip) => (
-                                      <code key={ip.ip} className="text-[11px] bg-muted/80 px-2 py-0.5 rounded font-mono border border-border/50 text-muted-foreground tabular-nums">
+                                      <code key={ip.ip} className="text-xs font-medium bg-muted/80 px-2 py-1 rounded font-mono border border-border/50 text-foreground/90 tabular-nums">
                                         {ip.ip}
                                       </code>
                                     ))}
