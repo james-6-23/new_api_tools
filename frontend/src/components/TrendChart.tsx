@@ -51,7 +51,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
   }
 
   return (
-    <Card className="shadow-sm hover:shadow-md transition-all duration-300 border-border/50 flex flex-col h-full overflow-hidden">
+    <Card className="shadow-sm hover:shadow-md transition-all duration-300 border-border/50 flex flex-col h-full relative">
       <CardHeader className="pb-0 shrink-0">
         <div className="flex items-center justify-between">
           <div className="space-y-1">

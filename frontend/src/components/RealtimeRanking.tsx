@@ -56,7 +56,7 @@ interface UserAnalysis {
 const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
 const SORT_LABELS: Record<SortKey, string> = { requests: '请求次数', quota: '额度消耗', failure_rate: '失败率' }
 
-// 预设封禁原因（基于风控检测的风险类型）
+// 预设封禁原因
 const BAN_REASONS = [
   { value: '', label: '请选择封禁原因' },
   { value: '请求频率过高 (HIGH_RPM)', label: '请求频率过高 (HIGH_RPM)' },
@@ -226,7 +226,6 @@ const HASH_VIEW_MAP: Record<string, string> = {
 
 function getInitialView(): 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' {
   const hash = window.location.hash
-  // 解析 #risk/ip 或 #risk-ip 格式
   const match = hash.match(/#risk[/-]?(\w*)/)
   if (match && match[1]) {
     return VIEW_HASH_MAP[match[1]] || 'leaderboards'
@@ -278,7 +277,7 @@ export function RealtimeRanking() {
   const [bannedTotalPages, setBannedTotalPages] = useState(1)
   const [bannedTotal, setBannedTotal] = useState(0)
 
-  // 审计日志状态 (原封禁记录)
+  // 审计日志状态
   const [records, setRecords] = useState<BanRecordItem[]>([])
   const [recordsLoading, setRecordsLoading] = useState(false)
   const [recordsRefreshing, setRecordsRefreshing] = useState(false)
@@ -290,9 +289,21 @@ export function RealtimeRanking() {
   const [sharedIps, setSharedIps] = useState<SharedIPItem[]>([])
   const [multiIpTokens, setMultiIpTokens] = useState<MultiIPTokenItem[]>([])
   const [multiIpUsers, setMultiIpUsers] = useState<MultiIPUserItem[]>([])
+  
+  // Pagination for IP monitoring
+  const [ipPage, setIpPage] = useState({ shared: 1, tokens: 1, users: 1 })
+  const ipPageSize = 10
+
   const [ipWindow, setIpWindow] = useState<WindowKey>('24h')
   const [ipLoading, setIpLoading] = useState(false)
   const [ipRefreshing, setIpRefreshing] = useState(false)
+  
+  // User IP details dialog
+  const [userIpsDialogOpen, setUserIpsDialogOpen] = useState(false)
+  const [selectedUserForIps, setSelectedUserForIps] = useState<{ id: number; username: string } | null>(null)
+  const [userIpsData, setUserIpsData] = useState<Array<{ ip: string; request_count: number; first_seen: number; last_seen: number }>>([])
+  const [userIpsLoading, setUserIpsLoading] = useState(false)
+
   const [enableAllDialogOpen, setEnableAllDialogOpen] = useState(false)
   const [enableAllLoading, setEnableAllLoading] = useState(false)
   const [expandedSharedIps, setExpandedSharedIps] = useState<Set<string>>(new Set())
@@ -374,7 +385,6 @@ export function RealtimeRanking() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
-  // 获取封禁列表
   const fetchBannedUsers = useCallback(async (page = 1, showSuccessToast = false) => {
     setBannedLoading(true)
     try {
@@ -397,7 +407,6 @@ export function RealtimeRanking() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
-  // IP Monitoring fetch functions
   const fetchIPStats = useCallback(async () => {
     try {
       const response = await fetch(`${apiUrl}/api/ip/stats`, { headers: getAuthHeaders() })
@@ -412,12 +421,13 @@ export function RealtimeRanking() {
 
   const fetchIPData = useCallback(async (showSuccessToast = false) => {
     setIpLoading(true)
+    setIpPage({ shared: 1, tokens: 1, users: 1 })
     try {
       const [statsRes, sharedRes, tokensRes, usersRes] = await Promise.all([
         fetch(`${apiUrl}/api/ip/stats`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=50`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=50`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=50`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200`, { headers: getAuthHeaders() }),
       ])
       
       const [stats, shared, tokens, users] = await Promise.all([
@@ -440,6 +450,30 @@ export function RealtimeRanking() {
       setIpLoading(false)
     }
   }, [apiUrl, getAuthHeaders, ipWindow, showToast])
+
+  const fetchUserIps = useCallback(async (userId: number, window: WindowKey) => {
+    setUserIpsLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ip/users/${userId}/ips?window=${window}`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setUserIpsData(res.data?.items || [])
+      } else {
+        showToast('error', res.message || '获取用户 IP 列表失败')
+      }
+    } catch (e) {
+      console.error('Failed to fetch user IPs:', e)
+      showToast('error', '获取用户 IP 列表失败')
+    } finally {
+      setUserIpsLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
+
+  const openUserIpsDialog = (userId: number, username: string) => {
+    setSelectedUserForIps({ id: userId, username })
+    setUserIpsDialogOpen(true)
+    fetchUserIps(userId, ipWindow)
+  }
 
   const handleEnableAllIPRecording = async () => {
     setEnableAllLoading(true)
@@ -464,7 +498,6 @@ export function RealtimeRanking() {
     }
   }
 
-  // 禁用单个令牌
   const handleDisableToken = async (tokenId: number, tokenName: string) => {
     setConfirmDialog({
       open: true,
@@ -495,12 +528,10 @@ export function RealtimeRanking() {
     })
   }
 
-  // 从 IP 监控快速封禁用户 - 打开用户分析弹窗
   const handleQuickBanUser = (userId: number, username: string) => {
     openUserAnalysisFromIP(userId, username)
   }
 
-  // 从 IP 监控打开用户分析弹窗
   const openUserAnalysisFromIP = (userId: number, username: string) => {
     const mockItem: LeaderboardItem = {
       user_id: userId,
@@ -523,7 +554,6 @@ export function RealtimeRanking() {
     setAnalysis(null)
   }
 
-  // 同步 view 和 URL hash
   useEffect(() => {
     const subPath = HASH_VIEW_MAP[view] || ''
     const newHash = subPath ? `#risk/${subPath}` : '#risk'
@@ -532,7 +562,6 @@ export function RealtimeRanking() {
     }
   }, [view])
 
-  // 监听浏览器前进/后退
   useEffect(() => {
     const handleHashChange = () => {
       const newView = getInitialView()
@@ -542,7 +571,6 @@ export function RealtimeRanking() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
-  // 计算Tab指示器位置
   useEffect(() => {
     const activeTabIndex = riskTabs.findIndex(tab => tab.id === view)
     const activeTabElement = tabsRef.current[activeTabIndex]
@@ -555,7 +583,6 @@ export function RealtimeRanking() {
     }
   }, [view, riskTabs])
 
-  // 窗口大小变化时重新计算指示器位置
   useEffect(() => {
     const handleResize = () => {
       const activeTabIndex = riskTabs.findIndex(tab => tab.id === view)
@@ -705,10 +732,8 @@ export function RealtimeRanking() {
         </div>
       </div>
 
-      {/* 自定义 Tabs 带滑动指示器 */}
       <div className="relative">
         <div className="relative inline-flex h-10 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
-          {/* 滑动背景指示器 */}
           <div
             className="absolute inset-y-1 bg-background rounded-md shadow-sm transition-all duration-300 ease-out"
             style={{
@@ -718,7 +743,6 @@ export function RealtimeRanking() {
             }}
           />
 
-          {/* Tab 按钮 */}
           {riskTabs.map(({ id, label, icon: Icon }, index) => (
             <button
               key={id}
@@ -738,10 +762,8 @@ export function RealtimeRanking() {
         </div>
       </div>
 
-      {/* Tab 内容 */}
       {view === 'leaderboards' && (
         <div className="mt-4">
-          {/* Responsive Grid Layout: 1 col on mobile, 2 cols on tablet/desktop */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {windows.map((w) => (
               <Card 
@@ -798,7 +820,7 @@ export function RealtimeRanking() {
                                   onClick={() => openUserDialog(item, w)}
                                   title="查看用户分析"
                                 >
-                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
                                     {String(name)[0]?.toUpperCase()}
                                   </div>
                                   <span className="text-xs font-medium truncate max-w-[100px]">{name}</span>
@@ -850,7 +872,6 @@ export function RealtimeRanking() {
             ))}
           </div>
 
-          {/* 第5个卡片：可选时间段排行榜 (24h/3d/7d) */}
           <Card className="rounded-xl shadow-sm mt-6">
             <CardHeader className="pb-3 border-b bg-muted/20">
               <div className="flex items-center justify-between">
@@ -913,7 +934,7 @@ export function RealtimeRanking() {
                               onClick={() => openUserDialog(item, selectedWindow)}
                               title="查看用户分析"
                             >
-                              <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                              <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
                                 {String(name)[0]?.toUpperCase()}
                               </div>
                               <span className="text-xs font-medium truncate max-w-[100px]">{name}</span>
@@ -967,7 +988,6 @@ export function RealtimeRanking() {
         </div>
       )}
 
-      {/* 封禁列表 Tab */}
       {view === 'banned_list' && (
         <div className="mt-4">
           <Card className="rounded-xl shadow-sm border">
@@ -1040,7 +1060,7 @@ export function RealtimeRanking() {
                                   }}
                                   title="查看用户分析"
                                 >
-                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
                                     {String(user.username)[0]?.toUpperCase()}
                                   </div>
                                   <span className="text-xs font-medium truncate max-w-[120px]">{user.username}</span>
@@ -1169,7 +1189,6 @@ export function RealtimeRanking() {
         </div>
       )}
 
-      {/* 审计日志 Tab (原封禁记录) */}
       {view === 'audit_logs' && (
         <div className="mt-4">
           <Card className="rounded-xl shadow-sm border">
@@ -1264,7 +1283,7 @@ export function RealtimeRanking() {
                                     }}
                                     title="查看用户分析"
                                   >
-                                    <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                    <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
                                       {(r.username || `U`)[0]?.toUpperCase()}
                                     </div>
                                     <span className="text-xs font-medium truncate max-w-[100px]">{r.username || `User#${r.user_id}`}</span>
@@ -1298,7 +1317,6 @@ export function RealtimeRanking() {
                                     )}
                                   </div>
                                   
-                                  {/* 风险指标快捷展示 */}
                                   {r.context && (r.context.risk || r.context.summary) && (
                                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/80 tabular-nums font-mono">
                                       {r.context.risk?.requests_per_minute > 0 && (
@@ -1395,11 +1413,9 @@ export function RealtimeRanking() {
         </div>
       )}
 
-      {/* IP Monitoring Tab */}
       {view === 'ip_monitoring' && (
         <div className="mt-4">
           <div className="space-y-6">
-            {/* Header with controls */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <Select value={ipWindow} onChange={(e) => setIpWindow(e.target.value as WindowKey)} className="w-32 h-9">
@@ -1414,7 +1430,6 @@ export function RealtimeRanking() {
               </Button>
             </div>
 
-            {/* Stats Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <Card className="rounded-xl border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
@@ -1501,54 +1516,66 @@ export function RealtimeRanking() {
               </div>
             ) : (
               <>
-                {/* Shared IPs Table */}
-                <Card className="rounded-xl border shadow-sm">
+                <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
                     <CardTitle className="text-base flex items-center gap-2">
                       <AlertTriangle className="h-4 w-4 text-orange-500" />
                       多令牌共用 IP
-                      <Badge variant="secondary" className="ml-2 bg-background">{sharedIps.length}</Badge>
+                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{sharedIps.length}</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
                     {sharedIps.length > 0 ? (
-                      <div className="divide-y">
-                        {sharedIps.map((item) => (
-                          <div key={item.ip} className="px-4 py-3 transition-colors hover:bg-muted/30">
-                            <div 
-                              className="flex items-center justify-between cursor-pointer"
-                              onClick={() => toggleSharedIpExpand(item.ip)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <code className="text-sm bg-muted px-2 py-1 rounded font-mono text-foreground">{item.ip}</code>
-                                <div className="flex gap-2">
-                                  <Badge variant="outline" className="font-normal">{item.token_count} 令牌</Badge>
-                                  <Badge variant="outline" className="font-normal">{item.user_count} 用户</Badge>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-muted-foreground tabular-nums">{formatNumber(item.request_count)} 请求</span>
-                                <div className={cn("transition-transform duration-200 p-1 rounded hover:bg-muted", expandedSharedIps.has(item.ip) && "rotate-180")}>
-                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                                </div>
-                              </div>
-                            </div>
-                            {expandedSharedIps.has(item.ip) && (
-                              <div className="mt-3 pl-4 space-y-2 animate-in slide-in-from-top-1 duration-200">
-                                {item.tokens.map((t) => (
-                                  <div key={t.token_id} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2 border border-border/50">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-medium">{t.token_name || `Token#${t.token_id}`}</span>
-                                      <span className="text-muted-foreground text-xs">({t.username || t.user_id})</span>
-                                    </div>
-                                    <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(t.request_count)} 请求</span>
+                      <>
+                        <div className="divide-y">
+                          {sharedIps.slice((ipPage.shared - 1) * ipPageSize, ipPage.shared * ipPageSize).map((item) => (
+                            <div key={item.ip} className="px-4 py-3 transition-colors hover:bg-muted/30">
+                              <div 
+                                className="flex items-center justify-between cursor-pointer"
+                                onClick={() => toggleSharedIpExpand(item.ip)}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <code className="text-sm bg-muted px-2 py-1 rounded font-mono text-foreground border border-border/50">{item.ip}</code>
+                                  <div className="flex gap-2">
+                                    <Badge variant="outline" className="font-normal bg-background">{item.token_count} 令牌</Badge>
+                                    <Badge variant="outline" className="font-normal bg-background">{item.user_count} 用户</Badge>
                                   </div>
-                                ))}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-muted-foreground tabular-nums">{formatNumber(item.request_count)} 请求</span>
+                                  <div className={cn("transition-transform duration-200 p-1 rounded hover:bg-muted", expandedSharedIps.has(item.ip) && "rotate-180")}>
+                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                  </div>
+                                </div>
                               </div>
-                            )}
+                              {expandedSharedIps.has(item.ip) && (
+                                <div className="mt-3 pl-4 space-y-2 animate-in slide-in-from-top-1 duration-200">
+                                  {item.tokens.map((t) => (
+                                    <div key={t.token_id} className="flex items-center justify-between text-sm bg-muted/40 rounded-lg px-3 py-2 border border-border/40">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-primary/80">{t.token_name || `Token#${t.token_id}`}</span>
+                                        <span className="text-muted-foreground text-xs bg-background/50 px-1.5 py-0.5 rounded">({t.username || t.user_id})</span>
+                                      </div>
+                                      <span className="text-muted-foreground text-xs tabular-nums font-mono">{formatNumber(t.request_count)} 请求</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {sharedIps.length > ipPageSize && (
+                          <div className="flex items-center justify-between p-3 border-t bg-muted/5">
+                            <div className="text-[11px] text-muted-foreground">
+                              显示 {Math.min(sharedIps.length, (ipPage.shared - 1) * ipPageSize + 1)} - {Math.min(sharedIps.length, ipPage.shared * ipPageSize)}，共 {sharedIps.length} 条
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={ipPage.shared <= 1} onClick={() => setIpPage(p => ({ ...p, shared: p.shared - 1 }))}>上一页</Button>
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={ipPage.shared * ipPageSize >= sharedIps.length} onClick={() => setIpPage(p => ({ ...p, shared: p.shared + 1 }))}>下一页</Button>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     ) : (
                       <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm">
                         <ShieldCheck className="h-8 w-8 mb-2 opacity-20" />
@@ -1558,84 +1585,99 @@ export function RealtimeRanking() {
                   </CardContent>
                 </Card>
 
-                {/* Multi-IP Tokens Table */}
-                <Card className="rounded-xl border shadow-sm">
+                <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
                     <CardTitle className="text-base flex items-center gap-2">
                       <ShieldBan className="h-4 w-4 text-red-500" />
                       单令牌多 IP (疑似泄露)
-                      <Badge variant="secondary" className="ml-2 bg-background">{multiIpTokens.length}</Badge>
+                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpTokens.length}</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
                     {multiIpTokens.length > 0 ? (
-                      <div className="divide-y">
-                        {multiIpTokens.map((item) => (
-                          <div key={item.token_id} className="px-4 py-3 group transition-colors hover:bg-muted/30">
-                            <div className="flex items-center justify-between gap-4">
-                              <div
-                                className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0"
-                              >
-                                <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleTokenExpand(item.token_id)}>
-                                  <span className="font-medium text-sm truncate max-w-[180px]" title={item.token_name}>{item.token_name || `Token#${item.token_id}`}</span>
-                                  <Badge variant="destructive" className="flex-shrink-0 h-5 px-1.5 text-[10px]">{item.ip_count} IP</Badge>
-                                </div>
-                                
-                                <div 
-                                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openUserAnalysisFromIP(item.user_id, item.username)
-                                  }}
-                                  title="查看用户分析"
-                                >
-                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
-                                    {item.username[0]?.toUpperCase()}
+                      <>
+                        <div className="divide-y">
+                          {multiIpTokens.slice((ipPage.tokens - 1) * ipPageSize, ipPage.tokens * ipPageSize).map((item) => (
+                            <div key={item.token_id} className="px-4 py-3 group transition-colors hover:bg-muted/30">
+                              <div className="flex items-center justify-between gap-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleTokenExpand(item.token_id)}>
+                                    <span className="font-medium text-sm truncate max-w-[180px] text-primary/80" title={item.token_name}>{item.token_name || `Token#${item.token_id}`}</span>
+                                    <Badge variant="destructive" className="flex-shrink-0 h-5 px-1.5 text-[10px]">{item.ip_count} IP</Badge>
                                   </div>
-                                  <span className="text-xs font-medium truncate max-w-[100px]">{item.username || item.user_id}</span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs text-muted-foreground tabular-nums bg-muted/30 px-1.5 py-0.5 rounded hidden sm:inline">
-                                  {formatNumber(item.request_count)} 请求
-                                </span>
-                                
-                                <div className="flex items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  
+                                  <div 
+                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
                                     onClick={(e) => {
                                       e.stopPropagation()
-                                      handleDisableToken(item.token_id, item.token_name || `Token#${item.token_id}`)
+                                      openUserAnalysisFromIP(item.user_id, item.username)
                                     }}
-                                    title="禁用令牌"
+                                    title="查看用户分析"
                                   >
-                                    <Ban className="h-3.5 w-3.5" />
-                                  </Button>
-                                  <div
-                                    className={cn("cursor-pointer p-1 rounded hover:bg-muted transition-transform duration-200", expandedTokens.has(item.token_id) && "rotate-180")}
-                                    onClick={() => toggleTokenExpand(item.token_id)}
-                                  >
-                                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                    <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
+                                      {item.username[0]?.toUpperCase()}
+                                    </div>
+                                    <span className="text-xs font-medium truncate max-w-[100px]">{item.username || item.user_id}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-muted-foreground tabular-nums bg-muted/40 px-1.5 py-0.5 rounded hidden sm:inline border border-border/30">
+                                    {formatNumber(item.request_count)} 请求
+                                  </span>
+                                  
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleDisableToken(item.token_id, item.token_name || `Token#${item.token_id}`)
+                                      }}
+                                      title="禁用令牌"
+                                    >
+                                      <Ban className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <div
+                                      className={cn("cursor-pointer p-1 rounded hover:bg-muted transition-transform duration-200", expandedTokens.has(item.token_id) && "rotate-180")}
+                                      onClick={() => toggleTokenExpand(item.token_id)}
+                                    >
+                                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                    </div>
                                   </div>
                                 </div>
                               </div>
+                              {expandedTokens.has(item.token_id) && (
+                                <div className="mt-3 pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
+                                  {item.ips.map((ip) => (
+                                    <div key={ip.ip} className="flex items-center justify-between text-sm bg-muted/40 rounded-lg px-3 py-2 border border-border/40">
+                                      <code className="text-[11px] font-mono text-foreground">{ip.ip}</code>
+                                      <span className="text-muted-foreground text-xs tabular-nums font-mono">{formatNumber(ip.request_count)} 请求</span>
+                                    </div>
+                                  ))}
+                                  {item.ip_count > item.ips.length && (
+                                    <div className="text-[10px] text-muted-foreground pl-2 italic pt-1">
+                                      * 仅显示活跃度最高的 {item.ips.length} 个 IP，查看用户详情以获取完整列表
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            {expandedTokens.has(item.token_id) && (
-                              <div className="mt-3 pl-4 space-y-1 animate-in slide-in-from-top-1 duration-200">
-                                {item.ips.map((ip) => (
-                                  <div key={ip.ip} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2 border border-border/50">
-                                    <code className="text-xs font-mono text-foreground">{ip.ip}</code>
-                                    <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(ip.request_count)} 请求</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                          ))}
+                        </div>
+                        {multiIpTokens.length > ipPageSize && (
+                          <div className="flex items-center justify-between p-3 border-t bg-muted/5">
+                            <div className="text-[11px] text-muted-foreground">
+                              显示 {Math.min(multiIpTokens.length, (ipPage.tokens - 1) * ipPageSize + 1)} - {Math.min(multiIpTokens.length, ipPage.tokens * ipPageSize)}，共 {multiIpTokens.length} 条
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={ipPage.tokens <= 1} onClick={() => setIpPage(p => ({ ...p, tokens: p.tokens - 1 }))}>上一页</Button>
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={ipPage.tokens * ipPageSize >= multiIpTokens.length} onClick={() => setIpPage(p => ({ ...p, tokens: p.tokens + 1 }))}>下一页</Button>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     ) : (
                       <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm">
                         <ShieldCheck className="h-8 w-8 mb-2 opacity-20" />
@@ -1645,84 +1687,107 @@ export function RealtimeRanking() {
                   </CardContent>
                 </Card>
 
-                {/* Multi-IP Users Table */}
-                <Card className="rounded-xl border shadow-sm">
+                <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
                     <CardTitle className="text-base flex items-center gap-2">
                       <Activity className="h-4 w-4 text-blue-500" />
                       单用户多 IP (≥3)
-                      <Badge variant="secondary" className="ml-2 bg-background">{multiIpUsers.length}</Badge>
+                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpUsers.length}</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
                     {multiIpUsers.length > 0 ? (
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-muted/50 hover:bg-muted/50">
-                            <TableHead className="w-[180px] text-xs uppercase tracking-wider">用户详情</TableHead>
-                            <TableHead className="w-[80px] text-xs uppercase tracking-wider">IP 来源</TableHead>
-                            <TableHead className="w-[100px] text-xs uppercase tracking-wider">请求总量</TableHead>
-                            <TableHead className="hidden md:table-cell text-xs uppercase tracking-wider">Top IPs</TableHead>
-                            <TableHead className="w-[100px] text-center text-xs uppercase tracking-wider">操作</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {multiIpUsers.map((item) => (
-                            <TableRow key={item.user_id} className="group hover:bg-muted/30 transition-colors">
-                              <TableCell className="py-3">
-                                <div 
-                                  className="flex items-center gap-2 cursor-pointer group/user"
-                                  onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
-                                >
-                                  <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-100 dark:border-blue-800 group-hover/user:bg-blue-100 transition-colors">
-                                    {item.username[0]?.toUpperCase()}
-                                  </div>
-                                  <div className="flex flex-col">
-                                    <span className="font-semibold text-sm truncate max-w-[120px] group-hover/user:text-blue-600 transition-colors">{item.username || item.user_id}</span>
-                                    <span className="text-[10px] text-muted-foreground">ID: {item.user_id}</span>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="font-normal bg-background">{item.ip_count} 个</Badge>
-                              </TableCell>
-                              <TableCell className="text-muted-foreground text-sm tabular-nums font-mono">{formatNumber(item.request_count)}</TableCell>
-                              <TableCell className="hidden md:table-cell">
-                                <div className="flex flex-wrap gap-1.5">
-                                  {item.top_ips.slice(0, 3).map((ip) => (
-                                    <code key={ip.ip} className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono border text-muted-foreground">{ip.ip}</code>
-                                  ))}
-                                  {item.top_ips.length > 3 && (
-                                    <span className="text-[10px] text-muted-foreground flex items-center bg-muted/50 px-1 rounded">+{item.top_ips.length - 3}</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50"
-                                    onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
-                                    title="查看详情"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                    onClick={() => handleQuickBanUser(item.user_id, item.username || `User#${item.user_id}`)}
-                                    title="封禁用户"
-                                  >
-                                    <ShieldBan className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
+                      <>
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/50 hover:bg-muted/50 border-b">
+                              <TableHead className="w-[180px] text-[11px] uppercase tracking-wider py-2">用户详情</TableHead>
+                              <TableHead className="w-[80px] text-[11px] uppercase tracking-wider py-2">IP 数量</TableHead>
+                              <TableHead className="w-[100px] text-[11px] uppercase tracking-wider py-2">请求总量</TableHead>
+                              <TableHead className="hidden md:table-cell text-[11px] uppercase tracking-wider py-2">常用 IP</TableHead>
+                              <TableHead className="w-[100px] text-center text-[11px] uppercase tracking-wider py-2">操作</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {multiIpUsers.slice((ipPage.users - 1) * ipPageSize, ipPage.users * ipPageSize).map((item) => (
+                              <TableRow key={item.user_id} className="group hover:bg-muted/30 transition-colors">
+                                <TableCell className="py-3">
+                                  <div 
+                                    className="flex items-center gap-2 cursor-pointer group/user"
+                                    onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
+                                  >
+                                    <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-100 dark:border-blue-800 group-hover/user:bg-blue-100 transition-colors">
+                                      {item.username[0]?.toUpperCase()}
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-sm truncate max-w-[120px] group-hover/user:text-blue-600 transition-colors">{item.username || item.user_id}</span>
+                                      <span className="text-[10px] text-muted-foreground font-mono">ID: {item.user_id}</span>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge 
+                                    variant="outline" 
+                                    className="font-bold bg-background cursor-pointer hover:bg-blue-50 hover:text-blue-600 transition-colors border-blue-100"
+                                    onClick={() => openUserIpsDialog(item.user_id, item.username)}
+                                  >
+                                    {item.ip_count} 个
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-muted-foreground text-sm tabular-nums font-mono">{formatNumber(item.request_count)}</TableCell>
+                                <TableCell className="hidden md:table-cell">
+                                  <div className="flex flex-wrap gap-1">
+                                    {item.top_ips.slice(0, 2).map((ip) => (
+                                      <code key={ip.ip} className="text-[10px] bg-muted/50 px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground/80">{ip.ip}</code>
+                                    ))}
+                                    {item.ip_count > 2 && (
+                                      <button 
+                                        className="text-[10px] text-primary hover:underline bg-primary/5 px-1.5 rounded border border-primary/20 transition-colors"
+                                        onClick={() => openUserIpsDialog(item.user_id, item.username)}
+                                      >
+                                        更多...
+                                      </button>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-50"
+                                      onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
+                                      title="行为分析"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                      onClick={() => handleQuickBanUser(item.user_id, item.username || `User#${item.user_id}`)}
+                                      title="封禁用户"
+                                    >
+                                      <ShieldBan className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                        {multiIpUsers.length > ipPageSize && (
+                          <div className="flex items-center justify-between p-3 border-t bg-muted/5">
+                            <div className="text-[11px] text-muted-foreground">
+                              第 {ipPage.users} / {Math.ceil(multiIpUsers.length / ipPageSize)} 页，共 {multiIpUsers.length} 条
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="outline" size="sm" className="h-7 px-3 text-[11px] shadow-sm" disabled={ipPage.users <= 1} onClick={() => setIpPage(p => ({ ...p, users: p.users - 1 }))}>上一页</Button>
+                              <Button variant="outline" size="sm" className="h-7 px-3 text-[11px] shadow-sm" disabled={ipPage.users * ipPageSize >= multiIpUsers.length} onClick={() => setIpPage(p => ({ ...p, users: p.users + 1 }))}>下一页</Button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm">
                         <Activity className="h-8 w-8 mb-2 opacity-20" />
@@ -1737,7 +1802,80 @@ export function RealtimeRanking() {
         </div>
       )}
 
-      {/* Enable All IP Recording Dialog */}
+      <Dialog open={userIpsDialogOpen} onOpenChange={setUserIpsDialogOpen}>
+        <DialogContent className="max-w-2xl w-full max-h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          <DialogHeader className="p-5 border-b bg-muted/10 shrink-0">
+            <div className="flex justify-between items-center pr-6">
+              <div>
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-blue-500" />
+                  用户 IP 访问列表
+                </DialogTitle>
+                <DialogDescription className="mt-1 flex items-center gap-2">
+                  <span className="font-semibold text-foreground">{selectedUserForIps?.username}</span>
+                  <span className="text-muted-foreground">(ID: {selectedUserForIps?.id})</span>
+                  <Badge variant="outline" className="ml-2">{WINDOW_LABELS[ipWindow]}</Badge>
+                </DialogDescription>
+              </div>
+              <Badge variant="secondary" className="px-3 py-1 font-mono">{userIpsData.length} IPs</Badge>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto min-h-0 bg-background">
+            {userIpsLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Loader2 className="h-8 w-8 mb-3 animate-spin text-primary/40" />
+                <p className="text-sm">正在检索所有访问 IP...</p>
+              </div>
+            ) : userIpsData.length > 0 ? (
+              <div className="p-0">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10 border-b">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-2 text-xs uppercase">IP 地址</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">请求数</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">首次访问</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">最近访问</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {userIpsData.map((ip, idx) => (
+                      <TableRow key={ip.ip} className="hover:bg-muted/20 transition-colors">
+                        <TableCell className="py-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-muted-foreground w-5">{idx + 1}</span>
+                            <code className="text-xs font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/40 text-foreground">{ip.ip}</code>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-right">
+                          <span className="text-sm font-semibold tabular-nums text-primary/80">{formatNumber(ip.request_count)}</span>
+                        </TableCell>
+                        <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                          {formatTime(ip.first_seen)}
+                        </TableCell>
+                        <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                          {formatTime(ip.last_seen)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Globe className="h-10 w-10 mb-2 opacity-10" />
+                <p>未发现该用户的访问记录</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="p-4 border-t bg-muted/5 sm:justify-start">
+             <div className="text-[10px] text-muted-foreground italic">
+               * 列表按请求量排序，显示该用户在所选时间段内的所有唯一访问 IP 及其首末次访问记录。
+             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={enableAllDialogOpen} onOpenChange={setEnableAllDialogOpen}>
         <DialogContent className="max-w-md rounded-xl">
           <DialogHeader>
@@ -1758,10 +1896,8 @@ export function RealtimeRanking() {
         </DialogContent>
       </Dialog>
 
-      {/* Optimized Analysis Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
-          {/* Fixed Header */}
           <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
             <div className="flex justify-between items-start pr-6">
               <div>
@@ -1774,7 +1910,6 @@ export function RealtimeRanking() {
             </div>
           </DialogHeader>
 
-          {/* Scrollable Content */}
           <div className="flex-1 overflow-y-auto p-5 min-h-0 bg-background">
             {analysisLoading ? (
               <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
@@ -1783,7 +1918,6 @@ export function RealtimeRanking() {
               </div>
             ) : analysis ? (
               <div className="space-y-6">
-                {/* Risk Overview Tags */}
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                     RPM: {analysis.risk.requests_per_minute.toFixed(1)}
@@ -1804,7 +1938,6 @@ export function RealtimeRanking() {
                   )}
                 </div>
 
-                {/* Core Metrics Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <Card className="bg-muted/20 border-none shadow-sm">
                     <CardContent className="p-4 text-center">
@@ -1836,7 +1969,6 @@ export function RealtimeRanking() {
                   </Card>
                 </div>
 
-                {/* Distributions */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold text-muted-foreground">模型偏好 (Top 5)</h4>
@@ -1875,7 +2007,6 @@ export function RealtimeRanking() {
                   </div>
                 </div>
 
-                {/* Recent Logs Table */}
                 <div className="space-y-3">
                   <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>
                   <div className="rounded-lg border overflow-hidden">
@@ -1913,7 +2044,6 @@ export function RealtimeRanking() {
             )}
           </div>
 
-          {/* Fixed Footer */}
           <div className="p-5 border-t bg-muted/10 flex-shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm">
@@ -1978,7 +2108,6 @@ export function RealtimeRanking() {
         </DialogContent>
       </Dialog>
 
-      {/* 确认弹窗 */}
       <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}>
         <DialogContent className="max-w-md rounded-xl">
           <DialogHeader>
@@ -1999,7 +2128,6 @@ export function RealtimeRanking() {
         </DialogContent>
       </Dialog>
 
-      {/* 封禁/解封确认弹窗 */}
       <Dialog open={banConfirmDialog.open} onOpenChange={(open) => setBanConfirmDialog(prev => ({ ...prev, open }))}>
         <DialogContent className="max-w-[600px] w-full rounded-xl gap-6 p-6 overflow-visible">
           <DialogHeader className="space-y-2">

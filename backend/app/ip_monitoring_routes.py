@@ -124,12 +124,30 @@ async def enable_all_ip_recording(
             data=data,
             message=f"已更新 {data['updated_count']} 个用户，跳过 {data['skipped_count']} 个已开启的用户",
         )
-    except Exception as e:
-        raise InvalidParamsError(message=f"操作失败: {str(e)}")
-
-
-
-class EnsureIndexesResponse(BaseModel):
+        except Exception as e:
+            raise InvalidParamsError(message=f"操作失败: {str(e)}")
+    
+    
+    @router.get("/users/{user_id}/ips", response_model=SharedIPsResponse)
+    async def get_user_ips(
+        user_id: int,
+        window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
+        _: str = Depends(verify_auth),
+    ):
+        """Get all unique IPs for a specific user."""
+        seconds = WINDOW_SECONDS.get(window)
+        if not seconds:
+            raise InvalidParamsError(message=f"Invalid window: {window}")
+    
+        service = get_ip_monitoring_service()
+        data = service.get_user_ips(
+            user_id=user_id,
+            window_seconds=seconds,
+        )
+        return SharedIPsResponse(success=True, data={"items": data})
+    
+    
+    class EnsureIndexesResponse(BaseModel):
     success: bool
     data: dict
     message: str

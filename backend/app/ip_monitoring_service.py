@@ -439,6 +439,58 @@ class IPMonitoringService:
             logger.db_error(f"批量开启 IP 记录失败: {e}")
             raise
 
+    def get_user_ips(
+        self,
+        user_id: int,
+        window_seconds: int,
+        limit: int = 1000,
+        now: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all unique IPs for a specific user within a time window.
+        """
+        if now is None:
+            now = int(time.time())
+        start_time = now - window_seconds
+
+        self.db.connect()
+
+        sql = """
+            SELECT 
+                ip,
+                COUNT(*) as request_count,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND user_id = :user_id
+                AND ip IS NOT NULL AND ip <> ''
+            GROUP BY ip
+            ORDER BY request_count DESC
+            LIMIT :limit
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "user_id": user_id,
+                "limit": limit,
+            })
+
+            return [
+                {
+                    "ip": r.get("ip") or "",
+                    "request_count": int(r.get("request_count") or 0),
+                    "first_seen": int(r.get("first_seen") or 0),
+                    "last_seen": int(r.get("last_seen") or 0),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.db_error(f"获取用户 IP 列表失败: {e}")
+            return []
+
 
 _ip_monitoring_service: Optional[IPMonitoringService] = None
 
