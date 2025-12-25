@@ -650,9 +650,9 @@ export function RealtimeRanking() {
   }
 
   const handleRefreshRecords = async () => {
-    setRefreshing(true)
+    setRecordsRefreshing(true)
     await fetchBanRecords(recordsPage, true)
-    setRefreshing(false)
+    setRecordsRefreshing(false)
   }
 
   const handleRefreshIP = async () => {
@@ -1518,11 +1518,23 @@ export function RealtimeRanking() {
               <>
                 <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-500" />
-                      多令牌共用 IP
-                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{sharedIps.length}</Badge>
-                    </CardTitle>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-orange-500" />
+                        多令牌共用 IP
+                        <Badge variant="secondary" className="ml-2 bg-background font-mono">{sharedIps.length}</Badge>
+                      </CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={handleRefreshIP}
+                        disabled={ipRefreshing}
+                        title="刷新"
+                      >
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-0">
                     {sharedIps.length > 0 ? (
@@ -1588,11 +1600,23 @@ export function RealtimeRanking() {
                 {/* Multi-IP Tokens Table (Refactored) */}
                 <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <ShieldBan className="h-4 w-4 text-red-500" />
-                      单令牌多 IP (疑似泄露)
-                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpTokens.length}</Badge>
-                    </CardTitle>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <ShieldBan className="h-4 w-4 text-red-500" />
+                        单令牌多 IP (疑似泄露)
+                        <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpTokens.length}</Badge>
+                      </CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={handleRefreshIP}
+                        disabled={ipRefreshing}
+                        title="刷新"
+                      >
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-0">
                     {multiIpTokens.length > 0 ? (
@@ -1725,11 +1749,23 @@ export function RealtimeRanking() {
                 {/* Multi-IP Users Table */}
                 <Card className="rounded-xl border shadow-sm overflow-hidden">
                   <CardHeader className="pb-3 border-b bg-muted/20">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Activity className="h-4 w-4 text-blue-500" />
-                      单用户多 IP (≥3)
-                      <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpUsers.length}</Badge>
-                    </CardTitle>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-blue-500" />
+                        单用户多 IP (≥3)
+                        <Badge variant="secondary" className="ml-2 bg-background font-mono">{multiIpUsers.length}</Badge>
+                      </CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={handleRefreshIP}
+                        disabled={ipRefreshing}
+                        title="刷新"
+                      >
+                        <RefreshCw className={cn("h-3.5 w-3.5", ipRefreshing && "animate-spin")} />
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="p-0">
                     {multiIpUsers.length > 0 ? (
