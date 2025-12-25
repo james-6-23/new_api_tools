@@ -289,7 +289,7 @@ export function RealtimeRanking() {
   const [sharedIps, setSharedIps] = useState<SharedIPItem[]>([])
   const [multiIpTokens, setMultiIpTokens] = useState<MultiIPTokenItem[]>([])
   const [multiIpUsers, setMultiIpUsers] = useState<MultiIPUserItem[]>([])
-  
+
   // Pagination for IP monitoring
   const [ipPage, setIpPage] = useState({ shared: 1, tokens: 1, users: 1 })
   const ipPageSize = 10
@@ -297,7 +297,7 @@ export function RealtimeRanking() {
   const [ipWindow, setIpWindow] = useState<WindowKey>('24h')
   const [ipLoading, setIpLoading] = useState(false)
   const [ipRefreshing, setIpRefreshing] = useState(false)
-  
+
   // User IP details dialog
   const [userIpsDialogOpen, setUserIpsDialogOpen] = useState(false)
   const [selectedUserForIps, setSelectedUserForIps] = useState<{ id: number; username: string } | null>(null)
@@ -317,7 +317,7 @@ export function RealtimeRanking() {
     onConfirm: () => void
     confirmText?: string
     variant?: 'default' | 'destructive'
-  }>({ open: false, title: '', description: '', onConfirm: () => {} })
+  }>({ open: false, title: '', description: '', onConfirm: () => { } })
 
   // 封禁/解封确认弹窗状态
   const [banConfirmDialog, setBanConfirmDialog] = useState<{
@@ -429,19 +429,19 @@ export function RealtimeRanking() {
         fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200`, { headers: getAuthHeaders() }),
         fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200`, { headers: getAuthHeaders() }),
       ])
-      
+
       const [stats, shared, tokens, users] = await Promise.all([
         statsRes.json(),
         sharedRes.json(),
         tokensRes.json(),
         usersRes.json(),
       ])
-      
+
       if (stats.success) setIpStats(stats.data)
       if (shared.success) setSharedIps(shared.data?.items || [])
       if (tokens.success) setMultiIpTokens(tokens.data?.items || [])
       if (users.success) setMultiIpUsers(users.data?.items || [])
-      
+
       if (showSuccessToast) showToast('success', '已刷新')
     } catch (e) {
       console.error('Failed to fetch IP data:', e)
@@ -695,9 +695,9 @@ export function RealtimeRanking() {
             <h2 className="text-3xl font-bold tracking-tight">风控中心</h2>
             <Badge variant="outline" className="animate-pulse border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20">
               <div className="w-2 h-2 rounded-full bg-green-500 mr-2" />
-              {view === 'leaderboards' ? '实时流量监控' : 
-               view === 'ip_monitoring' ? 'IP 实时监控' :
-               view === 'banned_list' ? '策略生效中' : '系统运行中'}
+              {view === 'leaderboards' ? '实时流量监控' :
+                view === 'ip_monitoring' ? 'IP 实时监控' :
+                  view === 'banned_list' ? '策略生效中' : '系统运行中'}
             </Badge>
           </div>
           <p className="text-muted-foreground mt-1">实时 Top 10 · 深度分析 · 快速封禁</p>
@@ -766,8 +766,8 @@ export function RealtimeRanking() {
         <div className="mt-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {windows.map((w) => (
-              <Card 
-                key={w} 
+              <Card
+                key={w}
                 className="rounded-xl shadow-sm transition-all duration-200 hover:shadow-md"
               >
                 <CardHeader className="pb-3 border-b bg-muted/20">
@@ -812,10 +812,10 @@ export function RealtimeRanking() {
                             )}>
                               {idx + 1}
                             </div>
-                            
+
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <div 
+                                <div
                                   className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
                                   onClick={() => openUserDialog(item, w)}
                                   title="查看用户分析"
@@ -926,10 +926,10 @@ export function RealtimeRanking() {
                         )}>
                           {idx + 1}
                         </div>
-                        
+
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <div 
+                            <div
                               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
                               onClick={() => openUserDialog(item, selectedWindow)}
                               title="查看用户分析"
@@ -1001,10 +1001,10 @@ export function RealtimeRanking() {
                   <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">
                     当前封禁 {bannedTotal} 个用户
                   </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => fetchBannedUsers(1, true)} 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchBannedUsers(1, true)}
                     disabled={bannedLoading}
                     className="h-8 shadow-sm"
                   >
@@ -1041,7 +1041,7 @@ export function RealtimeRanking() {
                             </TableCell>
                             <TableCell className="py-3">
                               <div className="flex flex-col gap-1">
-                                <div 
+                                <div
                                   className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
                                   onClick={() => {
                                     const mockItem: LeaderboardItem = {
@@ -1088,8 +1088,8 @@ export function RealtimeRanking() {
                                 {renderReasonBadge(user.ban_reason)}
                                 {user.ban_context?.source && (
                                   <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1 opacity-60">
-                                    {user.ban_context.source === 'risk_center' ? '自动' : 
-                                     user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
+                                    {user.ban_context.source === 'risk_center' ? '自动' :
+                                      user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
                                   </Badge>
                                 )}
                               </div>
@@ -1161,20 +1161,20 @@ export function RealtimeRanking() {
                         第 {bannedPage} / {bannedTotalPages} 页
                       </div>
                       <div className="flex gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="h-8 text-xs"
-                          disabled={bannedPage <= 1 || bannedLoading} 
+                          disabled={bannedPage <= 1 || bannedLoading}
                           onClick={() => fetchBannedUsers(bannedPage - 1)}
                         >
                           上一页
                         </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="h-8 text-xs"
-                          disabled={bannedPage >= bannedTotalPages || bannedLoading} 
+                          disabled={bannedPage >= bannedTotalPages || bannedLoading}
                           onClick={() => fetchBannedUsers(bannedPage + 1)}
                         >
                           下一页
@@ -1202,10 +1202,10 @@ export function RealtimeRanking() {
                   <div className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">
                     本页显示 {records.length} 条记录
                   </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => fetchBanRecords(1, true)} 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchBanRecords(1, true)}
                     disabled={recordsLoading}
                     className="h-8 shadow-sm"
                   >
@@ -1264,7 +1264,7 @@ export function RealtimeRanking() {
                               </TableCell>
                               <TableCell className="py-3">
                                 <div className="flex flex-col gap-1">
-                                  <div 
+                                  <div
                                     className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
                                     onClick={() => {
                                       const mockItem: LeaderboardItem = {
@@ -1310,13 +1310,13 @@ export function RealtimeRanking() {
                                     {renderReasonBadge(r.reason)}
                                     {r.context?.source && (
                                       <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1 opacity-60">
-                                        {r.context.source === 'risk_center' ? '风控' : 
-                                         r.context.source === 'ip_monitoring' ? 'IP监控' : 
-                                         r.context.source === 'ban_records' ? '记录' : r.context.source}
+                                        {r.context.source === 'risk_center' ? '风控' :
+                                          r.context.source === 'ip_monitoring' ? 'IP监控' :
+                                            r.context.source === 'ban_records' ? '记录' : r.context.source}
                                       </Badge>
                                     )}
                                   </div>
-                                  
+
                                   {r.context && (r.context.risk || r.context.summary) && (
                                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/80 tabular-nums font-mono">
                                       {r.context.risk?.requests_per_minute > 0 && (
@@ -1385,20 +1385,20 @@ export function RealtimeRanking() {
                         第 {recordsPage} / {recordsTotalPages} 页
                       </div>
                       <div className="flex gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="h-8 text-xs"
-                          disabled={recordsPage <= 1 || recordsLoading} 
+                          disabled={recordsPage <= 1 || recordsLoading}
                           onClick={() => fetchBanRecords(recordsPage - 1)}
                         >
                           上一页
                         </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
+                        <Button
+                          variant="outline"
+                          size="sm"
                           className="h-8 text-xs"
-                          disabled={recordsPage >= recordsTotalPages || recordsLoading} 
+                          disabled={recordsPage >= recordsTotalPages || recordsLoading}
                           onClick={() => fetchBanRecords(recordsPage + 1)}
                         >
                           下一页
@@ -1542,7 +1542,7 @@ export function RealtimeRanking() {
                         <div className="divide-y">
                           {sharedIps.slice((ipPage.shared - 1) * ipPageSize, ipPage.shared * ipPageSize).map((item) => (
                             <div key={item.ip} className="px-4 py-3 transition-colors hover:bg-muted/30">
-                              <div 
+                              <div
                                 className="flex items-center justify-between cursor-pointer"
                                 onClick={() => toggleSharedIpExpand(item.ip)}
                               >
@@ -1554,7 +1554,12 @@ export function RealtimeRanking() {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-sm text-muted-foreground tabular-nums font-mono">{formatNumber(item.request_count)} 请求</span>
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-sm font-bold tabular-nums font-mono text-foreground">
+                                      {formatNumber(item.request_count)}
+                                    </span>
+                                    <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Requests</span>
+                                  </div>
                                   <div className={cn("transition-transform duration-200 p-1 rounded hover:bg-muted", expandedSharedIps.has(item.ip) && "rotate-180")}>
                                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
                                   </div>
@@ -1568,7 +1573,10 @@ export function RealtimeRanking() {
                                         <span className="font-semibold text-primary/80">{t.token_name || `Token#${t.token_id}`}</span>
                                         <span className="text-muted-foreground text-xs bg-background/50 px-1.5 py-0.5 rounded">({t.username || t.user_id})</span>
                                       </div>
-                                      <span className="text-muted-foreground text-xs tabular-nums font-mono">{formatNumber(t.request_count)} 请求</span>
+                                      <div className="flex items-center gap-1.5 opacity-80">
+                                        <span className="text-foreground font-bold tabular-nums font-mono text-xs">{formatNumber(t.request_count)}</span>
+                                        <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tighter opacity-60">reqs</span>
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -1666,9 +1674,12 @@ export function RealtimeRanking() {
                                     </div>
                                   </TableCell>
                                   <TableCell className="py-3">
-                                    <span className="text-sm font-bold tabular-nums font-mono text-foreground">
-                                      {formatNumber(item.request_count)}
-                                    </span>
+                                    <div className="flex flex-col items-end pr-4">
+                                      <span className="text-base font-bold tabular-nums font-mono text-primary">
+                                        {formatNumber(item.request_count)}
+                                      </span>
+                                      <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Total Reqs</span>
+                                    </div>
                                   </TableCell>
                                   <TableCell className="py-3 text-center">
                                     <div className="flex items-center gap-1 justify-center">
@@ -1703,8 +1714,11 @@ export function RealtimeRanking() {
                                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                         {item.ips.map((ip) => (
                                           <div key={ip.ip} className="flex items-center justify-between text-[11px] bg-background/50 rounded-md px-3 py-1.5 border border-border/40 hover:border-primary/20 transition-colors">
-                                            <code className="font-mono text-foreground font-medium">{ip.ip}</code>
-                                            <span className="text-muted-foreground tabular-nums font-mono opacity-80">{formatNumber(ip.request_count)} reqs</span>
+                                            <code className="font-mono text-foreground font-semibold">{ip.ip}</code>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="text-primary font-bold tabular-nums font-mono">{formatNumber(ip.request_count)}</span>
+                                              <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tighter opacity-60">reqs</span>
+                                            </div>
                                           </div>
                                         ))}
                                       </div>
@@ -1798,9 +1812,12 @@ export function RealtimeRanking() {
                                   </Badge>
                                 </TableCell>
                                 <TableCell className="py-2.5">
-                                  <span className="text-base font-bold tabular-nums text-foreground">
-                                    {formatNumber(item.request_count)}
-                                  </span>
+                                  <div className="flex flex-col items-start">
+                                    <span className="text-lg font-black tabular-nums font-mono text-blue-600 dark:text-blue-400">
+                                      {formatNumber(item.request_count)}
+                                    </span>
+                                    <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Total Requests</span>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="hidden md:table-cell py-2.5 max-w-[320px]">
                                   <div className="flex flex-wrap gap-1.5">
@@ -1918,7 +1935,12 @@ export function RealtimeRanking() {
                           </div>
                         </TableCell>
                         <TableCell className="py-3 text-right">
-                          <span className="text-sm font-semibold tabular-nums text-primary/80">{formatNumber(ip.request_count)}</span>
+                          <div className="flex flex-col items-end">
+                            <span className="text-sm font-bold tabular-nums text-primary">
+                              {formatNumber(ip.request_count)}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Requests</span>
+                          </div>
                         </TableCell>
                         <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
                           {formatTime(ip.first_seen)}
@@ -1939,9 +1961,9 @@ export function RealtimeRanking() {
             )}
           </div>
           <DialogFooter className="p-4 border-t bg-muted/5 sm:justify-start">
-             <div className="text-[10px] text-muted-foreground italic">
-               * 列表按请求量排序，显示该用户在所选时间段内的所有唯一访问 IP 及其首末次访问记录。
-             </div>
+            <div className="text-[10px] text-muted-foreground italic">
+              * 列表按请求量排序，显示该用户在所选时间段内的所有唯一访问 IP 及其首末次访问记录。
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2131,7 +2153,7 @@ export function RealtimeRanking() {
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
                 {analysis?.user.status === 2 ? (
-                  <Button 
+                  <Button
                     onClick={() => {
                       if (!analysis) return
                       setBanConfirmDialog({
@@ -2143,16 +2165,16 @@ export function RealtimeRanking() {
                         disableTokens: false,
                         enableTokens: true,
                       })
-                    }} 
-                    disabled={mutating || analysisLoading} 
+                    }}
+                    disabled={mutating || analysisLoading}
                     className="min-w-28 bg-green-600 hover:bg-green-700"
                   >
                     <ShieldCheck className="h-4 w-4 mr-2" />
                     解除封禁
                   </Button>
                 ) : (
-                  <Button 
-                    variant="destructive" 
+                  <Button
+                    variant="destructive"
                     onClick={() => {
                       if (!analysis) return
                       setBanConfirmDialog({
@@ -2164,8 +2186,8 @@ export function RealtimeRanking() {
                         disableTokens: true,
                         enableTokens: false,
                       })
-                    }} 
-                    disabled={mutating || analysisLoading} 
+                    }}
+                    disabled={mutating || analysisLoading}
                     className="min-w-28"
                   >
                     <ShieldBan className="h-4 w-4 mr-2" />
@@ -2188,8 +2210,8 @@ export function RealtimeRanking() {
             <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
               取消
             </Button>
-            <Button 
-              variant={confirmDialog.variant || 'default'} 
+            <Button
+              variant={confirmDialog.variant || 'default'}
               onClick={confirmDialog.onConfirm}
             >
               {confirmDialog.confirmText || '确认'}
@@ -2215,12 +2237,12 @@ export function RealtimeRanking() {
               )}
             </DialogTitle>
             <DialogDescription className="text-sm">
-              {banConfirmDialog.type === 'ban' 
+              {banConfirmDialog.type === 'ban'
                 ? <span className="block break-words">即将封禁用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>
                 : <span className="block break-words">即将解封用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>}
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="flex flex-col gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
@@ -2236,24 +2258,24 @@ export function RealtimeRanking() {
                 ))}
               </Select>
             </div>
-            
+
             <label className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none bg-muted/30 p-2 rounded-md border border-transparent hover:border-border">
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={banConfirmDialog.type === 'ban' ? banConfirmDialog.disableTokens : banConfirmDialog.enableTokens}
-                onChange={(e) => banConfirmDialog.type === 'ban' 
+                onChange={(e) => banConfirmDialog.type === 'ban'
                   ? setBanConfirmDialog(prev => ({ ...prev, disableTokens: e.target.checked }))
                   : setBanConfirmDialog(prev => ({ ...prev, enableTokens: e.target.checked }))
-                } 
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" 
+                }
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
               {banConfirmDialog.type === 'ban' ? '同时禁用该用户所有令牌' : '同时启用该用户所有令牌'}
             </label>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0 mt-2">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               onClick={() => setBanConfirmDialog(prev => ({ ...prev, open: false }))}
               disabled={mutating}
               className="flex-1 sm:flex-none"
@@ -2261,7 +2283,7 @@ export function RealtimeRanking() {
               取消
             </Button>
             {banConfirmDialog.type === 'ban' ? (
-              <Button 
+              <Button
                 variant="destructive"
                 disabled={mutating}
                 className="flex-1 sm:flex-none min-w-[100px]"
@@ -2305,7 +2327,7 @@ export function RealtimeRanking() {
                 确认封禁
               </Button>
             ) : (
-              <Button 
+              <Button
                 className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none min-w-[100px]"
                 disabled={mutating}
                 onClick={async () => {

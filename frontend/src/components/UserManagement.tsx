@@ -137,7 +137,7 @@ export function UserManagement() {
     title: '',
     message: '',
     type: 'warning',
-    onConfirm: () => {},
+    onConfirm: () => { },
   })
 
   // 用户分析弹窗状态
@@ -402,12 +402,21 @@ export function UserManagement() {
     }
   }
 
-  const getRoleName = (role: number) => {
+  const getRoleBadge = (role: number) => {
     switch (role) {
-      case 1: return '普通用户'
-      case 10: return '管理员'
-      case 100: return '超级管理员'
-      default: return `角色${role}`
+      case 1:
+        return <Badge variant="outline" className="text-muted-foreground font-normal border-muted-foreground/20">普通用户</Badge>
+      case 10:
+        return <Badge className="bg-blue-500 hover:bg-blue-600 border-none">管理员</Badge>
+      case 100:
+        return (
+          <Badge className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white border-none shadow-sm">
+            <ShieldCheck className="w-3 h-3 mr-1" />
+            超级管理员
+          </Badge>
+        )
+      default:
+        return <Badge variant="secondary">角色{role}</Badge>
     }
   }
 
@@ -516,31 +525,31 @@ export function UserManagement() {
       {/* Search and Filter */}
       <Card>
         <CardHeader className="pb-3">
-           <CardTitle className="text-base font-medium flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Search className="w-4 h-4" />
-                用户列表
-                <span className="ml-2 text-sm font-normal text-muted-foreground">共 {total} 个</span>
-              </div>
-              {activityFilter !== 'all' && (
-                <Button variant="ghost" size="sm" onClick={() => { setActivityFilter('all'); setPage(1) }} className="h-8 text-xs">
-                  清除筛选: {activityFilter === 'active' ? '活跃' : activityFilter === 'inactive' ? '不活跃' : activityFilter === 'very_inactive' ? '非常不活跃' : '从未请求'}
-                </Button>
-              )}
-           </CardTitle>
+          <CardTitle className="text-base font-medium flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4" />
+              用户列表
+              <span className="ml-2 text-sm font-normal text-muted-foreground">共 {total} 个</span>
+            </div>
+            {activityFilter !== 'all' && (
+              <Button variant="ghost" size="sm" onClick={() => { setActivityFilter('all'); setPage(1) }} className="h-8 text-xs">
+                清除筛选: {activityFilter === 'active' ? '活跃' : activityFilter === 'inactive' ? '不活跃' : activityFilter === 'very_inactive' ? '非常不活跃' : '从未请求'}
+              </Button>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-4 mb-4">
             <div className="flex-1 flex gap-2">
               <div className="relative flex-1 max-w-sm">
-                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                 <Input
-                   placeholder="搜索用户名或邮箱..."
-                   value={searchInput}
-                   onChange={(e) => setSearchInput(e.target.value)}
-                   onKeyPress={handleKeyPress}
-                   className="pl-9"
-                 />
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="搜索用户名或邮箱..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  className="pl-9"
+                />
               </div>
               <Button onClick={handleSearch}>搜索</Button>
             </div>
@@ -567,13 +576,12 @@ export function UserManagement() {
                   <TableRow>
                     <TableHead className="w-16">ID</TableHead>
                     <TableHead>用户</TableHead>
-                    <TableHead className="hidden md:table-cell">邮箱</TableHead>
                     <TableHead className="hidden sm:table-cell">角色</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead className="text-right">额度 (USD)</TableHead>
                     <TableHead className="text-right hidden sm:table-cell">已用</TableHead>
                     <TableHead className="text-right hidden md:table-cell">请求数</TableHead>
-                    <TableHead className="hidden lg:table-cell">最后请求</TableHead>
+                    <TableHead className="hidden md:table-cell">最后请求</TableHead>
                     <TableHead>活跃度</TableHead>
                     <TableHead className="w-20">操作</TableHead>
                   </TableRow>
@@ -581,7 +589,7 @@ export function UserManagement() {
                 <TableBody>
                   {users.map((user) => (
                     <TableRow key={user.id} className="hover:bg-muted/50 transition-colors group">
-                      <TableCell className="font-mono text-[10px] text-muted-foreground tabular-nums">{user.id}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{user.id}</TableCell>
                       <TableCell>
                         <div
                           className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
@@ -592,14 +600,13 @@ export function UserManagement() {
                             {user.username[0]?.toUpperCase()}
                           </div>
                           <div className="flex flex-col leading-tight">
-                            <span className="font-bold text-sm truncate max-w-[100px]">{user.username}</span>
-                            {user.display_name && <span className="text-[9px] text-muted-foreground opacity-70">{user.display_name}</span>}
+                            <span className="font-bold text-sm whitespace-nowrap">{user.username}</span>
+                            {user.display_name && <span className="text-[10px] text-muted-foreground opacity-70">{user.display_name}</span>}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{user.email || '-'}</TableCell>
                       <TableCell className="hidden sm:table-cell">
-                        <span className="text-xs font-medium text-muted-foreground">{getRoleName(user.role)}</span>
+                        {getRoleBadge(user.role)}
                       </TableCell>
                       <TableCell>{getStatusBadge(user.status)}</TableCell>
                       <TableCell className="text-right font-mono text-sm font-bold text-primary tabular-nums tracking-tight">
@@ -611,7 +618,7 @@ export function UserManagement() {
                       <TableCell className="text-right hidden md:table-cell tabular-nums font-bold text-sm">
                         {user.request_count.toLocaleString()}
                       </TableCell>
-                      <TableCell className="hidden lg:table-cell text-xs whitespace-nowrap tabular-nums text-muted-foreground">{formatLastRequest(user)}</TableCell>
+                      <TableCell className="hidden md:table-cell text-xs whitespace-nowrap tabular-nums text-muted-foreground">{formatLastRequest(user)}</TableCell>
                       <TableCell>{getActivityBadge(user.activity_level)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

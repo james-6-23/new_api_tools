@@ -292,6 +292,10 @@ class LogAnalyticsService:
         self._set_state("last_log_id", max_log_id)
         self._set_state("last_processed_at", now)
         self._set_state("total_processed", total_processed + processed_count)
+        
+        # Also update max_log_id cache to prevent false "data inconsistent" warnings
+        self._set_state("cached_max_log_id", max_log_id)
+        self._set_state("cached_max_log_id_time", now)
 
         logger.analytics(f"日志处理完成", processed=processed_count, last_id=max_log_id)
 
@@ -812,6 +816,10 @@ class LogAnalyticsService:
         self._set_state("last_log_id", new_last_log_id)
         self._set_state("last_processed_at", now)
         self._set_state("total_processed", total_processed + processed_count)
+        
+        # Also update max_log_id cache to prevent false "data inconsistent" warnings
+        self._set_state("cached_max_log_id", new_last_log_id)
+        self._set_state("cached_max_log_id_time", now)
 
         return {"success": True, "processed": processed_count}
 
@@ -833,12 +841,16 @@ class LogAnalyticsService:
         last_log_id = self._get_state("last_log_id", 0)
         total_processed = self._get_state("total_processed", 0)
         init_max_log_id = self._get_state("init_max_log_id", 0)
+        
+        # Use cached values for display (fast)
         max_log_id = self.get_max_log_id()
         total_logs = self.get_total_logs_count()
 
-        # Detect if logs have been deleted/reset
-        # If max_log_id in DB is less than our last_log_id, data is inconsistent
-        data_inconsistent = max_log_id > 0 and last_log_id > max_log_id
+        # For consistency check, only flag as inconsistent if the difference is significant
+        # Small differences can occur due to cache lag, so allow a small tolerance
+        # Only consider inconsistent if last_log_id is MORE than 100 ahead of cached max_log_id
+        # This prevents false positives from cache staleness
+        data_inconsistent = max_log_id > 0 and last_log_id > max_log_id + 100
 
         # If in initialization mode, use init_max_log_id for progress
         is_initializing = init_max_log_id > 0
@@ -887,7 +899,9 @@ class LogAnalyticsService:
             Result of the check/reset operation.
         """
         last_log_id = self._get_state("last_log_id", 0)
-        max_log_id = self.get_max_log_id()
+        # IMPORTANT: Use fresh max_log_id (no cache) for consistency check
+        # to avoid false positives when cache is stale
+        max_log_id = self.get_max_log_id(use_cache=False)
 
         if last_log_id > 0 and max_log_id > 0 and last_log_id > max_log_id:
             # Data is inconsistent - logs have been deleted
