@@ -74,7 +74,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pb-4">
         {processedData.length > 0 ? (
           <div className="relative h-[250px] w-full mt-4 select-none pl-6">
             {/* Background Grid */}
@@ -89,82 +89,94 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
 
             {/* Chart Area */}
             <div className="absolute inset-0 ml-0 flex items-end justify-between gap-2 sm:gap-4 pl-2 z-10">
-              {processedData.map((item, index) => (
-                <div
-                  key={index}
-                  className="relative flex-1 h-full flex items-end justify-center group"
-                  onMouseEnter={() => setHoveredIndex(index)}
-                  onMouseLeave={() => setHoveredIndex(null)}
-                >
-                  {/* Hover Line */}
-                  <div 
-                    className={cn(
-                      "absolute bottom-0 w-[1px] bg-primary/20 transition-all duration-300 pointer-events-none",
-                      hoveredIndex === index ? "h-full opacity-100" : "h-0 opacity-0"
-                    )} 
-                  />
+              {processedData.map((item, index) => {
+                 // Determine if we should show the label
+                 const total = processedData.length;
+                 const showLabel = 
+                    (total <= 10) || // Show all if few items
+                    (total <= 24 && index % 4 === 0) || // Every 4th for up to 24 items (e.g. 24h view)
+                    (index % Math.ceil(total / 6) === 0); // Dynamic for larger sets
 
-                  {/* Bar */}
-                  <div 
-                    className="relative w-full max-w-[40px] flex items-end transition-all duration-500 ease-out"
-                    style={{ height: '100%' }}
+                 return (
+                  <div
+                    key={index}
+                    className="relative flex-1 h-full flex items-end justify-center group"
+                    onMouseEnter={() => setHoveredIndex(index)}
+                    onMouseLeave={() => setHoveredIndex(null)}
                   >
-                     <div 
-                        className={cn(
-                          "w-full rounded-t-sm transition-all duration-300 relative",
-                          "bg-gradient-to-t from-primary/60 to-primary/90",
-                          "hover:from-primary/80 hover:to-primary hover:shadow-[0_0_20px_-5px_rgba(var(--primary),0.5)]",
-                          "after:content-[''] after:absolute after:inset-0 after:bg-white/10 after:opacity-0 hover:after:opacity-100 after:transition-opacity"
-                        )}
-                        style={{ 
-                          height: `${Math.max(item.height, 2)}%`,
-                        }}
-                     >
-                        {/* Top Cap/Highlight */}
-                        <div className="absolute top-0 inset-x-0 h-[2px] bg-white/30 rounded-t-sm"></div>
-                     </div>
-                  </div>
+                    {/* Hover Line */}
+                    <div 
+                      className={cn(
+                        "absolute bottom-0 w-[1px] bg-primary/20 transition-all duration-300 pointer-events-none",
+                        hoveredIndex === index ? "h-full opacity-100" : "h-0 opacity-0"
+                      )} 
+                    />
 
-                  {/* Tooltip */}
-                  <div 
-                    className={cn(
-                      "absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50",
-                      "transition-all duration-200 ease-out transform",
-                      hoveredIndex === index 
-                        ? "opacity-100 translate-y-0 scale-100" 
-                        : "opacity-0 translate-y-2 scale-95 pointer-events-none"
-                    )}
-                  >
-                    <div className="bg-popover/95 backdrop-blur-sm text-popover-foreground text-xs rounded-lg shadow-xl border border-border p-3 min-w-[140px]">
-                       <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
-                          <Calendar className="w-3 h-3 text-muted-foreground" />
-                          {item.hour || item.date}
-                       </div>
-                       <div className="space-y-1 mt-2">
-                          <div className="flex justify-between items-center gap-4">
-                             <span className="text-muted-foreground">请求数:</span>
-                             <span className="font-mono font-bold">{item.request_count}</span>
-                          </div>
-                          <div className="flex justify-between items-center gap-4">
-                             <span className="text-muted-foreground">用户数:</span>
-                             <span className="font-mono">{item.unique_users}</span>
-                          </div>
-                          <div className="flex justify-between items-center gap-4">
-                             <span className="text-muted-foreground">消耗:</span>
-                             <span className="font-mono">${(item.quota_used / 500000).toFixed(4)}</span>
-                          </div>
+                    {/* Bar */}
+                    <div 
+                      className="relative w-full max-w-[40px] flex items-end transition-all duration-500 ease-out"
+                      style={{ height: '100%' }}
+                    >
+                       <div 
+                          className={cn(
+                            "w-full rounded-t-sm transition-all duration-300 relative",
+                            "bg-gradient-to-t from-primary/60 to-primary/90",
+                            "hover:from-primary/80 hover:to-primary hover:shadow-[0_0_20px_-5px_rgba(var(--primary),0.5)]",
+                            "after:content-[''] after:absolute after:inset-0 after:bg-white/10 after:opacity-0 hover:after:opacity-100 after:transition-opacity"
+                          )}
+                          style={{ 
+                            height: `${Math.max(item.height, 2)}%`,
+                          }}
+                       >
+                          {/* Top Cap/Highlight */}
+                          <div className="absolute top-0 inset-x-0 h-[2px] bg-white/30 rounded-t-sm"></div>
                        </div>
                     </div>
-                    {/* Arrow */}
-                    <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"></div>
-                  </div>
 
-                  {/* X-Axis Label */}
-                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] sm:text-xs text-muted-foreground font-medium whitespace-nowrap opacity-70 group-hover:opacity-100 transition-opacity">
-                    {item.displayDate}
+                    {/* Tooltip */}
+                    <div 
+                      className={cn(
+                        "absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50",
+                        "transition-all duration-200 ease-out transform",
+                        hoveredIndex === index 
+                          ? "opacity-100 translate-y-0 scale-100" 
+                          : "opacity-0 translate-y-2 scale-95 pointer-events-none"
+                      )}
+                    >
+                      <div className="bg-popover/95 backdrop-blur-sm text-popover-foreground text-xs rounded-lg shadow-xl border border-border p-3 min-w-[140px]">
+                         <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
+                            <Calendar className="w-3 h-3 text-muted-foreground" />
+                            {item.hour || item.date}
+                         </div>
+                         <div className="space-y-1 mt-2">
+                            <div className="flex justify-between items-center gap-4">
+                               <span className="text-muted-foreground">请求数:</span>
+                               <span className="font-mono font-bold">{item.request_count}</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-4">
+                               <span className="text-muted-foreground">用户数:</span>
+                               <span className="font-mono">{item.unique_users}</span>
+                            </div>
+                            <div className="flex justify-between items-center gap-4">
+                               <span className="text-muted-foreground">消耗:</span>
+                               <span className="font-mono">${(item.quota_used / 500000).toFixed(4)}</span>
+                            </div>
+                         </div>
+                      </div>
+                      {/* Arrow */}
+                      <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"></div>
+                    </div>
+
+                    {/* X-Axis Label */}
+                    <div className={cn(
+                      "absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] sm:text-xs text-muted-foreground font-medium whitespace-nowrap transition-opacity duration-200",
+                      showLabel ? "opacity-70" : "opacity-0 group-hover:opacity-100"
+                    )}>
+                      {item.displayDate}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         ) : (
