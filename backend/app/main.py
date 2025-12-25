@@ -114,55 +114,68 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.system("NewAPI Middleware Tool 启动中...")
 
-    # 初始化数据库连接（不阻塞启动）
+    # 初始化数据库连接
+    db = None
     try:
         from .database import get_db_manager
         db = get_db_manager()
         db.connect()
+        logger.system(f"数据库连接成功: {db.config.engine.value} @ {db.config.host}:{db.config.port}")
+        
+        # 检查索引状态并输出
+        index_status = db.get_index_status()
+        if index_status["all_ready"]:
+            logger.system(f"索引检查完成: {index_status['existing']}/{index_status['total']} 个索引已就绪")
+        else:
+            logger.system(f"索引状态: {index_status['existing']}/{index_status['total']} 已存在，{index_status['missing']} 个待创建")
     except Exception as e:
-        logger.warning(f"数据库连接失败: {e}", category="数据库")
+        logger.warning(f"数据库初始化失败: {e}", category="数据库")
 
     # 启动后台日志同步任务
     sync_task = asyncio.create_task(background_log_sync())
     
-    # 启动后台索引创建任务（不阻塞应用启动）
-    index_task = asyncio.create_task(background_ensure_indexes())
+    # 启动后台索引创建任务（仅当有缺失索引时）
+    index_task = None
+    if db and not index_status.get("all_ready", True):
+        index_task = asyncio.create_task(background_ensure_indexes())
 
     yield
 
     # 停止后台任务
     sync_task.cancel()
-    index_task.cancel()
+    if index_task:
+        index_task.cancel()
     try:
         await sync_task
     except asyncio.CancelledError:
         pass
-    try:
-        await index_task
-    except asyncio.CancelledError:
-        pass
+    if index_task:
+        try:
+            await index_task
+        except asyncio.CancelledError:
+            pass
     logger.system("NewAPI Middleware Tool 已关闭")
 
 
 async def background_ensure_indexes():
     """
-    Background task to create indexes without blocking app startup.
+    Background task to create missing indexes without blocking app startup.
     Creates indexes one by one with delays to minimize database load.
     """
-    # Wait for app to fully start before creating indexes
-    await asyncio.sleep(10)
+    # Wait a bit for app to fully start
+    await asyncio.sleep(5)
     
     try:
         from .database import get_db_manager
         db = get_db_manager()
         
-        logger.system("开始后台索引检查...")
+        logger.system("开始后台创建缺失索引...")
         
         # Run index creation in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, db.ensure_indexes_async_safe)
         
-        logger.system("后台索引检查完成")
+        logger.system("后台索引创建完成")
     except asyncio.CancelledError:
         logger.system("索引创建任务已取消")
     except Exception as e:

@@ -194,6 +194,44 @@ class DatabaseManager:
                 message=error_msg,
                 details={"sql": sql[:200] if len(sql) > 200 else sql}
             )
+
+    def execute_ddl(self, sql: str) -> None:
+        """
+        Execute DDL statement (CREATE INDEX, ALTER TABLE, etc.) outside of transaction.
+        Required for PostgreSQL CREATE INDEX CONCURRENTLY which cannot run in a transaction.
+        
+        Args:
+            sql: DDL SQL statement.
+        """
+        from .main import DatabaseConnectionError
+        
+        try:
+            # Use raw connection with autocommit for DDL
+            raw_conn = self.engine.raw_connection()
+            try:
+                # Set autocommit mode (different API for different drivers)
+                if hasattr(raw_conn, 'set_session'):
+                    # psycopg2 (PostgreSQL)
+                    raw_conn.set_session(autocommit=True)
+                elif hasattr(raw_conn, 'autocommit'):
+                    # pymysql (MySQL) - use property
+                    raw_conn.autocommit(True)
+                else:
+                    # Fallback: try autocommit attribute
+                    raw_conn.autocommit = True
+                
+                cursor = raw_conn.cursor()
+                cursor.execute(sql)
+                cursor.close()
+            finally:
+                raw_conn.close()
+        except Exception as e:
+            error_msg = f"DDL execution failed: {str(e)}"
+            logger.error(error_msg)
+            raise DatabaseConnectionError(
+                message=error_msg,
+                details={"sql": sql[:200] if len(sql) > 200 else sql}
+            )
     
     def execute_many(self, sql: str, params_list: list[dict[str, Any]]) -> int:
         """
@@ -426,16 +464,18 @@ class DatabaseManager:
                 if log_progress:
                     app_logger.system(f"创建索引 ({i+1}/{total}): {index_name} ON {table_name}...")
                 
-                # Create index - use CONCURRENTLY for PostgreSQL to avoid locking
+                # Create index
                 columns_str = ", ".join(columns)
                 if is_pg:
-                    # CONCURRENTLY allows reads/writes during index creation
+                    # PostgreSQL: use CONCURRENTLY to avoid locking (requires autocommit)
                     create_sql = f'CREATE INDEX CONCURRENTLY IF NOT EXISTS "{index_name}" ON {table_name} ({columns_str})'
+                    # Use execute_ddl for CONCURRENTLY (needs autocommit mode)
+                    self.execute_ddl(create_sql)
                 else:
-                    # MySQL: use ALGORITHM=INPLACE for online DDL when possible
+                    # MySQL: regular CREATE INDEX
                     create_sql = f'CREATE INDEX `{index_name}` ON {table_name} ({columns_str})'
+                    self.execute(create_sql)
                 
-                self.execute(create_sql)
                 created_count += 1
                 
                 if log_progress:

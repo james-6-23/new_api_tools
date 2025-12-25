@@ -51,8 +51,8 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
   }
 
   return (
-    <Card className="col-span-1 shadow-sm hover:shadow-md transition-all duration-300 border-border/50">
-      <CardHeader className="pb-2">
+    <Card className="col-span-1 shadow-sm hover:shadow-md transition-all duration-300 border-border/50 h-[350px] flex flex-col">
+      <CardHeader className="pb-2 flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -74,9 +74,9 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="pb-16">
+      <CardContent className="flex-1 flex flex-col justify-end pb-6">
         {processedData.length > 0 ? (
-          <div className="relative h-[220px] w-full mt-8 select-none pl-8 border-b border-border/50">
+          <div className="relative h-[220px] w-full select-none pl-8 border-b border-border/50">
             {/* Background Grid */}
             <div className="absolute inset-0 flex flex-col justify-between text-xs text-muted-foreground/30 pointer-events-none">
               {gridLines.reverse().map((val, i) => (

@@ -400,7 +400,8 @@ class DashboardService:
             SELECT
                 FLOOR(created_at / 3600) * 3600 as hour_ts,
                 COUNT(*) as request_count,
-                COALESCE(SUM(quota), 0) as quota_used
+                COALESCE(SUM(quota), 0) as quota_used,
+                COUNT(DISTINCT user_id) as unique_users
             FROM logs
             WHERE created_at >= :start_time AND created_at <= :end_time
                 AND type = 2
@@ -415,6 +416,7 @@ class DashboardService:
                 "timestamp": int(row["hour_ts"]),
                 "request_count": int(row["request_count"] or 0),
                 "quota_used": int(row["quota_used"] or 0),
+                "unique_users": int(row["unique_users"] or 0),
             }
             for row in result
         ]
