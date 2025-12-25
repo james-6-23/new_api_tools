@@ -793,7 +793,16 @@ export function RealtimeRanking() {
                             
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="font-medium text-sm truncate">{name}</span>
+                                <div 
+                                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
+                                  onClick={() => openUserDialog(item, w)}
+                                  title="查看用户分析"
+                                >
+                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                    {String(name)[0]?.toUpperCase()}
+                                  </div>
+                                  <span className="text-xs font-medium truncate max-w-[100px]">{name}</span>
+                                </div>
                                 {isBanned && <Badge variant="destructive" className="h-4 px-1 text-[10px]">禁用</Badge>}
                               </div>
                               <div className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-2">
@@ -899,7 +908,16 @@ export function RealtimeRanking() {
                         
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm truncate">{name}</span>
+                            <div 
+                              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
+                              onClick={() => openUserDialog(item, selectedWindow)}
+                              title="查看用户分析"
+                            >
+                              <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                {String(name)[0]?.toUpperCase()}
+                              </div>
+                              <span className="text-xs font-medium truncate max-w-[100px]">{name}</span>
+                            </div>
                             {isBanned && <Badge variant="destructive" className="h-4 px-1 text-[10px]">禁用</Badge>}
                           </div>
                           <div className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-2">
@@ -1002,12 +1020,33 @@ export function RealtimeRanking() {
                               {user.id}
                             </TableCell>
                             <TableCell className="py-3">
-                              <div className="flex flex-col">
-                                <span className="font-semibold text-sm truncate max-w-[160px] text-foreground" title={user.username}>
-                                  {user.username}
-                                </span>
+                              <div className="flex flex-col gap-1">
+                                <div 
+                                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
+                                  onClick={() => {
+                                    const mockItem: LeaderboardItem = {
+                                      user_id: user.id,
+                                      username: user.username,
+                                      user_status: 2,
+                                      request_count: 0,
+                                      failure_requests: 0,
+                                      failure_rate: 0,
+                                      quota_used: 0,
+                                      prompt_tokens: 0,
+                                      completion_tokens: 0,
+                                      unique_ips: 0
+                                    }
+                                    openUserDialog(mockItem, '24h')
+                                  }}
+                                  title="查看用户分析"
+                                >
+                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                    {String(user.username)[0]?.toUpperCase()}
+                                  </div>
+                                  <span className="text-xs font-medium truncate max-w-[120px]">{user.username}</span>
+                                </div>
                                 {user.display_name && user.display_name !== user.username && (
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[160px]">
+                                  <span className="text-[10px] text-muted-foreground truncate max-w-[160px] pl-2">
                                     {user.display_name}
                                   </span>
                                 )}
@@ -1205,12 +1244,35 @@ export function RealtimeRanking() {
                                 </div>
                               </TableCell>
                               <TableCell className="py-3">
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-sm truncate max-w-[140px] text-foreground" title={r.username}>{r.username || `User#${r.user_id}`}</span>
-                                  <span className="text-[11px] text-muted-foreground tabular-nums">ID: {r.user_id}</span>
+                                <div className="flex flex-col gap-1">
+                                  <div 
+                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
+                                    onClick={() => {
+                                      const mockItem: LeaderboardItem = {
+                                        user_id: r.user_id,
+                                        username: r.username,
+                                        user_status: r.action === 'ban' ? 2 : 1,
+                                        request_count: 0,
+                                        failure_requests: 0,
+                                        failure_rate: 0,
+                                        quota_used: 0,
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        unique_ips: 0
+                                      }
+                                      openUserDialog(mockItem, '24h')
+                                    }}
+                                    title="查看用户分析"
+                                  >
+                                    <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground">
+                                      {(r.username || `U`)[0]?.toUpperCase()}
+                                    </div>
+                                    <span className="text-xs font-medium truncate max-w-[100px]">{r.username || `User#${r.user_id}`}</span>
+                                  </div>
+                                  <span className="text-[11px] text-muted-foreground tabular-nums pl-2">ID: {r.user_id}</span>
                                   {isTokenBan && tokenName && (
                                     <span className="text-[10px] text-orange-600/80 dark:text-orange-400/80 truncate max-w-[140px] mt-0.5" title={tokenName}>
-                                      <code className="bg-orange-100/50 dark:bg-orange-900/30 px-1 rounded">{tokenName}</code>
+                                      <code className="bg-orange-100/50 dark:bg-orange-900/30 px-1 rounded ml-2">{tokenName}</code>
                                     </span>
                                   )}
                                 </div>
