@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye } from 'lucide-react'
@@ -1633,56 +1633,45 @@ export function RealtimeRanking() {
                           </TableHeader>
                           <TableBody>
                             {multiIpTokens.slice((ipPage.tokens - 1) * ipPageSize, ipPage.tokens * ipPageSize).map((item) => (
-                              <TableRow key={item.token_id} className="group transition-colors border-b last:border-0">
-                                <TableCell colSpan={5} className="p-0">
-                                  <div className="flex items-center justify-between py-3 px-4 group-hover:bg-muted/30 transition-colors">
-                                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                                      {/* Token Info Column */}
-                                      <div className="w-[184px] shrink-0">
-                                        <div 
-                                          className="flex flex-col cursor-pointer hover:text-primary transition-colors"
-                                          onClick={() => toggleTokenExpand(item.token_id)}
-                                        >
-                                          <span className="font-bold text-sm truncate" title={item.token_name}>
-                                            {item.token_name || `Token#${item.token_id}`}
-                                          </span>
-                                          <span className="text-[10px] text-muted-foreground font-mono opacity-70 leading-none mt-0.5">ID: {item.token_id}</span>
-                                        </div>
-                                      </div>
-
-                                      {/* IP Count Column */}
-                                      <div className="w-[64px] shrink-0">
-                                        <Badge 
-                                          variant="destructive" 
-                                          className="font-bold tabular-nums bg-red-500/10 text-red-500 border-red-500/20 px-2 py-0.5 h-5 min-w-[28px] justify-center"
-                                        >
-                                          {item.ip_count}
-                                        </Badge>
-                                      </div>
-
-                                      {/* User Column */}
-                                      <div className="w-[134px] shrink-0">
-                                        <div 
-                                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
-                                          onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
-                                        >
-                                          <div className="w-4 h-4 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
-                                            {item.username[0]?.toUpperCase()}
-                                          </div>
-                                          <span className="text-xs font-semibold truncate max-w-[80px]">{item.username || item.user_id}</span>
-                                        </div>
-                                      </div>
-
-                                      {/* Requests Column */}
-                                      <div className="w-[84px] shrink-0">
-                                        <span className="text-sm font-bold tabular-nums font-mono text-foreground">
-                                          {formatNumber(item.request_count)}
-                                        </span>
-                                      </div>
+                              <React.Fragment key={item.token_id}>
+                                <TableRow className="group transition-colors border-b last:border-0 hover:bg-muted/30">
+                                  <TableCell className="py-3 px-4">
+                                    <div
+                                      className="flex flex-col cursor-pointer hover:text-primary transition-colors"
+                                      onClick={() => toggleTokenExpand(item.token_id)}
+                                    >
+                                      <span className="font-bold text-sm truncate max-w-[180px]" title={item.token_name}>
+                                        {item.token_name || `Token#${item.token_id}`}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground font-mono opacity-70 leading-none mt-0.5">ID: {item.token_id}</span>
                                     </div>
-
-                                    {/* Action Column */}
-                                    <div className="flex items-center gap-1 shrink-0 w-[100px] justify-center">
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    <Badge
+                                      variant="destructive"
+                                      className="font-bold tabular-nums bg-red-500/10 text-red-500 border-red-500/20 px-2 py-0.5 h-5 min-w-[28px] justify-center"
+                                    >
+                                      {item.ip_count}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    <div
+                                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
+                                      onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
+                                    >
+                                      <div className="w-4 h-4 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
+                                        {item.username[0]?.toUpperCase()}
+                                      </div>
+                                      <span className="text-xs font-semibold truncate max-w-[100px]">{item.username || item.user_id}</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    <span className="text-sm font-bold tabular-nums font-mono text-foreground">
+                                      {formatNumber(item.request_count)}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="py-3 text-center">
+                                    <div className="flex items-center gap-1 justify-center">
                                       <Button
                                         variant="ghost"
                                         size="icon"
@@ -1701,16 +1690,17 @@ export function RealtimeRanking() {
                                         <ChevronDown className="h-4 w-4" />
                                       </Button>
                                     </div>
-                                  </div>
-
-                                  {/* Expandable IP List */}
-                                  {expandedTokens.has(item.token_id) && (
-                                    <div className="bg-muted/20 border-t border-border/40 py-3 px-12 space-y-2 animate-in slide-in-from-top-1 duration-200 shadow-inner">
+                                  </TableCell>
+                                </TableRow>
+                                {/* Expandable IP List Row */}
+                                {expandedTokens.has(item.token_id) && (
+                                  <TableRow className="bg-muted/10 hover:bg-muted/10">
+                                    <TableCell colSpan={5} className="py-3 px-6">
                                       <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-2 flex items-center gap-2">
                                         <div className="h-1 w-1 rounded-full bg-primary" />
                                         活跃 IP 详细分布
                                       </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-1">
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                         {item.ips.map((ip) => (
                                           <div key={ip.ip} className="flex items-center justify-between text-[11px] bg-background/50 rounded-md px-3 py-1.5 border border-border/40 hover:border-primary/20 transition-colors">
                                             <code className="font-mono text-foreground font-medium">{ip.ip}</code>
@@ -1718,10 +1708,10 @@ export function RealtimeRanking() {
                                           </div>
                                         ))}
                                       </div>
-                                    </div>
-                                  )}
-                                </TableCell>
-                              </TableRow>
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </React.Fragment>
                             ))}
                           </TableBody>
                         </Table>
@@ -1773,53 +1763,55 @@ export function RealtimeRanking() {
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/50 hover:bg-muted/50 border-b">
-                              <TableHead className="w-[200px] text-[11px] uppercase tracking-wider py-3 px-4 text-muted-foreground font-bold">用户详情</TableHead>
-                              <TableHead className="w-[100px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">IP 数量</TableHead>
-                              <TableHead className="w-[120px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">请求总量</TableHead>
-                              <TableHead className="hidden md:table-cell text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">常用 IP 分布</TableHead>
-                              <TableHead className="w-[100px] text-center text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">操作</TableHead>
+                              <TableHead className="w-[180px] text-[11px] uppercase tracking-wider py-3 px-4 text-muted-foreground font-bold">用户详情</TableHead>
+                              <TableHead className="w-[80px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">IP 数量</TableHead>
+                              <TableHead className="w-[100px] text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">请求总量</TableHead>
+                              <TableHead className="hidden md:table-cell text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold max-w-[320px]">常用 IP 分布</TableHead>
+                              <TableHead className="w-[80px] text-center text-[11px] uppercase tracking-wider py-3 text-muted-foreground font-bold">操作</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {multiIpUsers.slice((ipPage.users - 1) * ipPageSize, ipPage.users * ipPageSize).map((item) => (
                               <TableRow key={item.user_id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
-                                <TableCell className="py-3 px-4">
-                                  <div 
-                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit group/user"
+                                <TableCell className="py-2.5 px-4">
+                                  <div
+                                    className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit group/user"
                                     onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
                                   >
                                     <div className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-600 flex items-center justify-center font-bold text-[10px] border border-blue-500/20 group-hover/user:bg-blue-500/20">
                                       {item.username[0]?.toUpperCase()}
                                     </div>
                                     <div className="flex flex-col leading-tight">
-                                      <span className="font-bold text-sm truncate max-w-[120px]">{item.username || item.user_id}</span>
+                                      <span className="font-bold text-sm truncate max-w-[100px]">{item.username || item.user_id}</span>
                                       <span className="text-[9px] opacity-60 font-mono mt-0.5 leading-none">ID: {item.user_id}</span>
                                     </div>
                                   </div>
                                 </TableCell>
-                                <TableCell>
-                                  <Badge 
-                                    variant="outline" 
-                                    className="font-bold tabular-nums bg-background border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white transition-all cursor-pointer px-2 py-0.5 h-6 min-w-[32px] justify-center"
+                                <TableCell className="py-2.5">
+                                  <Badge
+                                    variant="outline"
+                                    className="font-bold text-sm tabular-nums bg-background border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white transition-all cursor-pointer px-2.5 py-0.5 h-7 min-w-[36px] justify-center"
                                     onClick={() => openUserIpsDialog(item.user_id, item.username)}
                                     title="点击查看完整 IP 列表"
                                   >
                                     {item.ip_count}
                                   </Badge>
                                 </TableCell>
-                                <TableCell className="text-foreground text-sm tabular-nums font-mono font-semibold">
-                                  {formatNumber(item.request_count)}
+                                <TableCell className="py-2.5">
+                                  <span className="text-base font-bold tabular-nums text-foreground">
+                                    {formatNumber(item.request_count)}
+                                  </span>
                                 </TableCell>
-                                <TableCell className="hidden md:table-cell">
+                                <TableCell className="hidden md:table-cell py-2.5 max-w-[320px]">
                                   <div className="flex flex-wrap gap-1.5">
                                     {item.top_ips.slice(0, 2).map((ip) => (
-                                      <code key={ip.ip} className="text-[10px] bg-muted/80 px-2 py-0.5 rounded font-mono border border-border/50 text-muted-foreground tabular-nums">
+                                      <code key={ip.ip} className="text-[11px] bg-muted/80 px-2 py-0.5 rounded font-mono border border-border/50 text-muted-foreground tabular-nums">
                                         {ip.ip}
                                       </code>
                                     ))}
                                     {item.ip_count > 2 && (
-                                      <button 
-                                        className="text-[10px] text-primary font-bold hover:underline bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded border border-primary/20 transition-all"
+                                      <button
+                                        className="text-[11px] text-primary font-bold hover:underline bg-primary/5 hover:bg-primary/10 px-2 py-0.5 rounded border border-primary/20 transition-all"
                                         onClick={() => openUserIpsDialog(item.user_id, item.username)}
                                       >
                                         +{item.ip_count - 2}
@@ -1827,25 +1819,25 @@ export function RealtimeRanking() {
                                     )}
                                   </div>
                                 </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <TableCell className="py-2.5">
+                                  <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                                      className="h-7 w-7 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
                                       onClick={() => openUserAnalysisFromIP(item.user_id, item.username)}
                                       title="行为分析"
                                     >
-                                      <Eye className="h-4 w-4" />
+                                      <Eye className="h-3.5 w-3.5" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                      className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-500/10"
                                       onClick={() => handleQuickBanUser(item.user_id, item.username || `User#${item.user_id}`)}
                                       title="封禁用户"
                                     >
-                                      <ShieldBan className="h-4 w-4" />
+                                      <ShieldBan className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
                                 </TableCell>
