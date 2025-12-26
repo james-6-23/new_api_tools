@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from .auth import verify_token
+from .auth import verify_auth
 from .ai_auto_ban_service import get_ai_auto_ban_service
 from .risk_monitoring_service import get_risk_monitoring_service, WINDOW_SECONDS
 
@@ -43,7 +43,7 @@ class TestModelRequest(BaseModel):
 
 
 @router.get("/config")
-async def get_config(_: str = Depends(verify_token)):
+async def get_config(_: str = Depends(verify_auth)):
     """获取 AI 自动封禁配置"""
     service = get_ai_auto_ban_service()
     return {
@@ -55,7 +55,7 @@ async def get_config(_: str = Depends(verify_token)):
 @router.post("/config")
 async def save_config(
     request: SaveConfigRequest,
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """保存 AI 自动封禁配置"""
     service = get_ai_auto_ban_service()
@@ -90,7 +90,7 @@ async def save_config(
 @router.post("/models")
 async def fetch_models(
     request: FetchModelsRequest,
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """获取可用模型列表 (OpenAI Compatible /v1/models)"""
     service = get_ai_auto_ban_service()
@@ -104,7 +104,7 @@ async def fetch_models(
 @router.post("/test-model")
 async def test_model(
     request: TestModelRequest,
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """测试指定模型是否可用"""
     service = get_ai_auto_ban_service()
@@ -120,7 +120,7 @@ async def test_model(
 async def get_suspicious_users(
     window: str = Query(default="1h", description="时间窗口"),
     limit: int = Query(default=20, ge=1, le=100, description="最大数量"),
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """获取可疑用户列表"""
     service = get_ai_auto_ban_service()
@@ -159,7 +159,7 @@ async def get_suspicious_users(
 @router.post("/assess")
 async def manual_assess(
     request: ManualAssessRequest,
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """
     手动触发单个用户的 AI 评估
@@ -212,7 +212,7 @@ async def manual_assess(
 async def run_scan(
     window: str = Query(default="1h", description="时间窗口"),
     limit: int = Query(default=10, ge=1, le=50, description="最大处理用户数"),
-    _: str = Depends(verify_token),
+    _: str = Depends(verify_auth),
 ):
     """
     手动触发一次扫描
@@ -236,7 +236,7 @@ async def run_scan(
 
 
 @router.post("/test-connection")
-async def test_connection(_: str = Depends(verify_token)):
+async def test_connection(_: str = Depends(verify_auth)):
     """测试当前配置的 API 连接"""
     service = get_ai_auto_ban_service()
     
