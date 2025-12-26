@@ -33,13 +33,13 @@ class SaveConfigRequest(BaseModel):
 class FetchModelsRequest(BaseModel):
     """获取模型列表请求"""
     base_url: str
-    api_key: str
+    api_key: Optional[str] = None  # 可选，不传则使用已保存的配置
 
 
 class TestModelRequest(BaseModel):
     """测试模型请求"""
     base_url: str
-    api_key: str
+    api_key: Optional[str] = None  # 可选，不传则使用已保存的配置
     model: str
 
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, Settings, Check, X } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -380,6 +380,8 @@ export function RealtimeRanking() {
     model: string
     base_url: string
     has_api_key: boolean
+    api_key?: string
+    masked_api_key?: string
     scan_interval_minutes?: number
   } | null>(null)
   const [aiSuspiciousUsers, setAiSuspiciousUsers] = useState<Array<{
@@ -428,6 +430,7 @@ export function RealtimeRanking() {
   const [aiSaving, setAiSaving] = useState(false)
   const [aiConfigExpanded, setAiConfigExpanded] = useState(false)
   const [isAiLogicModalOpen, setIsAiLogicModalOpen] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -653,7 +656,9 @@ export function RealtimeRanking() {
 
   // AI 配置相关函数
   const handleFetchModels = async () => {
-    if (!aiConfigEdit.base_url || !aiConfigEdit.api_key) {
+    // 如果没有填写新的 api_key，但已经保存过配置，则允许获取模型列表
+    const hasApiKey = aiConfigEdit.api_key || aiConfig?.has_api_key
+    if (!aiConfigEdit.base_url || !hasApiKey) {
       showToast('error', '请先填写 API 地址和 API Key')
       return
     }
@@ -665,7 +670,7 @@ export function RealtimeRanking() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           base_url: aiConfigEdit.base_url,
-          api_key: aiConfigEdit.api_key,
+          api_key: aiConfigEdit.api_key || undefined,  // 不传则使用已保存的
         }),
       })
       const res = await response.json()
@@ -684,7 +689,9 @@ export function RealtimeRanking() {
   }
 
   const handleTestModel = async () => {
-    if (!aiConfigEdit.base_url || !aiConfigEdit.api_key || !aiConfigEdit.model) {
+    // 如果没有填写新的 api_key，但已经保存过配置，则允许测试
+    const hasApiKey = aiConfigEdit.api_key || aiConfig?.has_api_key
+    if (!aiConfigEdit.base_url || !hasApiKey || !aiConfigEdit.model) {
       showToast('error', '请先填写完整配置并选择模型')
       return
     }
@@ -696,7 +703,7 @@ export function RealtimeRanking() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           base_url: aiConfigEdit.base_url,
-          api_key: aiConfigEdit.api_key,
+          api_key: aiConfigEdit.api_key || undefined,  // 不传则使用已保存的
           model: aiConfigEdit.model,
         }),
       })
@@ -2342,17 +2349,40 @@ export function RealtimeRanking() {
                             onChange={(e) => setAiConfigEdit(prev => ({ ...prev, base_url: e.target.value }))}
                             className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
                           />
+                          <p className="text-xs text-slate-500 px-1">
+                            只需填写 API 地址，系统会自动补全 /v1/chat/completions
+                          </p>
+                          {aiConfigEdit.base_url && (
+                            <p className="text-[10px] text-slate-400 font-mono px-1 truncate opacity-70" title={`${aiConfigEdit.base_url.replace(/\/+$/, "")}${/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions`}>
+                              预览路径: {aiConfigEdit.base_url.replace(/\/+$/, "")}{/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions
+                            </p>
+                          )}
                         </div>
 
                         <div className="space-y-1.5">
                           <label className="text-sm font-semibold text-slate-700">API 密钥</label>
-                          <Input
-                            type="password"
-                            placeholder={aiConfig?.has_api_key ? "已配置 (已隐藏)" : "sk-..."}
-                            value={aiConfigEdit.api_key}
-                            onChange={(e) => setAiConfigEdit(prev => ({ ...prev, api_key: e.target.value }))}
-                            className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
-                          />
+                          <div className="relative">
+                            <Input
+                              type={showApiKey ? "text" : "password"}
+                              placeholder="sk-..."
+                              value={aiConfigEdit.api_key || (aiConfig?.has_api_key ? (showApiKey && aiConfig.api_key ? aiConfig.api_key : aiConfig.masked_api_key) : '')}
+                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, api_key: e.target.value }))}
+                              className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors pr-10"
+                            />
+                            {(aiConfig?.has_api_key || aiConfigEdit.api_key) && (
+                              <button
+                                type="button"
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                                title={showApiKey ? "隐藏密钥" : "显示密钥"}
+                              >
+                                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            )}
+                          </div>
+                          {aiConfig?.has_api_key && !aiConfigEdit.api_key && (
+                            <p className="text-xs text-slate-500">留空则使用已保存的密钥</p>
+                          )}
                         </div>
                       </div>
 
@@ -2378,7 +2408,7 @@ export function RealtimeRanking() {
                               variant="outline"
                               size="icon"
                               onClick={handleFetchModels}
-                              disabled={aiModelLoading || !aiConfigEdit.base_url || !aiConfigEdit.api_key}
+                              disabled={aiModelLoading || !aiConfigEdit.base_url || (!aiConfigEdit.api_key && !aiConfig?.has_api_key)}
                               className="h-10 w-10 shrink-0"
                               title="刷新模型列表"
                             >
@@ -2427,10 +2457,10 @@ export function RealtimeRanking() {
 
                           <div className="flex items-center gap-3 pt-1">
                             <span className="text-sm font-medium text-slate-700 shrink-0">定时扫描:</span>
-                            <select
+                            <Select
                               value={aiConfigEdit.scan_interval_minutes}
                               onChange={(e) => setAiConfigEdit(prev => ({ ...prev, scan_interval_minutes: parseInt(e.target.value) }))}
-                              className="text-sm border rounded px-2 py-1.5 bg-white border-slate-200 text-slate-700 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                              className="w-full h-10 bg-slate-50 border-slate-200 focus:bg-white"
                             >
                               <option value={0}>已禁用</option>
                               <option value={15}>每 15 分钟</option>
@@ -2440,7 +2470,7 @@ export function RealtimeRanking() {
                               <option value={360}>每 6 小时</option>
                               <option value={720}>每 12 小时</option>
                               <option value={1440}>每 24 小时</option>
-                            </select>
+                            </Select>
                           </div>
                         </div>
                       </div>

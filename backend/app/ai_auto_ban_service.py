@@ -53,8 +53,8 @@ class AIAssessmentResult:
 AI_ASSESSMENT_COOLDOWN = 24 * 3600  # 24小时冷却期
 RISK_SCORE_BAN_THRESHOLD = 8        # 风险分 >= 8 才自动封禁
 CONFIDENCE_THRESHOLD = 0.8          # 置信度 >= 0.8 才自动执行
-DEFAULT_AI_MODEL = "gpt-4o-mini"    # 默认使用的模型
-DEFAULT_BASE_URL = "https://api.openai.com/v1"  # 默认API地址
+DEFAULT_AI_MODEL = ""    # 不预设模型，用户需手动选择
+DEFAULT_BASE_URL = ""  # 不预设API地址，用户需手动配置
 AI_CONFIG_KEY = "ai_ban_config"     # 本地存储配置键名
 
 
@@ -251,6 +251,19 @@ class AIAutoBanService:
 - 请谨慎判断，避免误封正常用户
 - 只返回 JSON，不要有其他内容"""
 
+    def _get_endpoint_url(self, base_url: str, endpoint: str) -> str:
+        """
+        智能构建 API URL
+        如果 base_url 不包含 /v1 且 endpoint 需要，则自动补充
+        """
+        base = base_url.rstrip("/")
+        # 如果 base_url 已经包含 /v1，或者是其他非标准版本号路径，则直接使用
+        if base.endswith("/v1"):
+            return f"{base}{endpoint}"
+        
+        # 否则默认补充 /v1
+        return f"{base}/v1{endpoint}"
+
     async def _call_openai_api(self, prompt: str) -> Optional[str]:
         """调用 OpenAI API"""
         if not self._openai_api_key:
@@ -274,8 +287,9 @@ class AIAutoBanService:
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                url = self._get_endpoint_url(self._openai_base_url, "/chat/completions")
                 response = await client.post(
-                    f"{self._openai_base_url}/chat/completions",
+                    url,
                     headers=headers,
                     json=payload,
                 )
@@ -297,7 +311,7 @@ class AIAutoBanService:
             base_url: API地址，不传则使用当前配置
             api_key: API Key，不传则使用当前配置
         """
-        url = (base_url or self._openai_base_url).rstrip("/")
+        base = (base_url or self._openai_base_url).rstrip("/")
         key = api_key or self._openai_api_key
         
         if not key:
@@ -310,7 +324,8 @@ class AIAutoBanService:
         
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(f"{url}/models", headers=headers)
+                url = self._get_endpoint_url(base, "/models")
+                response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -367,7 +382,7 @@ class AIAutoBanService:
             base_url: API地址，不传则使用当前配置
             api_key: API Key，不传则使用当前配置
         """
-        url = (base_url or self._openai_base_url).rstrip("/")
+        base = (base_url or self._openai_base_url).rstrip("/")
         key = api_key or self._openai_api_key
         
         if not key:
@@ -389,8 +404,9 @@ class AIAutoBanService:
         try:
             start_time = time.time()
             async with httpx.AsyncClient(timeout=30.0) as client:
+                url = self._get_endpoint_url(base, "/chat/completions")
                 response = await client.post(
-                    f"{url}/chat/completions",
+                    url,
                     headers=headers,
                     json=payload,
                 )
@@ -671,12 +687,23 @@ class AIAutoBanService:
 
     def get_config(self) -> Dict[str, Any]:
         """获取当前配置"""
+        # 遮蔽 API Key，只显示前4位和后4位
+        masked_api_key = ""
+        if self._openai_api_key:
+            key = self._openai_api_key
+            if len(key) > 8:
+                masked_api_key = key[:4] + "*" * (len(key) - 8) + key[-4:]
+            else:
+                masked_api_key = "*" * len(key)
+        
         return {
             "enabled": self._enabled,
             "dry_run": self._dry_run,
             "model": self._ai_model,
             "base_url": self._openai_base_url,
             "has_api_key": bool(self._openai_api_key),
+            "api_key": self._openai_api_key,  # 完整 key
+            "masked_api_key": masked_api_key,  # 遮蔽版
             "whitelist_count": len(self._whitelist_ids),
             "risk_score_threshold": RISK_SCORE_BAN_THRESHOLD,
             "confidence_threshold": CONFIDENCE_THRESHOLD,
