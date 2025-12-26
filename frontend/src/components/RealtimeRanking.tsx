@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, Settings, Check, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -9,6 +9,7 @@ import { Progress } from './ui/progress'
 import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Select } from './ui/select'
+import { Input } from './ui/input'
 import { cn } from '../lib/utils'
 
 type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h' | '3d' | '7d'
@@ -25,6 +26,21 @@ interface LeaderboardItem {
   prompt_tokens: number
   completion_tokens: number
   unique_ips: number
+}
+
+interface IPSwitchDetail {
+  from_ip: string
+  to_ip: string
+  interval: number
+  time: number
+}
+
+interface IPSwitchAnalysis {
+  switch_count: number
+  rapid_switch_count: number
+  avg_ip_duration: number
+  min_switch_interval: number
+  switch_details: IPSwitchDetail[]
 }
 
 interface UserAnalysis {
@@ -46,7 +62,7 @@ interface UserAnalysis {
     failure_rate: number
     empty_rate: number
   }
-  risk: { requests_per_minute: number; avg_quota_per_request: number; risk_flags: string[] }
+  risk: { requests_per_minute: number; avg_quota_per_request: number; risk_flags: string[]; ip_switch_analysis?: IPSwitchAnalysis }
   top_models: Array<{ model_name: string; requests: number; quota_used: number; success_requests: number; failure_requests: number; empty_count: number }>
   top_channels: Array<{ channel_id: number; channel_name: string; requests: number; quota_used: number }>
   top_ips: Array<{ ip: string; requests: number }>
@@ -56,6 +72,16 @@ interface UserAnalysis {
 const WINDOW_LABELS: Record<WindowKey, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
 const SORT_LABELS: Record<SortKey, string> = { requests: '请求次数', quota: '额度消耗', failure_rate: '失败率' }
 
+// 风险标签中文映射
+const RISK_FLAG_LABELS: Record<string, string> = {
+  'HIGH_RPM': '请求频率过高',
+  'MANY_IPS': '多IP访问',
+  'HIGH_FAILURE_RATE': '失败率过高',
+  'HIGH_EMPTY_RATE': '空回复率过高',
+  'IP_RAPID_SWITCH': 'IP快速切换',
+  'IP_HOPPING': 'IP跳动异常',
+}
+
 // 预设封禁原因
 const BAN_REASONS = [
   { value: '', label: '请选择封禁原因' },
@@ -63,6 +89,8 @@ const BAN_REASONS = [
   { value: '多 IP 访问异常 (MANY_IPS)', label: '多 IP 访问异常 (MANY_IPS)' },
   { value: '失败率过高 (HIGH_FAILURE_RATE)', label: '失败率过高 (HIGH_FAILURE_RATE)' },
   { value: '空回复率过高 (HIGH_EMPTY_RATE)', label: '空回复率过高 (HIGH_EMPTY_RATE)' },
+  { value: 'IP快速切换 (IP_RAPID_SWITCH)', label: 'IP快速切换 (IP_RAPID_SWITCH)' },
+  { value: 'IP跳动异常 (IP_HOPPING)', label: 'IP跳动异常 (IP_HOPPING)' },
   { value: '账号共享嫌疑', label: '账号共享嫌疑' },
   { value: '令牌泄露风险', label: '令牌泄露风险' },
   { value: '滥用 API 资源', label: '滥用 API 资源' },
@@ -80,10 +108,18 @@ const UNBAN_REASONS = [
 ]
 
 const REASON_STYLES: Record<string, string> = {
+  '请求频率过高': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
   'HIGH_RPM': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
+  '多IP访问': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
   'MANY_IPS': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
+  '失败率过高': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
   'HIGH_FAILURE_RATE': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
+  '空回复率过高': 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400',
   'HIGH_EMPTY_RATE': 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400',
+  'IP快速切换': 'bg-pink-50 text-pink-700 border-pink-100 dark:bg-pink-900/20 dark:text-pink-400',
+  'IP_RAPID_SWITCH': 'bg-pink-50 text-pink-700 border-pink-100 dark:bg-pink-900/20 dark:text-pink-400',
+  'IP跳动异常': 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-100 dark:bg-fuchsia-900/20 dark:text-fuchsia-400',
+  'IP_HOPPING': 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-100 dark:bg-fuchsia-900/20 dark:text-fuchsia-400',
   '账号共享': 'bg-purple-50 text-purple-700 border-purple-100 dark:bg-purple-900/20 dark:text-purple-400',
   '令牌泄露': 'bg-indigo-50 text-indigo-700 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400',
   '滥用': 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400',
@@ -206,7 +242,7 @@ interface MultiIPUserItem {
 }
 
 // Hash路径映射
-const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'> = {
+const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban'> = {
   '': 'leaderboards',
   'leaderboards': 'leaderboards',
   'ip': 'ip_monitoring',
@@ -215,6 +251,8 @@ const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitor
   'banned_list': 'banned_list',
   'audit': 'audit_logs',
   'audit_logs': 'audit_logs',
+  'ai': 'ai_ban',
+  'ai_ban': 'ai_ban',
 }
 
 const HASH_VIEW_MAP: Record<string, string> = {
@@ -222,9 +260,10 @@ const HASH_VIEW_MAP: Record<string, string> = {
   'ip_monitoring': 'ip',
   'banned_list': 'banned',
   'audit_logs': 'audit',
+  'ai_ban': 'ai',
 }
 
-function getInitialView(): 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' {
+function getInitialView(): 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban' {
   const hash = window.location.hash
   const match = hash.match(/#risk[/-]?(\w*)/)
   if (match && match[1]) {
@@ -243,7 +282,7 @@ export function RealtimeRanking() {
   const extendedWindows = useMemo<WindowKey[]>(() => ['24h', '3d', '7d'], [])
   const [selectedWindow, setSelectedWindow] = useState<WindowKey>('24h')
 
-  const [view, setView] = useState<'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs'>(getInitialView)
+  const [view, setView] = useState<'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban'>(getInitialView)
 
   // Tab 配置
   const riskTabs = useMemo(() => [
@@ -251,6 +290,7 @@ export function RealtimeRanking() {
     { id: 'ip_monitoring' as const, label: 'IP 监控', icon: Globe },
     { id: 'banned_list' as const, label: '封禁列表', icon: ShieldBan },
     { id: 'audit_logs' as const, label: '审计日志', icon: Clock },
+    { id: 'ai_ban' as const, label: 'AI 封禁', icon: AlertTriangle },
   ], [])
 
   // 滑动指示器状态
@@ -331,6 +371,59 @@ export function RealtimeRanking() {
     disableTokens: boolean
     enableTokens: boolean
   }>({ open: false, type: 'ban', userId: 0, username: '', reason: '', disableTokens: true, enableTokens: false })
+
+  // AI 自动封禁状态
+  const [aiConfig, setAiConfig] = useState<{
+    enabled: boolean
+    dry_run: boolean
+    model: string
+    base_url: string
+    has_api_key: boolean
+  } | null>(null)
+  const [aiSuspiciousUsers, setAiSuspiciousUsers] = useState<Array<{
+    user_id: number
+    username: string
+    risk_flags: string[]
+    rpm: number
+    total_requests: number
+    empty_rate: number
+    failure_rate: number
+    unique_ips: number
+    rapid_switch_count: number
+  }>>([])
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiScanning, setAiScanning] = useState(false)
+  const [aiAssessing, setAiAssessing] = useState<number | null>(null)
+  const [aiAssessResult, setAiAssessResult] = useState<{
+    user_id: number
+    username: string
+    assessment: {
+      should_ban: boolean
+      risk_score: number
+      confidence: number
+      reason: string
+      action: string
+    }
+  } | null>(null)
+
+  // AI 配置编辑状态
+  const [aiConfigEdit, setAiConfigEdit] = useState({
+    base_url: '',
+    api_key: '',
+    model: '',
+    enabled: false,
+    dry_run: true,
+  })
+  const [aiModels, setAiModels] = useState<Array<{ id: string; owned_by: string }>>([])
+  const [aiModelLoading, setAiModelLoading] = useState(false)
+  const [aiTestResult, setAiTestResult] = useState<{
+    success: boolean
+    message: string
+    latency_ms?: number
+  } | null>(null)
+  const [aiTesting, setAiTesting] = useState(false)
+  const [aiSaving, setAiSaving] = useState(false)
+  const [aiConfigExpanded, setAiConfigExpanded] = useState(false)
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -474,6 +567,193 @@ export function RealtimeRanking() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
+  // AI 自动封禁相关函数
+  const fetchAiConfig = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/config`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setAiConfig(res.data)
+      }
+    } catch (e) {
+      console.error('Failed to fetch AI config:', e)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  const fetchAiSuspiciousUsers = useCallback(async (showSuccessToast = false) => {
+    setAiLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/suspicious-users?window=1h&limit=20`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setAiSuspiciousUsers(res.data?.items || [])
+        if (showSuccessToast) showToast('success', '已刷新')
+      } else {
+        showToast('error', res.message || '获取可疑用户失败')
+      }
+    } catch (e) {
+      console.error('Failed to fetch suspicious users:', e)
+      showToast('error', '获取可疑用户失败')
+    } finally {
+      setAiLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
+
+  const handleAiAssess = async (userId: number) => {
+    setAiAssessing(userId)
+    setAiAssessResult(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/assess`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ user_id: userId, window: '1h' }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        setAiAssessResult(res.data)
+        showToast('success', 'AI 评估完成')
+      } else {
+        showToast('error', res.message || 'AI 评估失败')
+      }
+    } catch (e) {
+      console.error('Failed to assess user:', e)
+      showToast('error', 'AI 评估失败')
+    } finally {
+      setAiAssessing(null)
+    }
+  }
+
+  const handleAiScan = async () => {
+    setAiScanning(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/scan?window=1h&limit=10`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const res = await response.json()
+      if (res.success) {
+        const stats = res.data?.stats || {}
+        showToast('success', `扫描完成: 处理 ${stats.total_processed || 0} 人, 封禁 ${stats.banned || 0} 人, 告警 ${stats.warned || 0} 人`)
+        fetchAiSuspiciousUsers()
+        fetchBanRecords(1)
+      } else {
+        showToast('error', res.message || '扫描失败')
+      }
+    } catch (e) {
+      console.error('Failed to run AI scan:', e)
+      showToast('error', '扫描失败')
+    } finally {
+      setAiScanning(false)
+    }
+  }
+
+  // AI 配置相关函数
+  const handleFetchModels = async () => {
+    if (!aiConfigEdit.base_url || !aiConfigEdit.api_key) {
+      showToast('error', '请先填写 API 地址和 API Key')
+      return
+    }
+    setAiModelLoading(true)
+    setAiModels([])
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/models`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          base_url: aiConfigEdit.base_url,
+          api_key: aiConfigEdit.api_key,
+        }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        setAiModels(res.models || [])
+        showToast('success', res.message || '获取模型列表成功')
+      } else {
+        showToast('error', res.message || '获取模型列表失败')
+      }
+    } catch (e) {
+      console.error('Failed to fetch models:', e)
+      showToast('error', '获取模型列表失败')
+    } finally {
+      setAiModelLoading(false)
+    }
+  }
+
+  const handleTestModel = async () => {
+    if (!aiConfigEdit.base_url || !aiConfigEdit.api_key || !aiConfigEdit.model) {
+      showToast('error', '请先填写完整配置并选择模型')
+      return
+    }
+    setAiTesting(true)
+    setAiTestResult(null)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/test-model`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          base_url: aiConfigEdit.base_url,
+          api_key: aiConfigEdit.api_key,
+          model: aiConfigEdit.model,
+        }),
+      })
+      const res = await response.json()
+      setAiTestResult(res)
+      if (res.success) {
+        showToast('success', `连接成功，延迟 ${res.latency_ms}ms`)
+      } else {
+        showToast('error', res.message || '测试失败')
+      }
+    } catch (e) {
+      console.error('Failed to test model:', e)
+      showToast('error', '测试失败')
+    } finally {
+      setAiTesting(false)
+    }
+  }
+
+  const handleSaveAiConfig = async () => {
+    setAiSaving(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/config`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          base_url: aiConfigEdit.base_url || undefined,
+          api_key: aiConfigEdit.api_key || undefined,
+          model: aiConfigEdit.model || undefined,
+          enabled: aiConfigEdit.enabled,
+          dry_run: aiConfigEdit.dry_run,
+        }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        showToast('success', '配置已保存')
+        setAiConfig(res.data)
+        setAiConfigExpanded(false)
+      } else {
+        showToast('error', res.message || '保存失败')
+      }
+    } catch (e) {
+      console.error('Failed to save config:', e)
+      showToast('error', '保存配置失败')
+    } finally {
+      setAiSaving(false)
+    }
+  }
+
+  // 初始化配置编辑状态
+  useEffect(() => {
+    if (aiConfig && aiConfigExpanded) {
+      setAiConfigEdit({
+        base_url: aiConfig.base_url || '',
+        api_key: '',  // 不回显 API Key
+        model: aiConfig.model || '',
+        enabled: aiConfig.enabled,
+        dry_run: aiConfig.dry_run,
+      })
+    }
+  }, [aiConfig, aiConfigExpanded])
+
   const openUserIpsDialog = (userId: number, username: string) => {
     setSelectedUserForIps({ id: userId, username })
     setUserIpsDialogOpen(true)
@@ -609,7 +889,11 @@ export function RealtimeRanking() {
     if (view === 'banned_list') fetchBannedUsers(1)
     if (view === 'audit_logs') fetchBanRecords(1)
     if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on view change
-  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, view])
+    if (view === 'ai_ban') {
+      fetchAiConfig()
+      fetchAiSuspiciousUsers()
+    }
+  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, fetchAiConfig, fetchAiSuspiciousUsers, view])
 
   useEffect(() => {
     if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on window change
@@ -1956,6 +2240,472 @@ export function RealtimeRanking() {
         </div>
       )}
 
+      {/* AI 自动封禁 */}
+      {view === 'ai_ban' && (
+        <div className="mt-4 space-y-6">
+          {/* 配置状态卡片 */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card className="rounded-xl border-l-4 border-l-blue-500 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">服务状态</div>
+                    <div className="text-xl font-bold mt-1">
+                      {aiConfig?.enabled ? (
+                        <span className="text-green-600">已启用</span>
+                      ) : (
+                        <span className="text-muted-foreground">未启用</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center",
+                    aiConfig?.enabled ? "bg-green-100 text-green-600" : "bg-muted text-muted-foreground"
+                  )}>
+                    {aiConfig?.enabled ? <ShieldCheck className="h-5 w-5" /> : <ShieldBan className="h-5 w-5" />}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-xl border-l-4 border-l-amber-500 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">运行模式</div>
+                    <div className="text-xl font-bold mt-1">
+                      {aiConfig?.dry_run ? (
+                        <span className="text-amber-600">试运行</span>
+                      ) : (
+                        <span className="text-red-600">正式运行</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center",
+                    aiConfig?.dry_run ? "bg-amber-100 text-amber-600" : "bg-red-100 text-red-600"
+                  )}>
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-xl border-l-4 border-l-purple-500 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">AI 模型</div>
+                    <div className="text-lg font-bold mt-1 truncate max-w-[120px]" title={aiConfig?.model}>
+                      {aiConfig?.model || '-'}
+                    </div>
+                  </div>
+                  <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center">
+                    <Activity className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-xl border-l-4 border-l-cyan-500 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider">可疑用户</div>
+                    <div className="text-xl font-bold mt-1">{aiSuspiciousUsers.length}</div>
+                  </div>
+                  <div className="w-10 h-10 rounded-full bg-cyan-100 text-cyan-600 flex items-center justify-center">
+                    <Eye className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 配置面板 */}
+          <Card className="rounded-xl shadow-sm border">
+            <CardHeader className="pb-3 border-b bg-muted/20 cursor-pointer" onClick={() => setAiConfigExpanded(!aiConfigExpanded)}>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-primary" />
+                  API 配置
+                  {aiConfig?.has_api_key && (
+                    <Badge variant="secondary" className="ml-2 bg-green-100 text-green-700">已配置</Badge>
+                  )}
+                </CardTitle>
+                <ChevronDown className={cn("h-5 w-5 transition-transform", aiConfigExpanded && "rotate-180")} />
+              </div>
+            </CardHeader>
+            {aiConfigExpanded && (
+              <CardContent className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">API 地址 (OpenAI Compatible)</label>
+                    <Input
+                      placeholder="https://api.openai.com/v1"
+                      value={aiConfigEdit.base_url}
+                      onChange={(e) => setAiConfigEdit(prev => ({ ...prev, base_url: e.target.value }))}
+                    />
+                    <p className="text-xs text-muted-foreground">支持 OpenAI、Azure、本地部署等兼容接口</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">API Key</label>
+                    <Input
+                      type="password"
+                      placeholder={aiConfig?.has_api_key ? "已配置，留空保持不变" : "sk-xxx..."}
+                      value={aiConfigEdit.api_key}
+                      onChange={(e) => setAiConfigEdit(prev => ({ ...prev, api_key: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-end gap-4">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-sm font-medium">模型选择</label>
+                    <div className="flex gap-2">
+                      <Select
+                        value={aiConfigEdit.model}
+                        onChange={(e) => setAiConfigEdit(prev => ({ ...prev, model: e.target.value }))}
+                        className="flex-1"
+                      >
+                        <option value="">请选择模型</option>
+                        {aiModels.map((m) => (
+                          <option key={m.id} value={m.id}>{m.id}</option>
+                        ))}
+                        {aiConfigEdit.model && !aiModels.find(m => m.id === aiConfigEdit.model) && (
+                          <option value={aiConfigEdit.model}>{aiConfigEdit.model} (当前)</option>
+                        )}
+                      </Select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleFetchModels}
+                        disabled={aiModelLoading || !aiConfigEdit.base_url || !aiConfigEdit.api_key}
+                        className="h-9 whitespace-nowrap"
+                      >
+                        {aiModelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        <span className="ml-2">获取列表</span>
+                      </Button>
+                    </div>
+                    {aiModels.length > 0 && (
+                      <p className="text-xs text-muted-foreground">共 {aiModels.length} 个可用模型</p>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestModel}
+                    disabled={aiTesting || !aiConfigEdit.model}
+                    className="h-9"
+                  >
+                    {aiTesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
+                    测试连接
+                  </Button>
+                </div>
+
+                {aiTestResult && (
+                  <div className={cn(
+                    "rounded-lg border p-3 text-sm",
+                    aiTestResult.success ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"
+                  )}>
+                    <div className="flex items-center gap-2">
+                      {aiTestResult.success ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                      <span className="font-medium">{aiTestResult.message}</span>
+                      {aiTestResult.latency_ms && <span className="text-muted-foreground">({aiTestResult.latency_ms}ms)</span>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-6 pt-2 border-t">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aiConfigEdit.enabled}
+                      onChange={(e) => setAiConfigEdit(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm">启用 AI 自动封禁</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aiConfigEdit.dry_run}
+                      onChange={(e) => setAiConfigEdit(prev => ({ ...prev, dry_run: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300"
+                    />
+                    <span className="text-sm">试运行模式 (仅记录不执行)</span>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={() => setAiConfigExpanded(false)}>
+                    取消
+                  </Button>
+                  <Button size="sm" onClick={handleSaveAiConfig} disabled={aiSaving}>
+                    {aiSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+                    保存配置
+                  </Button>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+
+          {/* 操作按钮 */}
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              {aiConfig?.enabled ? (
+                aiConfig?.dry_run ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    试运行模式：AI 评估后仅记录日志，不实际执行封禁
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 text-red-600">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    正式运行：AI 评估后将自动执行封禁操作
+                  </span>
+                )
+              ) : (
+                <span>请先配置 API 并启用服务</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchAiSuspiciousUsers(true)}
+                disabled={aiLoading}
+                className="h-9"
+              >
+                <RefreshCw className={cn("h-4 w-4 mr-2", aiLoading && "animate-spin")} />
+                刷新列表
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleAiScan}
+                disabled={!aiConfig?.enabled || aiScanning}
+                className="h-9"
+              >
+                {aiScanning ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Activity className="h-4 w-4 mr-2" />
+                )}
+                执行 AI 扫描
+              </Button>
+            </div>
+          </div>
+
+          {/* 可疑用户列表 */}
+          <Card className="rounded-xl shadow-sm border">
+            <CardHeader className="pb-3 border-b bg-muted/20">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                可疑用户列表
+                <Badge variant="secondary" className="ml-2">{aiSuspiciousUsers.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {aiLoading ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-6 w-6 mr-2 animate-spin text-primary/50" />加载中...
+                </div>
+              ) : aiSuspiciousUsers.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30 hover:bg-muted/30 border-b">
+                      <TableHead className="w-[180px] text-xs uppercase tracking-wider">用户</TableHead>
+                      <TableHead className="w-[200px] text-xs uppercase tracking-wider">风险标签</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">RPM</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">请求数</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">空回复率</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">IP数</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wider text-right">快速切换</TableHead>
+                      <TableHead className="w-[120px] text-center text-xs uppercase tracking-wider">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aiSuspiciousUsers.map((user) => (
+                      <TableRow key={user.user_id} className="group hover:bg-muted/20 transition-colors">
+                        <TableCell className="py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center font-bold text-sm">
+                              {user.username[0]?.toUpperCase() || 'U'}
+                            </div>
+                            <div>
+                              <div className="font-medium text-sm">{user.username}</div>
+                              <div className="text-xs text-muted-foreground">ID: {user.user_id}</div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {user.risk_flags.map((flag) => (
+                              <Badge key={flag} variant="destructive" className="text-xs px-1.5 py-0">
+                                {RISK_FLAG_LABELS[flag] || flag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-right font-mono text-sm">{user.rpm}</TableCell>
+                        <TableCell className="py-3 text-right font-mono text-sm">{user.total_requests}</TableCell>
+                        <TableCell className="py-3 text-right">
+                          <span className={cn(
+                            "font-mono text-sm",
+                            user.empty_rate >= 80 && "text-red-600 font-bold"
+                          )}>
+                            {user.empty_rate}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-3 text-right font-mono text-sm">{user.unique_ips}</TableCell>
+                        <TableCell className="py-3 text-right">
+                          <span className={cn(
+                            "font-mono text-sm",
+                            user.rapid_switch_count >= 3 && "text-red-600 font-bold"
+                          )}>
+                            {user.rapid_switch_count}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-3">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
+                              onClick={() => {
+                                const mockItem: LeaderboardItem = {
+                                  user_id: user.user_id,
+                                  username: user.username,
+                                  user_status: 1,
+                                  request_count: user.total_requests,
+                                  failure_requests: 0,
+                                  failure_rate: user.failure_rate / 100,
+                                  quota_used: 0,
+                                  prompt_tokens: 0,
+                                  completion_tokens: 0,
+                                  unique_ips: user.unique_ips,
+                                }
+                                openUserDialog(mockItem, '1h')
+                              }}
+                              title="查看详情"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-purple-500 hover:text-purple-600 hover:bg-purple-500/10"
+                              onClick={() => handleAiAssess(user.user_id)}
+                              disabled={aiAssessing === user.user_id || !aiConfig?.enabled}
+                              title="AI 评估"
+                            >
+                              {aiAssessing === user.user_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Activity className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                  <ShieldCheck className="h-12 w-12 mb-4 opacity-20" />
+                  <p>暂无可疑用户</p>
+                  <p className="text-xs mt-1">系统运行正常</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* AI 评估结果弹窗 */}
+          {aiAssessResult && (
+            <Card className="rounded-xl shadow-lg border-2 border-primary/20">
+              <CardHeader className="pb-3 border-b bg-primary/5">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-primary" />
+                    AI 评估结果
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => setAiAssessResult(null)}>
+                    关闭
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="text-sm text-muted-foreground">用户:</div>
+                  <div className="font-medium">{aiAssessResult.username} (ID: {aiAssessResult.user_id})</div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className={cn(
+                      "text-2xl font-bold",
+                      aiAssessResult.assessment.risk_score >= 8 ? "text-red-600" :
+                      aiAssessResult.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
+                    )}>
+                      {aiAssessResult.assessment.risk_score}/10
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">风险评分</div>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className="text-2xl font-bold">
+                      {(aiAssessResult.assessment.confidence * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">置信度</div>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className={cn(
+                      "text-lg font-bold",
+                      aiAssessResult.assessment.action === 'ban' ? "text-red-600" :
+                      aiAssessResult.assessment.action === 'warn' ? "text-amber-600" : "text-green-600"
+                    )}>
+                      {aiAssessResult.assessment.action === 'ban' ? '建议封禁' :
+                       aiAssessResult.assessment.action === 'warn' ? '风险告警' :
+                       aiAssessResult.assessment.action === 'monitor' ? '继续观察' : '正常'}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">AI 决策</div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 bg-muted/30">
+                  <div className="text-xs text-muted-foreground mb-1">AI 分析理由:</div>
+                  <div className="text-sm">{aiAssessResult.assessment.reason}</div>
+                </div>
+
+                {aiAssessResult.assessment.should_ban && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setBanConfirmDialog({
+                          open: true,
+                          type: 'ban',
+                          userId: aiAssessResult.user_id,
+                          username: aiAssessResult.username,
+                          reason: `[AI建议] ${aiAssessResult.assessment.reason}`,
+                          disableTokens: true,
+                          enableTokens: false,
+                        })
+                      }}
+                    >
+                      <ShieldBan className="h-4 w-4 mr-2" />
+                      执行封禁
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       {/* User IPs Dialog */}
       <Dialog open={userIpsDialogOpen} onOpenChange={setUserIpsDialogOpen}>
         <DialogContent className="max-w-2xl w-full max-h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
@@ -2088,7 +2838,7 @@ export function RealtimeRanking() {
                   {analysis.risk.risk_flags.length > 0 ? (
                     analysis.risk.risk_flags.map((f) => (
                       <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
-                        <AlertTriangle className="w-3 h-3 mr-1" /> {f}
+                        <AlertTriangle className="w-3 h-3 mr-1" /> {RISK_FLAG_LABELS[f] || f}
                       </Badge>
                     ))
                   ) : (
@@ -2166,6 +2916,90 @@ export function RealtimeRanking() {
                     ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
                   </div>
                 </div>
+
+                {/* IP 切换分析 */}
+                {analysis.risk.ip_switch_analysis && analysis.risk.ip_switch_analysis.switch_count > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      IP 切换分析
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || analysis.risk.ip_switch_analysis.avg_ip_duration < 30) && (
+                        <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                      )}
+                    </h4>
+                    
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.switch_count}</div>
+                        <div className="text-xs text-muted-foreground">切换次数</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.rapid_switch_count}
+                        </div>
+                        <div className="text-xs text-muted-foreground">快速切换 (60s内)</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.avg_ip_duration}s
+                        </div>
+                        <div className="text-xs text-muted-foreground">平均停留</div>
+                      </div>
+                    </div>
+
+                    {/* 切换记录 */}
+                    {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-xs text-muted-foreground">最近切换记录:</div>
+                        <div className="rounded-lg border overflow-hidden max-h-[180px] overflow-y-auto">
+                          {analysis.risk.ip_switch_analysis.switch_details.slice(-8).reverse().map((detail, idx) => (
+                            <div 
+                              key={idx} 
+                              className={cn(
+                                "flex items-center justify-between px-2.5 py-1.5 text-xs border-b last:border-b-0",
+                                detail.interval <= 60 ? "bg-red-50/50 dark:bg-red-900/10" : "bg-background"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-muted-foreground whitespace-nowrap">{formatTime(detail.time)}</span>
+                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.from_ip}>{detail.from_ip}</code>
+                                <span className="text-muted-foreground">→</span>
+                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.to_ip}>{detail.to_ip}</code>
+                              </div>
+                              <div className={cn(
+                                "flex items-center gap-1 whitespace-nowrap ml-2",
+                                detail.interval <= 60 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+                              )}>
+                                {detail.interval <= 60 ? (
+                                  <AlertTriangle className="w-3 h-3" />
+                                ) : (
+                                  <ShieldCheck className="w-3 h-3" />
+                                )}
+                                <span>{detail.interval}s</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-3">
                   <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>

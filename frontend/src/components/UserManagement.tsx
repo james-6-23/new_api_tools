@@ -43,6 +43,22 @@ import { Progress } from './ui/progress'
 import { StatCard } from './StatCard'
 import { cn } from '../lib/utils'
 
+// IP切换分析类型
+interface IPSwitchDetail {
+  from_ip: string
+  to_ip: string
+  interval: number
+  time: number
+}
+
+interface IPSwitchAnalysis {
+  switch_count: number
+  rapid_switch_count: number
+  avg_ip_duration: number
+  min_switch_interval: number
+  switch_details: IPSwitchDetail[]
+}
+
 // 用户分析相关类型
 interface UserAnalysis {
   range: { start_time: number; end_time: number; window_seconds: number }
@@ -63,7 +79,7 @@ interface UserAnalysis {
     failure_rate: number
     empty_rate: number
   }
-  risk: { requests_per_minute: number; avg_quota_per_request: number; risk_flags: string[] }
+  risk: { requests_per_minute: number; avg_quota_per_request: number; risk_flags: string[]; ip_switch_analysis?: IPSwitchAnalysis }
   top_models: Array<{ model_name: string; requests: number; quota_used: number; success_requests: number; failure_requests: number; empty_count: number }>
   top_channels: Array<{ channel_id: number; channel_name: string; requests: number; quota_used: number }>
   top_ips: Array<{ ip: string; requests: number }>
@@ -71,6 +87,16 @@ interface UserAnalysis {
 }
 
 const WINDOW_LABELS: Record<string, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
+
+// 风险标签中文映射
+const RISK_FLAG_LABELS: Record<string, string> = {
+  'HIGH_RPM': '请求频率过高',
+  'MANY_IPS': '多IP访问',
+  'HIGH_FAILURE_RATE': '失败率过高',
+  'HIGH_EMPTY_RATE': '空回复率过高',
+  'IP_RAPID_SWITCH': 'IP快速切换',
+  'IP_HOPPING': 'IP跳动异常',
+}
 
 function formatAnalysisTime(ts: number) {
   if (!ts) return '-'
@@ -773,7 +799,7 @@ export function UserManagement() {
                   {analysis.risk.risk_flags.length > 0 ? (
                     analysis.risk.risk_flags.map((f) => (
                       <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
-                        <AlertTriangle className="w-3 h-3 mr-1" /> {f}
+                        <AlertTriangle className="w-3 h-3 mr-1" /> {RISK_FLAG_LABELS[f] || f}
                       </Badge>
                     ))
                   ) : (
@@ -859,6 +885,90 @@ export function UserManagement() {
                     ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
                   </div>
                 </div>
+
+                {/* IP 切换分析 */}
+                {analysis.risk.ip_switch_analysis && analysis.risk.ip_switch_analysis.switch_count > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      IP 切换分析
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || analysis.risk.ip_switch_analysis.avg_ip_duration < 30) && (
+                        <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                      )}
+                    </h4>
+                    
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.switch_count}</div>
+                        <div className="text-xs text-muted-foreground">切换次数</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.rapid_switch_count}
+                        </div>
+                        <div className="text-xs text-muted-foreground">快速切换 (60s内)</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.avg_ip_duration}s
+                        </div>
+                        <div className="text-xs text-muted-foreground">平均停留</div>
+                      </div>
+                    </div>
+
+                    {/* 切换记录 */}
+                    {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-xs text-muted-foreground">最近切换记录:</div>
+                        <div className="rounded-lg border overflow-hidden max-h-[180px] overflow-y-auto">
+                          {analysis.risk.ip_switch_analysis.switch_details.slice(-8).reverse().map((detail, idx) => (
+                            <div 
+                              key={idx} 
+                              className={cn(
+                                "flex items-center justify-between px-2.5 py-1.5 text-xs border-b last:border-b-0",
+                                detail.interval <= 60 ? "bg-red-50/50 dark:bg-red-900/10" : "bg-background"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-muted-foreground whitespace-nowrap">{formatAnalysisTime(detail.time)}</span>
+                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.from_ip}>{detail.from_ip}</code>
+                                <span className="text-muted-foreground">→</span>
+                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.to_ip}>{detail.to_ip}</code>
+                              </div>
+                              <div className={cn(
+                                "flex items-center gap-1 whitespace-nowrap ml-2",
+                                detail.interval <= 60 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+                              )}>
+                                {detail.interval <= 60 ? (
+                                  <AlertTriangle className="w-3 h-3" />
+                                ) : (
+                                  <ShieldCheck className="w-3 h-3" />
+                                )}
+                                <span>{detail.interval}s</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Recent Logs */}
                 <div className="space-y-3">

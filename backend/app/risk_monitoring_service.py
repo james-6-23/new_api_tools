@@ -317,6 +317,19 @@ class RiskMonitoringService:
         """
         recent_logs = self.db.execute(recent_sql, params)
 
+        # Query 5: IP切换频率分析 - 获取按时间排序的IP序列
+        ip_sequence_sql = """
+            SELECT created_at, ip
+            FROM logs
+            WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time
+                AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
+            ORDER BY created_at ASC
+        """
+        ip_sequence = self.db.execute(ip_sequence_sql, params) or []
+        
+        # 分析IP切换模式
+        ip_switch_analysis = self._analyze_ip_switches(ip_sequence)
+
         # Calculate derived metrics
         total_requests = int(summary.get("total_requests") or 0)
         success_requests = int(summary.get("success_requests") or 0)
@@ -339,6 +352,12 @@ class RiskMonitoringService:
             risk_flags.append("HIGH_FAILURE_RATE")
         if empty_rate >= 0.3 and success_requests >= 20:
             risk_flags.append("HIGH_EMPTY_RATE")
+        
+        # IP切换频率风险检测
+        if ip_switch_analysis.get("rapid_switch_count", 0) >= 3:
+            risk_flags.append("IP_RAPID_SWITCH")
+        if ip_switch_analysis.get("avg_ip_duration", float('inf')) < 30 and ip_switch_analysis.get("switch_count", 0) >= 3:
+            risk_flags.append("IP_HOPPING")
 
         return {
             "range": {"start_time": start_time, "end_time": now, "window_seconds": window_seconds},
@@ -371,6 +390,7 @@ class RiskMonitoringService:
                 "requests_per_minute": requests_per_minute,
                 "avg_quota_per_request": avg_quota_per_request,
                 "risk_flags": risk_flags,
+                "ip_switch_analysis": ip_switch_analysis,
             },
             "top_models": [
                 {
@@ -414,6 +434,98 @@ class RiskMonitoringService:
                 }
                 for r in (recent_logs or [])
             ],
+        }
+
+    def _analyze_ip_switches(self, ip_sequence: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        分析IP切换模式，检测异常的IP跳动行为。
+        
+        正常行为：几分钟或十几分钟换一次IP（机场自动选择）
+        异常行为：十几秒甚至几秒内频繁切换IP
+        
+        返回:
+        - switch_count: 总切换次数
+        - rapid_switch_count: 快速切换次数（60秒内切换）
+        - avg_ip_duration: 平均每个IP的使用时长（秒）
+        - min_switch_interval: 最短切换间隔（秒）
+        - switch_details: 切换详情列表
+        """
+        if len(ip_sequence) < 2:
+            return {
+                "switch_count": 0,
+                "rapid_switch_count": 0,
+                "avg_ip_duration": 0,
+                "min_switch_interval": 0,
+                "switch_details": [],
+            }
+        
+        switches = []  # 记录每次切换的时间间隔
+        ip_durations = {}  # 记录每个IP的使用时长
+        rapid_switches = 0  # 60秒内的快速切换次数
+        
+        prev_ip = None
+        prev_time = None
+        ip_start_time = None
+        
+        for row in ip_sequence:
+            current_ip = row.get("ip")
+            current_time = int(row.get("created_at") or 0)
+            
+            if not current_ip or not current_time:
+                continue
+            
+            if prev_ip is None:
+                # 第一条记录
+                prev_ip = current_ip
+                prev_time = current_time
+                ip_start_time = current_time
+                continue
+            
+            if current_ip != prev_ip:
+                # IP发生切换
+                switch_interval = current_time - prev_time
+                switches.append({
+                    "from_ip": prev_ip,
+                    "to_ip": current_ip,
+                    "interval": switch_interval,
+                    "time": current_time,
+                })
+                
+                # 统计快速切换（60秒内）
+                if switch_interval <= 60:
+                    rapid_switches += 1
+                
+                # 记录上一个IP的使用时长
+                ip_duration = current_time - ip_start_time
+                if prev_ip not in ip_durations:
+                    ip_durations[prev_ip] = []
+                ip_durations[prev_ip].append(ip_duration)
+                
+                # 重置为新IP
+                prev_ip = current_ip
+                ip_start_time = current_time
+            
+            prev_time = current_time
+        
+        # 计算统计数据
+        switch_count = len(switches)
+        min_switch_interval = min((s["interval"] for s in switches), default=0)
+        
+        # 计算平均IP使用时长
+        all_durations = []
+        for durations in ip_durations.values():
+            all_durations.extend(durations)
+        avg_ip_duration = sum(all_durations) / len(all_durations) if all_durations else 0
+        
+        # 只返回最近的10次切换详情
+        recent_switches = switches[-10:] if switches else []
+        
+        return {
+            "switch_count": switch_count,
+            "rapid_switch_count": rapid_switches,
+            "avg_ip_duration": round(avg_ip_duration, 1),
+            "min_switch_interval": min_switch_interval,
+            "switch_details": recent_switches,
         }
 
 

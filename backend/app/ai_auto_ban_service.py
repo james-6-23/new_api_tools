@@ -1,0 +1,701 @@
+"""
+AI 自动封禁服务 - NewAPI Middleware Tool
+
+基于 OpenAI API 的智能风险评估和自动封禁功能。
+
+功能：
+- 定时扫描可疑用户
+- 调用 AI 进行风险评估
+- 根据 AI 决策自动封禁或告警
+- 完整的审计日志记录
+- 支持前端配置 API 地址、Key 和模型
+
+安全机制：
+- 置信度阈值（< 0.8 转人工）
+- 风险分阈值（< 8 只告警不封禁）
+- 白名单保护（管理员/VIP）
+- 冷却期（24小时内不重复评估）
+"""
+import json
+import time
+import asyncio
+import httpx
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+from enum import Enum
+
+from .logger import logger
+from .local_storage import get_local_storage
+from .risk_monitoring_service import get_risk_monitoring_service, WINDOW_SECONDS
+from .user_management_service import get_user_management_service
+
+
+class AIBanAction(Enum):
+    """AI 决策动作"""
+    BAN = "ban"              # 立即封禁
+    WARN = "warn"            # 仅告警
+    MONITOR = "monitor"      # 继续观察
+    SKIP = "skip"            # 跳过（白名单等）
+
+
+@dataclass
+class AIAssessmentResult:
+    """AI 评估结果"""
+    should_ban: bool
+    risk_score: int          # 1-10
+    confidence: float        # 0.0-1.0
+    reason: str              # 封禁/告警理由
+    action: AIBanAction
+    raw_response: Optional[str] = None
+
+
+# 配置常量
+AI_ASSESSMENT_COOLDOWN = 24 * 3600  # 24小时冷却期
+RISK_SCORE_BAN_THRESHOLD = 8        # 风险分 >= 8 才自动封禁
+CONFIDENCE_THRESHOLD = 0.8          # 置信度 >= 0.8 才自动执行
+DEFAULT_AI_MODEL = "gpt-4o-mini"    # 默认使用的模型
+DEFAULT_BASE_URL = "https://api.openai.com/v1"  # 默认API地址
+AI_CONFIG_KEY = "ai_ban_config"     # 本地存储配置键名
+
+
+class AIAutoBanService:
+    """AI 自动封禁服务"""
+
+    def __init__(self):
+        self._storage = get_local_storage()
+        self._risk_service = get_risk_monitoring_service()
+        self._user_service = get_user_management_service()
+        self._reload_config()
+
+    def _reload_config(self):
+        """从本地存储加载配置（仅从SQLite读取，不再使用环境变量）"""
+        stored_config = self._storage.get_data(AI_CONFIG_KEY) or {}
+        
+        # 所有配置仅从本地存储读取
+        self._openai_api_key = stored_config.get("api_key", "")
+        self._openai_base_url = stored_config.get("base_url", DEFAULT_BASE_URL)
+        self._ai_model = stored_config.get("model", DEFAULT_AI_MODEL)
+        self._enabled = stored_config.get("enabled", False)
+        self._dry_run = stored_config.get("dry_run", True)
+        
+        # 白名单用户ID（从本地存储读取）
+        whitelist_ids = stored_config.get("whitelist_ids", [])
+        if isinstance(whitelist_ids, str):
+            self._whitelist_ids = set(
+                int(x.strip()) for x in whitelist_ids.split(",") if x.strip().isdigit()
+            )
+        elif isinstance(whitelist_ids, list):
+            self._whitelist_ids = set(int(x) for x in whitelist_ids if str(x).isdigit())
+        else:
+            self._whitelist_ids = set()
+
+    def save_config(self, config: Dict[str, Any]) -> bool:
+        """保存配置到本地存储"""
+        try:
+            current = self._storage.get_data(AI_CONFIG_KEY) or {}
+            current.update(config)
+            self._storage.set_data(AI_CONFIG_KEY, current)
+            self._reload_config()
+            logger.business("AI封禁配置已更新", **{k: v if k != "api_key" else "***" for k, v in config.items()})
+            return True
+        except Exception as e:
+            logger.error(f"保存AI封禁配置失败: {e}")
+            return False
+
+    def get_saved_config(self) -> Dict[str, Any]:
+        """获取保存的配置"""
+        return self._storage.get_data(AI_CONFIG_KEY) or {}
+
+    def is_enabled(self) -> bool:
+        """检查服务是否启用"""
+        return self._enabled and bool(self._openai_api_key)
+
+    def is_dry_run(self) -> bool:
+        """检查是否为试运行模式"""
+        return self._dry_run
+
+    def _is_in_cooldown(self, user_id: int) -> bool:
+        """检查用户是否在冷却期内"""
+        key = f"ai_ban_cooldown:{user_id}"
+        last_check = self._storage.cache_get(key)
+        return last_check is not None
+
+    def _set_cooldown(self, user_id: int):
+        """设置用户冷却期"""
+        key = f"ai_ban_cooldown:{user_id}"
+        self._storage.cache_set(key, int(time.time()), ttl=AI_ASSESSMENT_COOLDOWN)
+
+    def _is_whitelisted(self, user_id: int, user_role: int = 0) -> bool:
+        """检查用户是否在白名单中"""
+        # 管理员角色（role >= 10）自动白名单
+        if user_role >= 10:
+            return True
+        return user_id in self._whitelist_ids
+
+    def get_suspicious_users(self, window: str = "1h", limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        获取可疑用户列表（触发风险阈值的用户）
+        
+        筛选条件（满足任一）：
+        - RPM >= 100
+        - IP快速切换 >= 3
+        - 空回复率 >= 80%
+        - 失败率 >= 30%
+        - 多项风险标签叠加
+        """
+        window_seconds = WINDOW_SECONDS.get(window, 3600)
+        
+        # 获取排行榜数据
+        leaderboards = self._risk_service.get_leaderboards(
+            windows=[window],
+            limit=50,
+            sort_by="requests",
+            use_cache=False,
+        )
+        
+        candidates = leaderboards.get("windows", {}).get(window, [])
+        suspicious = []
+        
+        for user in candidates:
+            user_id = user.get("user_id")
+            if not user_id:
+                continue
+                
+            # 跳过冷却期内的用户
+            if self._is_in_cooldown(user_id):
+                continue
+            
+            # 获取详细分析
+            analysis = self._risk_service.get_user_analysis(user_id, window_seconds)
+            risk_flags = analysis.get("risk", {}).get("risk_flags", [])
+            
+            # 判断是否可疑
+            is_suspicious = False
+            
+            # 条件1: 有任何风险标签
+            if risk_flags:
+                is_suspicious = True
+            
+            # 条件2: RPM过高
+            rpm = analysis.get("risk", {}).get("requests_per_minute", 0)
+            if rpm >= 100:
+                is_suspicious = True
+            
+            # 条件3: 空回复率过高
+            empty_rate = analysis.get("summary", {}).get("empty_rate", 0)
+            if empty_rate >= 0.8:
+                is_suspicious = True
+            
+            if is_suspicious:
+                suspicious.append({
+                    "user_id": user_id,
+                    "username": user.get("username", ""),
+                    "analysis": analysis,
+                })
+                
+                if len(suspicious) >= limit:
+                    break
+        
+        return suspicious
+
+    def _build_assessment_prompt(self, analysis: Dict[str, Any]) -> str:
+        """构建 AI 评估 Prompt"""
+        summary = analysis.get("summary", {})
+        risk = analysis.get("risk", {})
+        ip_switch = risk.get("ip_switch_analysis", {})
+        user = analysis.get("user", {})
+        
+        return f"""你是一个 API 风控系统的 AI 助手。请分析以下用户行为数据，判断是否应该封禁该用户。
+
+## 用户信息
+- 用户ID: {user.get('id')}
+- 用户名: {user.get('username')}
+- 用户组: {user.get('group') or '默认'}
+
+## 行为数据（最近1小时）
+- 请求总数: {summary.get('total_requests', 0)}
+- 成功请求: {summary.get('success_requests', 0)}
+- 失败请求: {summary.get('failure_requests', 0)}
+- 失败率: {summary.get('failure_rate', 0) * 100:.1f}%
+- 空回复数: {summary.get('empty_count', 0)}
+- 空回复率: {summary.get('empty_rate', 0) * 100:.1f}%
+- 使用模型数: {summary.get('unique_models', 0)}
+- 使用令牌数: {summary.get('unique_tokens', 0)}
+
+## 风险指标
+- 每分钟请求数 (RPM): {risk.get('requests_per_minute', 0):.1f}
+- 平均每请求消耗: ${risk.get('avg_quota_per_request', 0) / 500000:.4f}
+- 已触发风险标签: {risk.get('risk_flags', [])}
+
+## IP 行为分析
+- 使用 IP 数量: {summary.get('unique_ips', 0)}
+- IP 切换次数: {ip_switch.get('switch_count', 0)}
+- 快速切换次数（60秒内）: {ip_switch.get('rapid_switch_count', 0)}
+- 平均 IP 停留时间: {ip_switch.get('avg_ip_duration', 0)} 秒
+- 最短切换间隔: {ip_switch.get('min_switch_interval', 0)} 秒
+
+## 判断标准
+1. 正常机场用户 IP 切换间隔通常 > 5 分钟
+2. 几秒内频繁切换 IP 是明显异常行为
+3. 高空回复率 + 高请求量 = 疑似 API 滥用/探测
+4. 多项风险标签叠加时风险更高
+5. 低请求量用户即使有异常也风险较低
+
+## 请返回 JSON 格式（严格遵循）:
+```json
+{{
+  "should_ban": true或false,
+  "risk_score": 1到10的整数,
+  "confidence": 0.0到1.0的小数,
+  "reason": "封禁或放行理由（中文，100字以内）"
+}}
+```
+
+注意：
+- risk_score >= 8 且 confidence >= 0.8 时才会自动封禁
+- 请谨慎判断，避免误封正常用户
+- 只返回 JSON，不要有其他内容"""
+
+    async def _call_openai_api(self, prompt: str) -> Optional[str]:
+        """调用 OpenAI API"""
+        if not self._openai_api_key:
+            logger.warning("AI自动封禁: OpenAI API Key 未配置")
+            return None
+        
+        headers = {
+            "Authorization": f"Bearer {self._openai_api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": self._ai_model,
+            "messages": [
+                {"role": "system", "content": "你是一个专业的 API 风控分析师，擅长识别异常用户行为。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 500,
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self._openai_base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"AI自动封禁: OpenAI API 请求失败 - {e.response.status_code}: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"AI自动封禁: OpenAI API 调用异常 - {e}")
+            return None
+
+    async def fetch_models(self, base_url: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取可用模型列表 (OpenAI Compatible /v1/models)
+        
+        Args:
+            base_url: API地址，不传则使用当前配置
+            api_key: API Key，不传则使用当前配置
+        """
+        url = (base_url or self._openai_base_url).rstrip("/")
+        key = api_key or self._openai_api_key
+        
+        if not key:
+            return {"success": False, "message": "API Key 未配置", "models": []}
+        
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(f"{url}/models", headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                # 解析模型列表
+                models = []
+                raw_models = data.get("data", [])
+                for m in raw_models:
+                    model_id = m.get("id", "")
+                    if model_id:
+                        models.append({
+                            "id": model_id,
+                            "owned_by": m.get("owned_by", ""),
+                            "created": m.get("created", 0),
+                        })
+                
+                # 按模型名排序
+                models.sort(key=lambda x: x["id"])
+                
+                return {
+                    "success": True,
+                    "message": f"获取到 {len(models)} 个模型",
+                    "models": models,
+                }
+        except httpx.HTTPStatusError as e:
+            return {
+                "success": False,
+                "message": f"请求失败: {e.response.status_code}",
+                "models": [],
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "连接失败，请检查 API 地址",
+                "models": [],
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"获取模型列表失败: {str(e)}",
+                "models": [],
+            }
+
+    async def test_model(
+        self,
+        model: str,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        测试指定模型是否可用
+        
+        Args:
+            model: 模型名称
+            base_url: API地址，不传则使用当前配置
+            api_key: API Key，不传则使用当前配置
+        """
+        url = (base_url or self._openai_base_url).rstrip("/")
+        key = api_key or self._openai_api_key
+        
+        if not key:
+            return {"success": False, "message": "API Key 未配置"}
+        
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": "请回复 OK"},
+            ],
+            "max_tokens": 10,
+        }
+        
+        try:
+            start_time = time.time()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                elapsed = time.time() - start_time
+                
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = data.get("usage", {})
+                
+                return {
+                    "success": True,
+                    "message": "连接成功",
+                    "model": model,
+                    "response": content[:100],
+                    "latency_ms": int(elapsed * 1000),
+                    "usage": {
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "completion_tokens": usage.get("completion_tokens", 0),
+                    },
+                }
+        except httpx.HTTPStatusError as e:
+            error_detail = ""
+            try:
+                error_data = e.response.json()
+                error_detail = error_data.get("error", {}).get("message", "")
+            except:
+                error_detail = e.response.text[:200]
+            return {
+                "success": False,
+                "message": f"请求失败 ({e.response.status_code}): {error_detail}",
+            }
+        except httpx.ConnectError:
+            return {
+                "success": False,
+                "message": "连接失败，请检查 API 地址",
+            }
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "message": "请求超时",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"测试失败: {str(e)}",
+            }
+
+    def _parse_ai_response(self, response: str) -> Optional[AIAssessmentResult]:
+        """解析 AI 响应"""
+        if not response:
+            return None
+        
+        try:
+            # 尝试提取 JSON
+            json_str = response
+            if "```json" in response:
+                json_str = response.split("```json")[1].split("```")[0]
+            elif "```" in response:
+                json_str = response.split("```")[1].split("```")[0]
+            
+            data = json.loads(json_str.strip())
+            
+            should_ban = bool(data.get("should_ban", False))
+            risk_score = int(data.get("risk_score", 1))
+            confidence = float(data.get("confidence", 0.0))
+            reason = str(data.get("reason", ""))
+            
+            # 确定动作
+            if should_ban and risk_score >= RISK_SCORE_BAN_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
+                action = AIBanAction.BAN
+            elif should_ban or risk_score >= 6:
+                action = AIBanAction.WARN
+            elif risk_score >= 4:
+                action = AIBanAction.MONITOR
+            else:
+                action = AIBanAction.SKIP
+            
+            return AIAssessmentResult(
+                should_ban=should_ban,
+                risk_score=risk_score,
+                confidence=confidence,
+                reason=reason,
+                action=action,
+                raw_response=response,
+            )
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.error(f"AI自动封禁: 解析响应失败 - {e}, 原始响应: {response[:200]}")
+            return None
+
+    async def assess_user(self, user_id: int, analysis: Dict[str, Any]) -> Optional[AIAssessmentResult]:
+        """
+        对单个用户进行 AI 风险评估
+        
+        Args:
+            user_id: 用户ID
+            analysis: 用户行为分析数据
+            
+        Returns:
+            AI 评估结果
+        """
+        user = analysis.get("user", {})
+        user_role = user.get("role", 0)
+        
+        # 检查白名单
+        if self._is_whitelisted(user_id, user_role):
+            return AIAssessmentResult(
+                should_ban=False,
+                risk_score=0,
+                confidence=1.0,
+                reason="白名单用户，跳过评估",
+                action=AIBanAction.SKIP,
+            )
+        
+        # 构建 prompt 并调用 AI
+        prompt = self._build_assessment_prompt(analysis)
+        response = await self._call_openai_api(prompt)
+        
+        if not response:
+            return None
+        
+        return self._parse_ai_response(response)
+
+    async def process_user(
+        self,
+        user_id: int,
+        username: str,
+        analysis: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        处理单个可疑用户
+        
+        Returns:
+            处理结果
+        """
+        result = {
+            "user_id": user_id,
+            "username": username,
+            "action": None,
+            "assessment": None,
+            "executed": False,
+            "message": "",
+        }
+        
+        # AI 评估
+        assessment = await self.assess_user(user_id, analysis)
+        if not assessment:
+            result["message"] = "AI 评估失败"
+            return result
+        
+        result["assessment"] = {
+            "should_ban": assessment.should_ban,
+            "risk_score": assessment.risk_score,
+            "confidence": assessment.confidence,
+            "reason": assessment.reason,
+            "action": assessment.action.value,
+        }
+        result["action"] = assessment.action.value
+        
+        # 设置冷却期
+        self._set_cooldown(user_id)
+        
+        # 根据决策执行
+        if assessment.action == AIBanAction.BAN:
+            if self._dry_run:
+                result["message"] = f"[试运行] 建议封禁: {assessment.reason}"
+                result["executed"] = False
+            else:
+                # 执行封禁
+                ban_result = self._user_service.ban_user(
+                    user_id=user_id,
+                    reason=f"[AI自动封禁] {assessment.reason}",
+                    disable_tokens=True,
+                    operator="AI自动封禁",
+                    context={
+                        "source": "ai_auto_ban",
+                        "risk_score": assessment.risk_score,
+                        "confidence": assessment.confidence,
+                        "ai_reason": assessment.reason,
+                    },
+                )
+                result["executed"] = ban_result.get("success", False)
+                result["message"] = ban_result.get("message", "")
+        
+        elif assessment.action == AIBanAction.WARN:
+            result["message"] = f"风险告警: {assessment.reason}"
+            # 记录告警日志
+            self._storage.add_security_audit(
+                action="ai_warn",
+                user_id=user_id,
+                username=username,
+                operator="AI自动封禁",
+                reason=assessment.reason,
+                context={
+                    "source": "ai_auto_ban",
+                    "risk_score": assessment.risk_score,
+                    "confidence": assessment.confidence,
+                },
+            )
+        
+        elif assessment.action == AIBanAction.MONITOR:
+            result["message"] = f"继续观察: {assessment.reason}"
+        
+        else:
+            result["message"] = f"跳过: {assessment.reason}"
+        
+        return result
+
+    async def run_scan(self, window: str = "1h", limit: int = 10) -> Dict[str, Any]:
+        """
+        执行一次扫描
+        
+        Args:
+            window: 时间窗口
+            limit: 最大处理用户数
+            
+        Returns:
+            扫描结果
+        """
+        if not self.is_enabled():
+            return {
+                "success": False,
+                "message": "AI 自动封禁服务未启用",
+                "enabled": False,
+            }
+        
+        start_time = time.time()
+        results = []
+        
+        # 获取可疑用户
+        suspicious_users = self.get_suspicious_users(window=window, limit=limit)
+        
+        for user_data in suspicious_users:
+            user_id = user_data["user_id"]
+            username = user_data["username"]
+            analysis = user_data["analysis"]
+            
+            try:
+                result = await self.process_user(user_id, username, analysis)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"AI自动封禁: 处理用户 {user_id} 失败 - {e}")
+                results.append({
+                    "user_id": user_id,
+                    "username": username,
+                    "action": "error",
+                    "message": str(e),
+                })
+        
+        elapsed = time.time() - start_time
+        
+        # 统计
+        stats = {
+            "total_scanned": len(suspicious_users),
+            "total_processed": len(results),
+            "banned": sum(1 for r in results if r.get("action") == "ban" and r.get("executed")),
+            "warned": sum(1 for r in results if r.get("action") == "warn"),
+            "skipped": sum(1 for r in results if r.get("action") in ["skip", "monitor"]),
+            "errors": sum(1 for r in results if r.get("action") == "error"),
+        }
+        
+        logger.business(
+            "AI自动封禁扫描完成",
+            window=window,
+            dry_run=self._dry_run,
+            **stats,
+            elapsed=f"{elapsed:.2f}s",
+        )
+        
+        return {
+            "success": True,
+            "dry_run": self._dry_run,
+            "window": window,
+            "elapsed_seconds": round(elapsed, 2),
+            "stats": stats,
+            "results": results,
+        }
+
+    def get_config(self) -> Dict[str, Any]:
+        """获取当前配置"""
+        return {
+            "enabled": self._enabled,
+            "dry_run": self._dry_run,
+            "model": self._ai_model,
+            "base_url": self._openai_base_url,
+            "has_api_key": bool(self._openai_api_key),
+            "whitelist_count": len(self._whitelist_ids),
+            "risk_score_threshold": RISK_SCORE_BAN_THRESHOLD,
+            "confidence_threshold": CONFIDENCE_THRESHOLD,
+            "cooldown_hours": AI_ASSESSMENT_COOLDOWN // 3600,
+        }
+
+
+# 全局实例
+_ai_auto_ban_service: Optional[AIAutoBanService] = None
+
+
+def get_ai_auto_ban_service() -> AIAutoBanService:
+    """获取 AI 自动封禁服务实例"""
+    global _ai_auto_ban_service
+    if _ai_auto_ban_service is None:
+        _ai_auto_ban_service = AIAutoBanService()
+    return _ai_auto_ban_service

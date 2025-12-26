@@ -234,6 +234,7 @@ def include_routes(app: FastAPI):
     from .user_management_routes import router as user_management_router
     from .risk_monitoring_routes import router as risk_monitoring_router
     from .ip_monitoring_routes import router as ip_monitoring_router
+    from .ai_auto_ban_routes import router as ai_auto_ban_router
     app.include_router(router)
     app.include_router(auth_router)
     app.include_router(top_up_router)
@@ -243,6 +244,7 @@ def include_routes(app: FastAPI):
     app.include_router(user_management_router)
     app.include_router(risk_monitoring_router)
     app.include_router(ip_monitoring_router)
+    app.include_router(ai_auto_ban_router)
 
 
 # Create FastAPI application
