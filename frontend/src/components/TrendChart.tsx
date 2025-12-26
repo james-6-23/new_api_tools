@@ -6,6 +6,7 @@ import { cn } from '../lib/utils'
 interface DailyTrend {
   date?: string
   hour?: string
+  timestamp?: number
   request_count: number
   quota_used: number
   unique_users?: number
@@ -24,14 +25,31 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return []
     const maxRequests = Math.max(...data.map(d => d.request_count), 1)
-    return data.map((d, i) => ({
-      ...d,
-      // Calculate normalized height (0-100)
-      height: (d.request_count / maxRequests) * 100,
-      // Format date/hour for display
-      displayDate: d.hour || (d.date ? d.date.slice(5) : ''), // "HH:MM" or "MM-DD"
-      x: i // original index
-    }))
+    return data.map((d, i) => {
+      // Format date/hour for display using local time if timestamp exists
+      let displayDate = ''
+      if (d.timestamp) {
+        const date = new Date(d.timestamp * 1000)
+        if (d.hour) {
+          // Hourly trend: Format as HH:MM
+          displayDate = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+        } else {
+          // Daily trend: Format as MM-DD
+          displayDate = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+        }
+      } else {
+        // Fallback to server string
+        displayDate = d.hour || (d.date ? d.date.slice(5) : '')
+      }
+
+      return {
+        ...d,
+        // Calculate normalized height (0-100)
+        height: (d.request_count / maxRequests) * 100,
+        displayDate,
+        x: i // original index
+      }
+    })
   }, [data])
 
   const maxVal = useMemo(() => Math.max(...data.map(d => d.request_count), 5), [data])
@@ -137,7 +155,11 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
                       <div className="bg-popover/95 backdrop-blur-sm text-popover-foreground text-xs rounded-lg shadow-xl border border-border p-3 min-w-[140px]">
                          <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
                             <Calendar className="w-3 h-3 text-muted-foreground" />
-                            {item.hour || item.date}
+                            {item.timestamp ? (
+                              item.hour 
+                                ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+                            ) : (item.hour || item.date)}
                          </div>
                          <div className="space-y-1 mt-2">
                             <div className="flex justify-between items-center gap-4">

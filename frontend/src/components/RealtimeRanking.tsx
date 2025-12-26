@@ -390,7 +390,7 @@ export function RealtimeRanking() {
       cooldown_remaining: number
     }
   } | null>(null)
-  
+
   // AI 审查记录
   const [aiAuditLogs, setAiAuditLogs] = useState<Array<{
     id: number
@@ -411,7 +411,7 @@ export function RealtimeRanking() {
   }>>([])
   const [aiAuditLogsTotal, setAiAuditLogsTotal] = useState(0)
   const [aiAuditLogsLoading, setAiAuditLogsLoading] = useState(false)
-  
+
   const [aiSuspiciousUsers, setAiSuspiciousUsers] = useState<Array<{
     user_id: number
     username: string
@@ -795,7 +795,7 @@ export function RealtimeRanking() {
       } else {
         showToast('error', res.message || '测试失败')
       }
-      
+
       // 3秒后自动清除测试结果
       setTimeout(() => {
         setAiTestResult(null)
@@ -1466,36 +1466,42 @@ export function RealtimeRanking() {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/30 hover:bg-muted/30 border-b">
-                          <TableHead className="w-[80px] text-xs uppercase tracking-wider">ID</TableHead>
-                          <TableHead className="w-[180px] text-xs uppercase tracking-wider">用户详情</TableHead>
-                          <TableHead className="w-[160px] text-xs uppercase tracking-wider">封禁时间</TableHead>
-                          <TableHead className="w-[120px] text-xs uppercase tracking-wider">操作者</TableHead>
+                          <TableHead className="w-[70px] text-xs uppercase tracking-wider">ID</TableHead>
+                          <TableHead className="w-[200px] text-xs uppercase tracking-wider">用户详情</TableHead>
+                          <TableHead className="w-[130px] text-xs uppercase tracking-wider">封禁时间</TableHead>
+                          <TableHead className="w-[100px] text-xs uppercase tracking-wider">操作者</TableHead>
                           <TableHead className="text-xs uppercase tracking-wider">封禁原因</TableHead>
-                          <TableHead className="w-[120px] text-right text-xs uppercase tracking-wider">操作</TableHead>
+                          <TableHead className="w-[100px] text-right text-xs uppercase tracking-wider">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {bannedUsers.length ? bannedUsers.map((user) => {
                           const bannedDate = user.banned_at ? new Date(user.banned_at * 1000) : null
-                          
+
                           return (
-                            <TableRow key={user.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
+                            <TableRow
+                              key={user.id}
+                              className="group transition-all duration-200 border-b last:border-0 relative overflow-hidden hover:bg-red-50/20 dark:hover:bg-red-950/5"
+                            >
+                              {/* 侧边风险指指示条 */}
+                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-500/60" />
+
                               {/* ID 列 */}
-                              <TableCell className="py-5 align-top w-[80px]">
-                                <span className="font-mono text-xs font-bold text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                              <TableCell className="py-4 pl-6">
+                                <span className="font-mono text-xs font-bold text-muted-foreground bg-muted/50 px-2 py-0.5 rounded">
                                   #{user.id}
                                 </span>
                               </TableCell>
-                              
+
                               {/* 用户详情列 */}
-                              <TableCell className="py-5 align-top w-[240px]">
-                                <div className="flex items-start gap-3">
-                                  <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-600 border border-slate-200 shadow-sm shrink-0">
+                              <TableCell className="py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 rounded-xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-sm font-bold text-red-600 border border-red-100 dark:border-red-900/30 shadow-sm shrink-0">
                                     {(user.username)[0]?.toUpperCase()}
                                   </div>
-                                  <div className="flex flex-col min-w-0 gap-1">
-                                    <div
-                                      className="flex items-center gap-1.5 cursor-pointer group/name"
+                                  <div className="flex flex-col min-w-0">
+                                    <span
+                                      className="text-sm font-bold text-foreground truncate max-w-[150px] cursor-pointer hover:text-primary transition-colors leading-tight"
                                       onClick={() => {
                                         const mockItem: LeaderboardItem = {
                                           user_id: user.id,
@@ -1512,35 +1518,28 @@ export function RealtimeRanking() {
                                         openUserDialog(mockItem, '24h')
                                       }}
                                     >
-                                      <span className="text-sm font-bold text-foreground truncate group-hover/name:text-primary transition-colors">
-                                        {user.username}
-                                      </span>
-                                    </div>
-                                    {user.display_name && user.display_name !== user.username && (
-                                      <span className="text-xs text-muted-foreground truncate">
-                                        {user.display_name}
-                                      </span>
-                                    )}
+                                      {user.username}
+                                    </span>
                                     <div className="flex items-center gap-2 mt-1">
-                                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-mono">
-                                        Reqs: {formatNumber(user.request_count)}
+                                      <span className="text-[10px] text-slate-500 font-mono font-bold px-1.5 py-0.5 bg-slate-100 rounded">
+                                        {formatNumber(user.request_count)} REQS
                                       </span>
-                                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-mono">
-                                        Quota: {formatQuota(user.used_quota)}
+                                      <span className="text-[10px] text-slate-500 font-mono font-bold px-1.5 py-0.5 bg-slate-100 rounded">
+                                        {formatQuota(user.used_quota)}
                                       </span>
                                     </div>
                                   </div>
                                 </div>
                               </TableCell>
-                              
+
                               {/* 封禁时间列 */}
-                              <TableCell className="py-5 align-top w-[140px]">
+                              <TableCell className="py-4">
                                 {bannedDate ? (
-                                  <div className="flex flex-col">
-                                    <span className="font-mono text-sm font-semibold text-foreground tracking-tight">
-                                      {bannedDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-mono text-sm font-bold text-foreground tabular-nums">
+                                      {bannedDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                                     </span>
-                                    <span className="text-xs text-muted-foreground mt-1 font-medium">
+                                    <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
                                       {bannedDate.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
                                     </span>
                                   </div>
@@ -1548,39 +1547,39 @@ export function RealtimeRanking() {
                                   <span className="text-muted-foreground">-</span>
                                 )}
                               </TableCell>
-                              
+
                               {/* 操作者列 */}
-                              <TableCell className="py-5 align-top w-[120px]">
+                              <TableCell className="py-4">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-200 shrink-0">
-                                    {(user.ban_operator || '系')[0].toUpperCase()}
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500 border border-slate-200 shrink-0">
+                                    {(user.ban_operator || 'S')[0].toUpperCase()}
                                   </div>
-                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                                    {user.ban_operator || '系统'}
+                                  <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 truncate">
+                                    {user.ban_operator || 'System'}
                                   </span>
                                 </div>
                               </TableCell>
-                              
+
                               {/* 封禁原因列 */}
-                              <TableCell className="py-5 align-top">
+                              <TableCell className="py-4">
                                 <div className="flex flex-wrap items-center gap-2">
                                   {renderReasonBadge(user.ban_reason)}
                                   {user.ban_context?.source && (
-                                    <Badge variant="secondary" className="text-xs h-6 font-medium px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
-                                      {user.ban_context.source === 'risk_center' ? '自动' :
-                                        user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
+                                    <Badge variant="secondary" className="text-[10px] h-5 font-bold px-2 bg-slate-100 text-slate-600 border-slate-200/50">
+                                      {user.ban_context.source === 'risk_center' ? 'AUTO' :
+                                        user.ban_context.source === 'ip_monitoring' ? 'IP-MON' : user.ban_context.source.toUpperCase()}
                                     </Badge>
                                   )}
                                 </div>
                               </TableCell>
-                              
+
                               {/* 操作列 */}
-                              <TableCell className="py-5 align-top text-right">
-                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <TableCell className="py-4 text-right pr-6">
+                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all duration-200">
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    className="h-8 bg-white hover:bg-green-50 text-green-600 hover:text-green-700 border-green-200 hover:border-green-300 shadow-sm transition-all"
+                                    className="h-8 rounded-full bg-white hover:bg-green-50 text-green-600 hover:text-green-700 border-green-200 hover:border-green-300 shadow-sm transition-all px-4 font-bold text-xs"
                                     disabled={mutating}
                                     onClick={() => {
                                       setBanConfirmDialog({
@@ -1600,7 +1599,7 @@ export function RealtimeRanking() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                                    className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/10 transition-all rounded-full"
                                     onClick={() => {
                                       const mockItem: LeaderboardItem = {
                                         user_id: user.id,
@@ -1709,12 +1708,12 @@ export function RealtimeRanking() {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/30 hover:bg-muted/30 border-b">
-                          <TableHead className="w-[160px] text-xs uppercase tracking-wider">时间</TableHead>
-                          <TableHead className="w-[100px] text-xs uppercase tracking-wider">动作</TableHead>
-                          <TableHead className="w-[160px] text-xs uppercase tracking-wider">受影响用户</TableHead>
-                          <TableHead className="w-[120px] text-xs uppercase tracking-wider">操作者</TableHead>
-                          <TableHead className="text-xs uppercase tracking-wider">原因与指标</TableHead>
-                          <TableHead className="w-[80px] text-right text-xs uppercase tracking-wider">操作</TableHead>
+                          <TableHead className="w-[140px] text-xs uppercase tracking-wider font-semibold">日志时间</TableHead>
+                          <TableHead className="w-[100px] text-xs uppercase tracking-wider font-semibold text-center">审计动作</TableHead>
+                          <TableHead className="w-[200px] text-xs uppercase tracking-wider font-semibold">目标用户</TableHead>
+                          <TableHead className="w-[140px] text-xs uppercase tracking-wider font-semibold">执行人</TableHead>
+                          <TableHead className="text-xs uppercase tracking-wider font-semibold">分析详情与风控指标</TableHead>
+                          <TableHead className="w-[60px] text-right text-xs uppercase tracking-wider font-semibold">操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1724,51 +1723,66 @@ export function RealtimeRanking() {
                           const dateObj = new Date(r.created_at * 1000)
 
                           return (
-                            <TableRow key={r.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
+                            <TableRow
+                              key={r.id}
+                              className={cn(
+                                "group transition-all duration-200 border-b last:border-0 relative overflow-hidden",
+                                r.action === 'ban' ? "hover:bg-red-50/30 dark:hover:bg-red-950/10" : "hover:bg-green-50/30 dark:hover:bg-green-950/10"
+                              )}
+                            >
+                              {/* 侧边状态指示条 */}
+                              <div className={cn(
+                                "absolute left-0 top-0 bottom-0 w-1",
+                                r.action === 'ban' ? "bg-red-500/80" : "bg-green-500/80"
+                              )} />
+
                               {/* 时间列 */}
-                              <TableCell className="py-5 align-top w-[140px]">
-                                <div className="flex flex-col">
-                                  <span className="font-mono text-sm font-semibold text-foreground tracking-tight">
+                              <TableCell className="py-4 pl-6">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="font-mono text-sm font-bold text-foreground tabular-nums">
                                     {dateObj.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                   </span>
-                                  <span className="text-xs text-muted-foreground mt-1 font-medium">
-                                    {dateObj.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
+                                  <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                                    {dateObj.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-')}
                                   </span>
                                 </div>
                               </TableCell>
-                              
+
                               {/* 动作列 */}
-                              <TableCell className="py-5 align-top w-[110px]">
-                                <div className="flex flex-col items-start gap-2">
+                              <TableCell className="py-4 text-center">
+                                <div className="flex flex-col items-center gap-1.5">
                                   {r.action === 'ban' ? (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 shadow-sm">
-                                      <ShieldBan className="w-4 h-4" />
-                                      <span className="text-xs font-bold">封禁</span>
+                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-100/50 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200/50 dark:border-red-800/50 shadow-sm">
+                                      <ShieldBan className="w-3.5 h-3.5" />
+                                      <span className="text-[11px] font-bold">封禁</span>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 border border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30 shadow-sm">
-                                      <ShieldCheck className="w-4 h-4" />
-                                      <span className="text-xs font-bold">解封</span>
+                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-100/50 text-green-700 dark:bg-green-900/30 dark:text-green-400 border border-green-200/50 dark:border-green-800/50 shadow-sm">
+                                      <ShieldCheck className="w-3.5 h-3.5" />
+                                      <span className="text-[11px] font-bold">解封</span>
                                     </div>
                                   )}
                                   {isTokenBan && (
-                                    <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 ml-0.5">
-                                      令牌级
+                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200/40 uppercase tracking-tighter">
+                                      Token Level
                                     </span>
                                   )}
                                 </div>
                               </TableCell>
 
                               {/* 用户列 */}
-                              <TableCell className="py-5 align-top w-[180px]">
+                              <TableCell className="py-4">
                                 <div className="flex flex-col gap-2">
                                   <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-600 border border-slate-200 shadow-sm shrink-0">
+                                    <div className={cn(
+                                      "w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold border shadow-sm shrink-0",
+                                      r.action === 'ban' ? "bg-red-50 text-red-600 border-red-100" : "bg-green-50 text-green-600 border-green-100"
+                                    )}>
                                       {(r.username || `U`)[0]?.toUpperCase()}
                                     </div>
                                     <div className="flex flex-col min-w-0">
-                                      <span 
-                                        className="text-sm font-bold text-foreground truncate max-w-[130px] hover:text-primary cursor-pointer transition-colors leading-tight mb-0.5"
+                                      <span
+                                        className="text-sm font-bold text-foreground truncate max-w-[140px] hover:text-primary cursor-pointer transition-colors leading-tight"
                                         onClick={() => {
                                           const mockItem: LeaderboardItem = {
                                             user_id: r.user_id,
@@ -1787,14 +1801,16 @@ export function RealtimeRanking() {
                                       >
                                         {r.username || `User#${r.user_id}`}
                                       </span>
-                                      <span className="text-xs text-muted-foreground font-mono font-medium">ID: {r.user_id}</span>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono font-bold">ID: {r.user_id}</span>
+                                      </div>
                                     </div>
                                   </div>
-                                  
+
                                   {isTokenBan && tokenName && (
                                     <div className="flex items-center gap-2 pl-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                                      <code className="text-xs bg-muted/60 px-2 py-1 rounded border border-border/50 text-muted-foreground truncate max-w-[160px]" title={tokenName}>
+                                      <div className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                                      <code className="text-[10px] bg-orange-50/50 dark:bg-orange-950/20 px-2 py-0.5 rounded border border-orange-100/50 text-orange-700 dark:text-orange-400 truncate max-w-[150px] font-mono italic" title={tokenName}>
                                         {tokenName}
                                       </code>
                                     </div>
@@ -1803,79 +1819,80 @@ export function RealtimeRanking() {
                               </TableCell>
 
                               {/* 操作者列 */}
-                              <TableCell className="py-5 align-top w-[120px]">
+                              <TableCell className="py-4">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-xs font-bold text-indigo-600 border border-indigo-100 shrink-0">
-                                    {(r.operator || '系')[0].toUpperCase()}
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500 border border-slate-200 shrink-0">
+                                    {(r.operator || 'S')[0].toUpperCase()}
                                   </div>
-                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{r.operator || '系统'}</span>
+                                  <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 truncate">{r.operator || 'System'}</span>
                                 </div>
                               </TableCell>
 
                               {/* 原因与指标列 */}
-                              <TableCell className="py-5 align-top">
-                                <div className="flex flex-col gap-3">
+                              <TableCell className="py-4">
+                                <div className="flex flex-col gap-2.5">
                                   {/* 原因标签行 */}
-                                  <div className="flex flex-wrap items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
                                     {renderReasonBadge(r.reason)}
                                     {r.context?.source && (
-                                      <Badge variant="secondary" className="text-xs h-6 font-medium px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
-                                        {r.context.source === 'risk_center' ? '自动' :
-                                          r.context.source === 'ip_monitoring' ? 'IP监控' :
-                                            r.context.source === 'ban_records' ? '手动' : 
-                                            r.context.source === 'ai_auto_ban' ? 'AI决策' : r.context.source}
+                                      <Badge variant="secondary" className="text-[10px] h-5 font-bold px-2 bg-indigo-50 text-indigo-600 border-indigo-100/50 dark:bg-indigo-900/20 dark:text-indigo-400">
+                                        {r.context.source === 'risk_center' ? 'AUTO-SHIELD' :
+                                          r.context.source === 'ip_monitoring' ? 'IP-MONITOR' :
+                                            r.context.source === 'ban_records' ? 'MANUAL' :
+                                              r.context.source === 'ai_auto_ban' ? 'AI-BRAIN' : r.context.source.toUpperCase()}
                                       </Badge>
                                     )}
                                   </div>
 
-                                  {/* 指标数据行 - 独立卡片样式 */}
-                                  {r.context && (r.context.risk || r.context.summary) && (
-                                    <div className="flex flex-wrap gap-3 text-xs text-slate-600">
-                                      {r.context.risk?.requests_per_minute > 0 && (
-                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-                                          <Activity className="w-3.5 h-3.5 text-blue-500" />
-                                          <span className="font-semibold text-slate-500">RPM</span>
-                                          <span className="font-mono font-bold text-slate-700 text-sm">{r.context.risk.requests_per_minute.toFixed(1)}</span>
-                                        </div>
-                                      )}
-                                      {r.context.summary?.failure_rate !== undefined && (
-                                        <div className={cn(
-                                          "flex items-center gap-2 px-2.5 py-1.5 rounded-lg border shadow-sm transition-shadow hover:shadow-md",
-                                          r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-100 text-red-700" : "bg-white border-slate-200"
-                                        )}>
-                                          <AlertTriangle className="w-3.5 h-3.5" />
-                                          <span className="font-semibold opacity-70">失败率</span>
-                                          <span className="font-mono font-bold text-sm">{(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
-                                        </div>
-                                      )}
-                                      {r.context.summary?.unique_ips > 0 && (
-                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-                                          <Globe className="w-3.5 h-3.5 text-indigo-500" />
-                                          <span className="font-semibold text-slate-500">IP</span>
-                                          <span className="font-mono font-bold text-slate-700 text-sm">{r.context.summary.unique_ips}</span>
-                                        </div>
-                                      )}
-                                      {/* AI 评分展示 */}
-                                      {r.context.risk_score !== undefined && (
-                                        <div className={cn(
-                                          "flex items-center gap-2 px-2.5 py-1.5 rounded-lg border shadow-sm transition-shadow hover:shadow-md",
-                                          r.context.risk_score >= 8 ? "bg-red-50 border-red-100 text-red-700" : "bg-amber-50 border-amber-100 text-amber-700"
-                                        )}>
-                                          <Activity className="w-3.5 h-3.5" />
-                                          <span className="font-semibold opacity-70">Risk</span>
-                                          <span className="font-mono font-bold text-sm">{r.context.risk_score}</span>
-                                        </div>
-                                      )}
+                                  {/* 指标数据行 - 整合的指标组 */}
+                                  {r.context && (r.context.risk || r.context.summary || r.context.risk_score !== undefined) && (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="flex items-center bg-muted/30 rounded-lg p-1 border border-border/40 gap-1">
+                                        {r.context.risk?.requests_per_minute > 0 && (
+                                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background border shadow-xs">
+                                            <Activity className="w-3 h-3 text-blue-500" />
+                                            <span className="text-[10px] font-bold text-muted-foreground">RPM</span>
+                                            <span className="text-xs font-mono font-black text-foreground">{r.context.risk.requests_per_minute.toFixed(1)}</span>
+                                          </div>
+                                        )}
+                                        {r.context.summary?.failure_rate !== undefined && (
+                                          <div className={cn(
+                                            "flex items-center gap-1.5 px-2 py-1 rounded-md border shadow-xs",
+                                            r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-200 text-red-700" : "bg-background"
+                                          )}>
+                                            <AlertTriangle className="w-3 h-3 text-amber-500" />
+                                            <span className="text-[10px] font-bold opacity-70">FAIL</span>
+                                            <span className="text-xs font-mono font-black">{(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
+                                          </div>
+                                        )}
+                                        {r.context.summary?.unique_ips > 0 && (
+                                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background border shadow-xs">
+                                            <Globe className="w-3 h-3 text-indigo-500" />
+                                            <span className="text-[10px] font-bold text-muted-foreground">IP</span>
+                                            <span className="text-xs font-mono font-black text-foreground">{r.context.summary.unique_ips}</span>
+                                          </div>
+                                        )}
+                                        {r.context.risk_score !== undefined && (
+                                          <div className={cn(
+                                            "flex items-center gap-1.5 px-2 py-1 rounded-md border shadow-xs",
+                                            r.context.risk_score >= 8 ? "bg-red-600 text-white border-red-700" : "bg-amber-500 text-white border-amber-600"
+                                          )}>
+                                            <Activity className="w-3 h-3" />
+                                            <span className="text-[10px] font-black uppercase">RISK</span>
+                                            <span className="text-xs font-mono font-black">{r.context.risk_score}</span>
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   )}
                                 </div>
                               </TableCell>
 
-                              <TableCell className="py-5 align-top text-right">
+                              <TableCell className="py-4 text-right pr-6">
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-9 w-9 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all rounded-full"
                                   onClick={() => {
                                     const mockItem: LeaderboardItem = {
                                       user_id: r.user_id,
@@ -2433,1616 +2450,1616 @@ export function RealtimeRanking() {
       )}
 
       {/* AI 自动封禁 */}
-          {view === 'ai_ban' && (
-            <div className="mt-4 space-y-6">
-              {/* 顶栏状态卡片 */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
-                  <div className={cn(
-                    "w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
-                    aiConfig?.enabled ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
-                  )}>
-                    {aiConfig?.enabled ? <ShieldCheck className="w-6 h-6" /> : <ShieldBan className="w-6 h-6" />}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">服务状态</span>
-                    <span className={cn("text-lg font-bold", aiConfig?.enabled ? "text-emerald-600" : "text-slate-500")}>
-                      {aiConfig?.enabled ? "已启用" : "已禁用"}
-                    </span>
-                  </div>
-                </div>
+      {view === 'ai_ban' && (
+        <div className="mt-4 space-y-6">
+          {/* 顶栏状态卡片 */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
+              <div className={cn(
+                "w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
+                aiConfig?.enabled ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
+              )}>
+                {aiConfig?.enabled ? <ShieldCheck className="w-6 h-6" /> : <ShieldBan className="w-6 h-6" />}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">服务状态</span>
+                <span className={cn("text-lg font-bold", aiConfig?.enabled ? "text-emerald-600" : "text-slate-500")}>
+                  {aiConfig?.enabled ? "已启用" : "已禁用"}
+                </span>
+              </div>
+            </div>
 
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
-                  <div className={cn(
-                    "w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
-                    aiConfig?.dry_run !== false ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
-                  )}>
-                    <Activity className="w-6 h-6" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">运行模式</span>
-                    <span className={cn("text-lg font-bold", aiConfig?.dry_run !== false ? "text-emerald-600" : "text-rose-600")}>
-                      {aiConfig?.dry_run !== false ? "试运行" : "正式运行"}
-                    </span>
-                  </div>
-                </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
+              <div className={cn(
+                "w-12 h-12 rounded-xl flex items-center justify-center shrink-0",
+                aiConfig?.dry_run !== false ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+              )}>
+                <Activity className="w-6 h-6" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">运行模式</span>
+                <span className={cn("text-lg font-bold", aiConfig?.dry_run !== false ? "text-emerald-600" : "text-rose-600")}>
+                  {aiConfig?.dry_run !== false ? "试运行" : "正式运行"}
+                </span>
+              </div>
+            </div>
 
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                    <Settings className="w-6 h-6" />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">AI 模型</span>
-                    <span className="text-lg font-bold text-blue-600 truncate" title={aiConfig?.model}>
-                      {aiConfig?.model || "未配置"}
-                    </span>
-                  </div>
-                </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <Settings className="w-6 h-6" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">AI 模型</span>
+                <span className="text-lg font-bold text-blue-600 truncate" title={aiConfig?.model}>
+                  {aiConfig?.model || "未配置"}
+                </span>
+              </div>
+            </div>
 
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">可疑用户</span>
-                    <span className="text-lg font-bold text-rose-600">
-                      {aiSuspiciousUsers.length}
-                    </span>
-                  </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">可疑用户</span>
+                <span className="text-lg font-bold text-rose-600">
+                  {aiSuspiciousUsers.length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* API 健康状态警告 */}
+          {aiConfig?.api_health?.suspended && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-semibold text-amber-800">API 服务已暂停</p>
+                  <p className="text-sm text-amber-600">
+                    连续失败 {aiConfig.api_health.consecutive_failures} 次
+                    {aiConfig.api_health.cooldown_remaining > 0 && (
+                      <span>，剩余冷却时间 {aiConfig.api_health.cooldown_remaining} 秒</span>
+                    )}
+                    {aiConfig.api_health.last_error && (
+                      <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
+                    )}
+                  </p>
                 </div>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetApiHealth}
+                className="border-amber-300 text-amber-700 hover:bg-amber-100"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                手动恢复
+              </Button>
+            </div>
+          )}
 
-              {/* API 健康状态警告 */}
-              {aiConfig?.api_health?.suspended && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
-                      <AlertTriangle className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-amber-800">API 服务已暂停</p>
-                      <p className="text-sm text-amber-600">
-                        连续失败 {aiConfig.api_health.consecutive_failures} 次
-                        {aiConfig.api_health.cooldown_remaining > 0 && (
-                          <span>，剩余冷却时间 {aiConfig.api_health.cooldown_remaining} 秒</span>
-                        )}
-                        {aiConfig.api_health.last_error && (
-                          <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleResetApiHealth}
-                    className="border-amber-300 text-amber-700 hover:bg-amber-100"
-                  >
-                    <RefreshCw className="w-4 h-4 mr-1" />
-                    手动恢复
-                  </Button>
-                </div>
-              )}
-
-              {/* API 连续失败警告（未暂停但有失败） */}
-              {aiConfig?.api_health && !aiConfig.api_health.suspended && aiConfig.api_health.consecutive_failures > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center">
-                    <AlertTriangle className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-yellow-800">API 调用异常</p>
-                    <p className="text-sm text-yellow-600">
-                      最近连续失败 {aiConfig.api_health.consecutive_failures} 次
-                      {aiConfig.api_health.last_error && (
-                        <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* API 配置面板 */}
-              <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div
-                  className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center"
-                >
-                  <div
-                    className="flex items-center gap-3 cursor-pointer flex-1"
-                    onClick={() => setAiConfigExpanded(!aiConfigExpanded)}
-                  >
-                    <h3 className="font-bold text-lg text-slate-800">API 配置</h3>
-                    <ChevronDown className={cn("h-5 w-5 text-slate-400 transition-transform", aiConfigExpanded && "rotate-180")} />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-xs font-medium gap-1.5"
-                    onClick={() => setIsAiLogicModalOpen(true)}
-                  >
-                    <Globe className="w-3.5 h-3.5" />
-                    了解运行逻辑
-                  </Button>
-                </div>
-
-                {aiConfigExpanded && (
-                  <div className="p-6 bg-white space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* Left Column */}
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-semibold text-slate-700">API 地址</label>
-                          <Input
-                            placeholder="https://api.openai.com/v1"
-                            value={aiConfigEdit.base_url}
-                            onChange={(e) => setAiConfigEdit(prev => ({ ...prev, base_url: e.target.value }))}
-                            className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
-                          />
-                          {aiConfigEdit.base_url && (
-                            <div className="px-1 py-0.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight mb-0.5">最终请求路径预览:</p>
-                              <p className="text-sm font-bold text-blue-600 font-mono break-all" title={`${aiConfigEdit.base_url.replace(/\/+$/, "")}${/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions`}>
-                                {aiConfigEdit.base_url.replace(/\/+$/, "")}{/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-semibold text-slate-700">API 密钥</label>
-                          <div className="relative">
-                            <Input
-                              type={showApiKey ? "text" : "password"}
-                              placeholder="sk-..."
-                              value={aiConfigEdit.api_key || (aiConfig?.has_api_key ? (showApiKey && aiConfig.api_key ? aiConfig.api_key : aiConfig.masked_api_key) : '')}
-                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, api_key: e.target.value }))}
-                              className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors pr-10"
-                            />
-                            {(aiConfig?.has_api_key || aiConfigEdit.api_key) && (
-                              <button
-                                type="button"
-                                onClick={() => setShowApiKey(!showApiKey)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                                title={showApiKey ? "隐藏密钥" : "显示密钥"}
-                              >
-                                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                              </button>
-                            )}
-                          </div>
-                          {aiConfig?.has_api_key && !aiConfigEdit.api_key && (
-                            <p className="text-xs text-slate-500">留空则使用已保存的密钥</p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right Column */}
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-semibold text-slate-700">模型选择</label>
-                          <div className="flex gap-2">
-                            <Select
-                              value={aiConfigEdit.model}
-                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, model: e.target.value }))}
-                              className="flex-1 h-10 bg-slate-50 border-slate-200 focus:bg-white"
-                            >
-                              <option value="">选择模型</option>
-                              {aiModels.map((m) => (
-                                <option key={m.id} value={m.id}>{m.id}</option>
-                              ))}
-                              {aiConfigEdit.model && !aiModels.find(m => m.id === aiConfigEdit.model) && (
-                                <option value={aiConfigEdit.model}>{aiConfigEdit.model} (当前)</option>
-                              )}
-                            </Select>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={handleFetchModels}
-                              disabled={aiModelLoading || !aiConfigEdit.base_url || (!aiConfigEdit.api_key && !aiConfig?.has_api_key)}
-                              className="h-10 w-10 shrink-0"
-                              title="刷新模型列表"
-                            >
-                              {aiModelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={handleTestModel}
-                              disabled={aiTesting || !aiConfigEdit.model}
-                              className="h-10 whitespace-nowrap"
-                            >
-                              {aiTesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
-                              测试
-                            </Button>
-                          </div>
-                          {/* Test Result Message - Positioned here for better UX */}
-                          {aiTestResult && (
-                            <div className={cn(
-                              "mt-2 rounded-lg border px-3 py-2 text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300",
-                              aiTestResult.success ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"
-                            )}>
-                              {aiTestResult.success ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
-                              <span className="font-medium">{aiTestResult.message}</span>
-                              {aiTestResult.latency_ms && <span className="opacity-70 ml-auto tabular-nums">{aiTestResult.latency_ms}ms</span>}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="pt-2 space-y-3">
-                          <div className="flex items-start space-x-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                            <input
-                              id="enable_ai_ban"
-                              type="checkbox"
-                              checked={aiConfigEdit.enabled}
-                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, enabled: e.target.checked }))}
-                              className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <label htmlFor="enable_ai_ban" className="text-sm cursor-pointer select-none">
-                              <span className="font-semibold text-slate-800 block mb-0.5">启用 AI 封禁</span>
-                              <span className="text-slate-500 leading-snug">使用 AI 实时分析流量并检测可疑行为。</span>
-                            </label>
-                          </div>
-
-                          <div className="flex items-start space-x-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                            <input
-                              id="dry_run_mode"
-                              type="checkbox"
-                              checked={aiConfigEdit.dry_run}
-                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, dry_run: e.target.checked }))}
-                              className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <label htmlFor="dry_run_mode" className="text-sm cursor-pointer select-none">
-                              <span className="font-semibold text-slate-800 block mb-0.5">试运行模式</span>
-                              <span className="text-slate-500 leading-snug">仅分析流量并记录风险，不执行任何封禁操作。</span>
-                            </label>
-                          </div>
-
-                          <div className="flex items-center gap-3 pt-1">
-                            <span className="text-sm font-medium text-slate-700 shrink-0">定时扫描:</span>
-                            <Select
-                              value={aiConfigEdit.scan_interval_minutes}
-                              onChange={(e) => setAiConfigEdit(prev => ({ ...prev, scan_interval_minutes: parseInt(e.target.value) }))}
-                              className="w-full h-10 bg-slate-50 border-slate-200 focus:bg-white"
-                            >
-                              <option value={0}>已禁用</option>
-                              <option value={15}>每 15 分钟</option>
-                              <option value={30}>每 30 分钟</option>
-                              <option value={60}>每 1 小时</option>
-                              <option value={120}>每 2 小时</option>
-                              <option value={360}>每 6 小时</option>
-                              <option value={720}>每 12 小时</option>
-                              <option value={1440}>每 24 小时</option>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end pt-4 border-t border-slate-100 gap-3">
-                      <Button variant="outline" onClick={() => setAiConfigExpanded(false)}>
-                        取消
-                      </Button>
-                      <Button onClick={handleSaveAiConfig} disabled={aiSaving} className="bg-blue-600 hover:bg-blue-700 text-white min-w-[100px]">
-                        {aiSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
-                        保存
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </Card>
-
-              {/* 状态栏 + 操作栏 */}
-              <div className="bg-blue-50/80 border border-blue-100 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
-                    <ShieldCheck className="w-4 h-4" />
-                  </div>
-                  <div className="text-sm text-blue-900">
-                    <div className="font-semibold flex items-center gap-2">
-                      当前状态:
-                      {aiConfig?.dry_run !== false ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                          试运行模式
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                          正式运行模式
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-blue-700/80 mt-1 leading-relaxed">
-                      AI 扫描上次运行为 {aiConfig?.scan_interval_minutes ? '自动执行' : '手动执行'}.
-                      {(aiConfig?.scan_interval_minutes ?? 0) > 0
-                        ? ` 下次计划扫描在 ${(aiConfig?.scan_interval_minutes ?? 0)} 分钟后。`
-                        : ' 自动扫描已禁用。'}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 shrink-0 w-full md:w-auto">
-                  <Button
-                    variant="outline"
-                    onClick={() => fetchAiSuspiciousUsers(true)}
-                    disabled={aiLoading}
-                    className="bg-white border-blue-200 text-blue-700 hover:bg-blue-50 flex-1 md:flex-none"
-                  >
-                    <RefreshCw className={cn("h-4 w-4 mr-2", aiLoading && "animate-spin")} />
-                    刷新列表
-                  </Button>
-                  <Button
-                    onClick={handleAiScan}
-                    disabled={!aiConfig?.enabled || aiScanning}
-                    className="bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20 flex-1 md:flex-none"
-                  >
-                    {aiScanning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
-                    执行 AI 扫描
-                  </Button>
-                </div>
+          {/* API 连续失败警告（未暂停但有失败） */}
+          {aiConfig?.api_health && !aiConfig.api_health.suspended && aiConfig.api_health.consecutive_failures > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5" />
               </div>
-
-              {/* Suspicious Users Table */}
-              <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white">
-                  <h3 className="font-bold text-lg text-slate-800">可疑用户列表</h3>
-                </CardHeader>
-                <div className="bg-white overflow-x-auto">
-                  {aiLoading ? (
-                    <div className="h-64 flex items-center justify-center text-muted-foreground">
-                      <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
-                    </div>
-                  ) : aiSuspiciousUsers.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50/50 hover:bg-slate-50/50 border-b border-slate-100">
-                          <TableHead className="w-[180px] font-semibold text-slate-600">用户</TableHead>
-                          <TableHead className="font-semibold text-slate-600">风险标签</TableHead>
-                          <TableHead className="text-right font-semibold text-slate-600">RPM</TableHead>
-                          <TableHead className="text-right font-semibold text-slate-600">请求数</TableHead>
-                          <TableHead className="text-right font-semibold text-slate-600">空回复率</TableHead>
-                          <TableHead className="text-right font-semibold text-slate-600">IP 数</TableHead>
-                          <TableHead className="text-center font-semibold text-slate-600 w-[120px]">操作</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {aiSuspiciousUsers.map((user) => (
-                          <TableRow key={user.user_id} className="hover:bg-slate-50 border-b border-slate-50 last:border-0 transition-colors">
-                            <TableCell className="py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-sm border border-slate-200">
-                                  {user.username[0]?.toUpperCase() || 'U'}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-slate-900 text-sm">{user.username}</span>
-                                  <span className="text-xs text-slate-500">ID: {user.user_id}</span>
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-4">
-                              <div className="flex flex-wrap gap-1.5">
-                                {user.risk_flags.map((flag) => (
-                                  <Badge key={flag} variant="destructive" className="rounded px-2 py-0.5 text-[11px] font-medium border-0 opacity-90">
-                                    {RISK_FLAG_LABELS[flag] || flag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{user.rpm}</TableCell>
-                            <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{formatNumber(user.total_requests)}</TableCell>
-                            <TableCell className="py-4 text-right">
-                              <span className={cn(
-                                "font-mono text-sm",
-                                user.empty_rate >= 80 ? "text-rose-600 font-bold" : "text-slate-600"
-                              )}>
-                                {user.empty_rate}%
-                              </span>
-                            </TableCell>
-                            <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{user.unique_ips}</TableCell>
-                            <TableCell className="py-4">
-                              <div className="flex items-center justify-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                  onClick={() => {
-                                    const mockItem: LeaderboardItem = {
-                                      user_id: user.user_id,
-                                      username: user.username,
-                                      user_status: 1,
-                                      request_count: user.total_requests,
-                                      failure_requests: 0,
-                                      failure_rate: user.failure_rate / 100,
-                                      quota_used: 0,
-                                      prompt_tokens: 0,
-                                      completion_tokens: 0,
-                                      unique_ips: user.unique_ips,
-                                    }
-                                    openUserDialog(mockItem, '1h')
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                                  onClick={() => handleAiAssess(user.user_id)}
-                                  disabled={aiAssessing === user.user_id || !aiConfig?.enabled}
-                                >
-                                  {aiAssessing === user.user_id ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <ShieldBan className="h-4 w-4" />
-                                  )}
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="h-64 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
-                      <ShieldCheck className="h-12 w-12 mb-3 text-emerald-500/20" />
-                      <p className="font-medium text-slate-500">未发现可疑用户</p>
-                      <p className="text-xs text-slate-400 mt-1">系统运行正常</p>
-                    </div>
+              <div>
+                <p className="font-semibold text-yellow-800">API 调用异常</p>
+                <p className="text-sm text-yellow-600">
+                  最近连续失败 {aiConfig.api_health.consecutive_failures} 次
+                  {aiConfig.api_health.last_error && (
+                    <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
                   )}
-                </div>
-              </Card>
+                </p>
+              </div>
+            </div>
+          )}
 
-              {/* AI 评估结果弹窗 */}
-              {aiAssessResult && (
-                <Card className="rounded-xl shadow-lg border-2 border-primary/20">
-                  <CardHeader className="pb-3 border-b bg-primary/5">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Activity className="h-5 w-5 text-primary" />
-                        AI 评估结果
-                      </CardTitle>
-                      <Button variant="ghost" size="sm" onClick={() => setAiAssessResult(null)}>
-                        关闭
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-4 space-y-4">
-                    <div className="flex items-center gap-4">
-                      <div className="text-sm text-muted-foreground">用户:</div>
-                      <div className="font-medium">{aiAssessResult.username} (ID: {aiAssessResult.user_id})</div>
-                    </div>
+          {/* API 配置面板 */}
+          <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div
+              className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center"
+            >
+              <div
+                className="flex items-center gap-3 cursor-pointer flex-1"
+                onClick={() => setAiConfigExpanded(!aiConfigExpanded)}
+              >
+                <h3 className="font-bold text-lg text-slate-800">API 配置</h3>
+                <ChevronDown className={cn("h-5 w-5 text-slate-400 transition-transform", aiConfigExpanded && "rotate-180")} />
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-xs font-medium gap-1.5"
+                onClick={() => setIsAiLogicModalOpen(true)}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                了解运行逻辑
+              </Button>
+            </div>
 
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="rounded-lg border p-3 text-center">
-                        <div className={cn(
-                          "text-2xl font-bold",
-                          aiAssessResult.assessment.risk_score >= 8 ? "text-red-600" :
-                            aiAssessResult.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
-                        )}>
-                          {aiAssessResult.assessment.risk_score}/10
+            {aiConfigExpanded && (
+              <div className="p-6 bg-white space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Left Column */}
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">API 地址</label>
+                      <Input
+                        placeholder="https://api.openai.com/v1"
+                        value={aiConfigEdit.base_url}
+                        onChange={(e) => setAiConfigEdit(prev => ({ ...prev, base_url: e.target.value }))}
+                        className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
+                      />
+                      {aiConfigEdit.base_url && (
+                        <div className="px-1 py-0.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight mb-0.5">最终请求路径预览:</p>
+                          <p className="text-sm font-bold text-blue-600 font-mono break-all" title={`${aiConfigEdit.base_url.replace(/\/+$/, "")}${/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions`}>
+                            {aiConfigEdit.base_url.replace(/\/+$/, "")}{/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions
+                          </p>
                         </div>
-                        <div className="text-xs text-muted-foreground mt-1">风险评分</div>
-                      </div>
-                      <div className="rounded-lg border p-3 text-center">
-                        <div className="text-2xl font-bold">
-                          {(aiAssessResult.assessment.confidence * 100).toFixed(0)}%
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">置信度</div>
-                      </div>
-                      <div className="rounded-lg border p-3 text-center">
-                        <div className={cn(
-                          "text-lg font-bold",
-                          aiAssessResult.assessment.action === 'ban' ? "text-red-600" :
-                            aiAssessResult.assessment.action === 'warn' ? "text-amber-600" : "text-green-600"
-                        )}>
-                          {aiAssessResult.assessment.action === 'ban' ? '建议封禁' :
-                            aiAssessResult.assessment.action === 'warn' ? '风险告警' :
-                              aiAssessResult.assessment.action === 'monitor' ? '继续观察' : '正常'}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">AI 决策</div>
-                      </div>
+                      )}
                     </div>
 
-                    <div className="rounded-lg border p-3 bg-muted/30">
-                      <div className="text-xs text-muted-foreground mb-1">AI 分析理由:</div>
-                      <div className="text-sm">{aiAssessResult.assessment.reason}</div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">API 密钥</label>
+                      <div className="relative">
+                        <Input
+                          type={showApiKey ? "text" : "password"}
+                          placeholder="sk-..."
+                          value={aiConfigEdit.api_key || (aiConfig?.has_api_key ? (showApiKey && aiConfig.api_key ? aiConfig.api_key : aiConfig.masked_api_key) : '')}
+                          onChange={(e) => setAiConfigEdit(prev => ({ ...prev, api_key: e.target.value }))}
+                          className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors pr-10"
+                        />
+                        {(aiConfig?.has_api_key || aiConfigEdit.api_key) && (
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                            title={showApiKey ? "隐藏密钥" : "显示密钥"}
+                          >
+                            {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        )}
+                      </div>
+                      {aiConfig?.has_api_key && !aiConfigEdit.api_key && (
+                        <p className="text-xs text-slate-500">留空则使用已保存的密钥</p>
+                      )}
                     </div>
+                  </div>
 
-                    {aiAssessResult.assessment.should_ban && (
-                      <div className="flex justify-end">
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => {
-                            setBanConfirmDialog({
-                              open: true,
-                              type: 'ban',
-                              userId: aiAssessResult.user_id,
-                              username: aiAssessResult.username,
-                              reason: `[AI建议] ${aiAssessResult.assessment.reason}`,
-                              disableTokens: true,
-                              enableTokens: false,
-                            })
-                          }}
+                  {/* Right Column */}
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">模型选择</label>
+                      <div className="flex gap-2">
+                        <Select
+                          value={aiConfigEdit.model}
+                          onChange={(e) => setAiConfigEdit(prev => ({ ...prev, model: e.target.value }))}
+                          className="flex-1 h-10 bg-slate-50 border-slate-200 focus:bg-white"
                         >
-                          <ShieldBan className="h-4 w-4 mr-2" />
-                          执行封禁
+                          <option value="">选择模型</option>
+                          {aiModels.map((m) => (
+                            <option key={m.id} value={m.id}>{m.id}</option>
+                          ))}
+                          {aiConfigEdit.model && !aiModels.find(m => m.id === aiConfigEdit.model) && (
+                            <option value={aiConfigEdit.model}>{aiConfigEdit.model} (当前)</option>
+                          )}
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={handleFetchModels}
+                          disabled={aiModelLoading || !aiConfigEdit.base_url || (!aiConfigEdit.api_key && !aiConfig?.has_api_key)}
+                          className="h-10 w-10 shrink-0"
+                          title="刷新模型列表"
+                        >
+                          {aiModelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleTestModel}
+                          disabled={aiTesting || !aiConfigEdit.model}
+                          className="h-10 whitespace-nowrap"
+                        >
+                          {aiTesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
+                          测试
                         </Button>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* AI 审查记录 */}
-              <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white flex flex-row items-center justify-between">
-                  <h3 className="font-bold text-lg text-slate-800">审查记录</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-500">共 {aiAuditLogsTotal} 条</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => fetchAiAuditLogs(true)}
-                      disabled={aiAuditLogsLoading}
-                      className="h-8"
-                    >
-                      {aiAuditLogsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </CardHeader>
-                <div className="bg-white overflow-x-auto">
-                  {aiAuditLogs.length > 0 ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
-                          <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
-                          <TableHead className="font-bold text-slate-600 w-[80px]">状态</TableHead>
-                          <TableHead className="font-bold text-slate-600 w-[80px]">模式</TableHead>
-                          <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
-                          <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
-                          <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
-                          <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
-                          <TableHead className="font-bold text-slate-600 w-[80px]">耗时</TableHead>
-                          <TableHead className="font-bold text-slate-600">时间</TableHead>
-                          <TableHead className="font-bold text-slate-600">错误信息</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {aiAuditLogs.map((log) => (
-                          <TableRow 
-                            key={log.id} 
-                            className="hover:bg-slate-50/50 cursor-pointer"
-                            onClick={() => setSelectedAuditLog(log)}
-                          >
-                            <TableCell className="font-mono text-xs text-slate-500">{log.scan_id}</TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  log.status === 'success' ? 'success' :
-                                  log.status === 'partial' ? 'warning' :
-                                  log.status === 'failed' ? 'destructive' :
-                                  log.status === 'empty' ? 'secondary' :
-                                  log.status === 'suspended' ? 'destructive' :
-                                  'outline'
-                                }
-                                className="text-xs"
-                              >
-                                {log.status === 'success' ? '成功' :
-                                 log.status === 'partial' ? '部分成功' :
-                                 log.status === 'failed' ? '失败' :
-                                 log.status === 'empty' ? '无数据' :
-                                 log.status === 'suspended' ? '已暂停' :
-                                 log.status === 'skipped' ? '跳过' : log.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={log.dry_run ? 'secondary' : 'destructive'} className="text-xs">
-                                {log.dry_run ? '试运行' : '正式'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-center font-mono">{log.total_scanned}</TableCell>
-                            <TableCell className="text-center">
-                              {log.banned_count > 0 ? (
-                                <span className="font-bold text-red-600">{log.banned_count}</span>
-                              ) : (
-                                <span className="text-slate-400">0</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {log.warned_count > 0 ? (
-                                <span className="font-bold text-amber-600">{log.warned_count}</span>
-                              ) : (
-                                <span className="text-slate-400">0</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {log.error_count > 0 ? (
-                                <span className="font-bold text-red-600">{log.error_count}</span>
-                              ) : (
-                                <span className="text-slate-400">0</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">{log.elapsed_seconds}s</TableCell>
-                            <TableCell className="text-xs text-slate-500">
-                              {new Date(log.created_at * 1000).toLocaleString('zh-CN')}
-                            </TableCell>
-                            <TableCell className="max-w-[200px]">
-                              {log.error_message ? (
-                                <span className="text-xs text-red-600 truncate block" title={log.error_message}>
-                                  {log.error_message}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">-</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  ) : (
-                    <div className="h-40 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
-                      <Clock className="h-10 w-10 mb-2 text-slate-300" />
-                      <p className="font-medium text-slate-500">暂无审查记录</p>
-                      <p className="text-xs text-slate-400 mt-1">启用定时扫描后将自动记录</p>
+                      {/* Test Result Message - Positioned here for better UX */}
+                      {aiTestResult && (
+                        <div className={cn(
+                          "mt-2 rounded-lg border px-3 py-2 text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300",
+                          aiTestResult.success ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"
+                        )}>
+                          {aiTestResult.success ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+                          <span className="font-medium">{aiTestResult.message}</span>
+                          {aiTestResult.latency_ms && <span className="opacity-70 ml-auto tabular-nums">{aiTestResult.latency_ms}ms</span>}
+                        </div>
+                      )}
                     </div>
+
+                    <div className="pt-2 space-y-3">
+                      <div className="flex items-start space-x-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        <input
+                          id="enable_ai_ban"
+                          type="checkbox"
+                          checked={aiConfigEdit.enabled}
+                          onChange={(e) => setAiConfigEdit(prev => ({ ...prev, enabled: e.target.checked }))}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <label htmlFor="enable_ai_ban" className="text-sm cursor-pointer select-none">
+                          <span className="font-semibold text-slate-800 block mb-0.5">启用 AI 封禁</span>
+                          <span className="text-slate-500 leading-snug">使用 AI 实时分析流量并检测可疑行为。</span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-start space-x-3 p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                        <input
+                          id="dry_run_mode"
+                          type="checkbox"
+                          checked={aiConfigEdit.dry_run}
+                          onChange={(e) => setAiConfigEdit(prev => ({ ...prev, dry_run: e.target.checked }))}
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <label htmlFor="dry_run_mode" className="text-sm cursor-pointer select-none">
+                          <span className="font-semibold text-slate-800 block mb-0.5">试运行模式</span>
+                          <span className="text-slate-500 leading-snug">仅分析流量并记录风险，不执行任何封禁操作。</span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-3 pt-1">
+                        <span className="text-sm font-medium text-slate-700 shrink-0">定时扫描:</span>
+                        <Select
+                          value={aiConfigEdit.scan_interval_minutes}
+                          onChange={(e) => setAiConfigEdit(prev => ({ ...prev, scan_interval_minutes: parseInt(e.target.value) }))}
+                          className="w-full h-10 bg-slate-50 border-slate-200 focus:bg-white"
+                        >
+                          <option value={0}>已禁用</option>
+                          <option value={15}>每 15 分钟</option>
+                          <option value={30}>每 30 分钟</option>
+                          <option value={60}>每 1 小时</option>
+                          <option value={120}>每 2 小时</option>
+                          <option value={360}>每 6 小时</option>
+                          <option value={720}>每 12 小时</option>
+                          <option value={1440}>每 24 小时</option>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4 border-t border-slate-100 gap-3">
+                  <Button variant="outline" onClick={() => setAiConfigExpanded(false)}>
+                    取消
+                  </Button>
+                  <Button onClick={handleSaveAiConfig} disabled={aiSaving} className="bg-blue-600 hover:bg-blue-700 text-white min-w-[100px]">
+                    {aiSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+                    保存
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* 状态栏 + 操作栏 */}
+          <div className="bg-blue-50/80 border border-blue-100 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div className="text-sm text-blue-900">
+                <div className="font-semibold flex items-center gap-2">
+                  当前状态:
+                  {aiConfig?.dry_run !== false ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                      试运行模式
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                      正式运行模式
+                    </span>
                   )}
                 </div>
-              </Card>
+                <div className="text-blue-700/80 mt-1 leading-relaxed">
+                  AI 扫描上次运行为 {aiConfig?.scan_interval_minutes ? '自动执行' : '手动执行'}.
+                  {(aiConfig?.scan_interval_minutes ?? 0) > 0
+                    ? ` 下次计划扫描在 ${(aiConfig?.scan_interval_minutes ?? 0)} 分钟后。`
+                    : ' 自动扫描已禁用。'}
+                </div>
+              </div>
+            </div>
 
-              {/* AI 运行逻辑说明弹窗 */}
-              <Dialog open={isAiLogicModalOpen} onOpenChange={setIsAiLogicModalOpen}>
-                <DialogContent className="max-w-4xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
-                  {/* Header with decorative background */}
-                  <div className="bg-slate-50/80 border-b border-slate-100 p-6 pb-5">
+            <div className="flex items-center gap-3 shrink-0 w-full md:w-auto">
+              <Button
+                variant="outline"
+                onClick={() => fetchAiSuspiciousUsers(true)}
+                disabled={aiLoading}
+                className="bg-white border-blue-200 text-blue-700 hover:bg-blue-50 flex-1 md:flex-none"
+              >
+                <RefreshCw className={cn("h-4 w-4 mr-2", aiLoading && "animate-spin")} />
+                刷新列表
+              </Button>
+              <Button
+                onClick={handleAiScan}
+                disabled={!aiConfig?.enabled || aiScanning}
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20 flex-1 md:flex-none"
+              >
+                {aiScanning ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
+                执行 AI 扫描
+              </Button>
+            </div>
+          </div>
+
+          {/* Suspicious Users Table */}
+          <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white">
+              <h3 className="font-bold text-lg text-slate-800">可疑用户列表</h3>
+            </CardHeader>
+            <div className="bg-white overflow-x-auto">
+              {aiLoading ? (
+                <div className="h-64 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-500/50" />
+                </div>
+              ) : aiSuspiciousUsers.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/50 hover:bg-slate-50/50 border-b border-slate-100">
+                      <TableHead className="w-[180px] font-semibold text-slate-600">用户</TableHead>
+                      <TableHead className="font-semibold text-slate-600">风险标签</TableHead>
+                      <TableHead className="text-right font-semibold text-slate-600">RPM</TableHead>
+                      <TableHead className="text-right font-semibold text-slate-600">请求数</TableHead>
+                      <TableHead className="text-right font-semibold text-slate-600">空回复率</TableHead>
+                      <TableHead className="text-right font-semibold text-slate-600">IP 数</TableHead>
+                      <TableHead className="text-center font-semibold text-slate-600 w-[120px]">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aiSuspiciousUsers.map((user) => (
+                      <TableRow key={user.user_id} className="hover:bg-slate-50 border-b border-slate-50 last:border-0 transition-colors">
+                        <TableCell className="py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center font-bold text-sm border border-slate-200">
+                              {user.username[0]?.toUpperCase() || 'U'}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-slate-900 text-sm">{user.username}</span>
+                              <span className="text-xs text-slate-500">ID: {user.user_id}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-4">
+                          <div className="flex flex-wrap gap-1.5">
+                            {user.risk_flags.map((flag) => (
+                              <Badge key={flag} variant="destructive" className="rounded px-2 py-0.5 text-[11px] font-medium border-0 opacity-90">
+                                {RISK_FLAG_LABELS[flag] || flag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{user.rpm}</TableCell>
+                        <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{formatNumber(user.total_requests)}</TableCell>
+                        <TableCell className="py-4 text-right">
+                          <span className={cn(
+                            "font-mono text-sm",
+                            user.empty_rate >= 80 ? "text-rose-600 font-bold" : "text-slate-600"
+                          )}>
+                            {user.empty_rate}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-4 text-right font-mono text-sm text-slate-600">{user.unique_ips}</TableCell>
+                        <TableCell className="py-4">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              onClick={() => {
+                                const mockItem: LeaderboardItem = {
+                                  user_id: user.user_id,
+                                  username: user.username,
+                                  user_status: 1,
+                                  request_count: user.total_requests,
+                                  failure_requests: 0,
+                                  failure_rate: user.failure_rate / 100,
+                                  quota_used: 0,
+                                  prompt_tokens: 0,
+                                  completion_tokens: 0,
+                                  unique_ips: user.unique_ips,
+                                }
+                                openUserDialog(mockItem, '1h')
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                              onClick={() => handleAiAssess(user.user_id)}
+                              disabled={aiAssessing === user.user_id || !aiConfig?.enabled}
+                            >
+                              {aiAssessing === user.user_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <ShieldBan className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
+                  <ShieldCheck className="h-12 w-12 mb-3 text-emerald-500/20" />
+                  <p className="font-medium text-slate-500">未发现可疑用户</p>
+                  <p className="text-xs text-slate-400 mt-1">系统运行正常</p>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* AI 评估结果弹窗 */}
+          {aiAssessResult && (
+            <Card className="rounded-xl shadow-lg border-2 border-primary/20">
+              <CardHeader className="pb-3 border-b bg-primary/5">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-primary" />
+                    AI 评估结果
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" onClick={() => setAiAssessResult(null)}>
+                    关闭
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="text-sm text-muted-foreground">用户:</div>
+                  <div className="font-medium">{aiAssessResult.username} (ID: {aiAssessResult.user_id})</div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className={cn(
+                      "text-2xl font-bold",
+                      aiAssessResult.assessment.risk_score >= 8 ? "text-red-600" :
+                        aiAssessResult.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
+                    )}>
+                      {aiAssessResult.assessment.risk_score}/10
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">风险评分</div>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className="text-2xl font-bold">
+                      {(aiAssessResult.assessment.confidence * 100).toFixed(0)}%
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">置信度</div>
+                  </div>
+                  <div className="rounded-lg border p-3 text-center">
+                    <div className={cn(
+                      "text-lg font-bold",
+                      aiAssessResult.assessment.action === 'ban' ? "text-red-600" :
+                        aiAssessResult.assessment.action === 'warn' ? "text-amber-600" : "text-green-600"
+                    )}>
+                      {aiAssessResult.assessment.action === 'ban' ? '建议封禁' :
+                        aiAssessResult.assessment.action === 'warn' ? '风险告警' :
+                          aiAssessResult.assessment.action === 'monitor' ? '继续观察' : '正常'}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">AI 决策</div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 bg-muted/30">
+                  <div className="text-xs text-muted-foreground mb-1">AI 分析理由:</div>
+                  <div className="text-sm">{aiAssessResult.assessment.reason}</div>
+                </div>
+
+                {aiAssessResult.assessment.should_ban && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setBanConfirmDialog({
+                          open: true,
+                          type: 'ban',
+                          userId: aiAssessResult.user_id,
+                          username: aiAssessResult.username,
+                          reason: `[AI建议] ${aiAssessResult.assessment.reason}`,
+                          disableTokens: true,
+                          enableTokens: false,
+                        })
+                      }}
+                    >
+                      <ShieldBan className="h-4 w-4 mr-2" />
+                      执行封禁
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI 审查记录 */}
+          <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white flex flex-row items-center justify-between">
+              <h3 className="font-bold text-lg text-slate-800">审查记录</h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-500">共 {aiAuditLogsTotal} 条</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchAiAuditLogs(true)}
+                  disabled={aiAuditLogsLoading}
+                  className="h-8"
+                >
+                  {aiAuditLogsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <div className="bg-white overflow-x-auto">
+              {aiAuditLogs.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                      <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[80px]">状态</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[80px]">模式</TableHead>
+                      <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
+                      <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
+                      <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
+                      <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[80px]">耗时</TableHead>
+                      <TableHead className="font-bold text-slate-600">时间</TableHead>
+                      <TableHead className="font-bold text-slate-600">错误信息</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {aiAuditLogs.map((log) => (
+                      <TableRow
+                        key={log.id}
+                        className="hover:bg-slate-50/50 cursor-pointer"
+                        onClick={() => setSelectedAuditLog(log)}
+                      >
+                        <TableCell className="font-mono text-xs text-slate-500">{log.scan_id}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              log.status === 'success' ? 'success' :
+                                log.status === 'partial' ? 'warning' :
+                                  log.status === 'failed' ? 'destructive' :
+                                    log.status === 'empty' ? 'secondary' :
+                                      log.status === 'suspended' ? 'destructive' :
+                                        'outline'
+                            }
+                            className="text-xs"
+                          >
+                            {log.status === 'success' ? '成功' :
+                              log.status === 'partial' ? '部分成功' :
+                                log.status === 'failed' ? '失败' :
+                                  log.status === 'empty' ? '无数据' :
+                                    log.status === 'suspended' ? '已暂停' :
+                                      log.status === 'skipped' ? '跳过' : log.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={log.dry_run ? 'secondary' : 'destructive'} className="text-xs">
+                            {log.dry_run ? '试运行' : '正式'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center font-mono">{log.total_scanned}</TableCell>
+                        <TableCell className="text-center">
+                          {log.banned_count > 0 ? (
+                            <span className="font-bold text-red-600">{log.banned_count}</span>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {log.warned_count > 0 ? (
+                            <span className="font-bold text-amber-600">{log.warned_count}</span>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {log.error_count > 0 ? (
+                            <span className="font-bold text-red-600">{log.error_count}</span>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{log.elapsed_seconds}s</TableCell>
+                        <TableCell className="text-xs text-slate-500">
+                          {new Date(log.created_at * 1000).toLocaleString('zh-CN')}
+                        </TableCell>
+                        <TableCell className="max-w-[200px]">
+                          {log.error_message ? (
+                            <span className="text-xs text-red-600 truncate block" title={log.error_message}>
+                              {log.error_message}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="h-40 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
+                  <Clock className="h-10 w-10 mb-2 text-slate-300" />
+                  <p className="font-medium text-slate-500">暂无审查记录</p>
+                  <p className="text-xs text-slate-400 mt-1">启用定时扫描后将自动记录</p>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* AI 运行逻辑说明弹窗 */}
+          <Dialog open={isAiLogicModalOpen} onOpenChange={setIsAiLogicModalOpen}>
+            <DialogContent className="max-w-4xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
+              {/* Header with decorative background */}
+              <div className="bg-slate-50/80 border-b border-slate-100 p-6 pb-5">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-3 text-xl text-slate-800">
+                    <div className="p-2.5 bg-blue-600/10 rounded-xl text-blue-600">
+                      <Activity className="h-5 w-5" />
+                    </div>
+                    AI 自动封禁系统运行逻辑
+                  </DialogTitle>
+                  <DialogDescription className="text-slate-500 ml-1 mt-1">
+                    系统基于实时流量特征，通过三个阶段进行智能风控决策。
+                  </DialogDescription>
+                </DialogHeader>
+              </div>
+
+              {/* Body Content - Grid Layout to avoid scrolling */}
+              <div className="p-6 space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {/* Stage 1 */}
+                  <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                      <Globe className="w-16 h-16 text-blue-600" />
+                    </div>
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">1</span>
+                      特征筛选
+                    </h4>
+                    <p className="text-xs text-slate-500 leading-relaxed z-10">
+                      系统实时监控并过滤有效流量，仅对满足特定门槛的用户触发评估。
+                    </p>
+                    <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-2.5 flex-1 z-10 border border-slate-100/50">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2 font-bold text-slate-700">
+                          <div className="w-1 h-1 rounded-full bg-blue-400"></div>
+                          请求量 &ge; 50 (活跃用户)
+                        </div>
+                        <p className="text-[10px] text-slate-500 pl-3">过滤低频调用，确保 AI 分析样本充足并节省 Token 消耗。</p>
+                      </div>
+
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2 font-bold text-slate-700">
+                          <div className="w-1 h-1 rounded-full bg-orange-400"></div>
+                          命中 IP 异常标签
+                        </div>
+                        <p className="text-[10px] text-slate-500 pl-3">仅对出现多IP、快速切换或地域跳变等风险特征的用户进行研判。</p>
+                      </div>
+
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2 font-bold text-slate-700">
+                          <div className="w-1 h-1 rounded-full bg-slate-400"></div>
+                          非白名单 / VIP 用户
+                        </div>
+                        <p className="text-[10px] text-slate-500 pl-3">管理员、受信任渠道及手动白名单用户受保护，系统永不自动封禁。</p>
+                      </div>
+
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2 font-bold text-slate-700">
+                          <div className="w-1 h-1 rounded-full bg-slate-400"></div>
+                          不在 24h 冷却期内
+                        </div>
+                        <p className="text-[10px] text-slate-500 pl-3">同一用户 24 小时内仅执行一次 AI 评估，防止针对同一对象的重复消耗。</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stage 2 */}
+                  <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                      <Activity className="w-16 h-16 text-purple-600" />
+                    </div>
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-600 text-xs font-bold">2</span>
+                      AI 模型研判
+                    </h4>
+                    <p className="text-xs text-slate-500 leading-relaxed z-10">
+                      将用户的行为指纹发送至大模型，模拟资深风控师进行深度分析。
+                    </p>
+                    <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1.5 flex-1 z-10 border border-slate-100/50">
+                      <div className="font-medium text-slate-700 mb-1">分析维度：</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        <span className="bg-white px-1.5 py-0.5 rounded border text-center">IP 停留时长</span>
+                        <span className="bg-white px-1.5 py-0.5 rounded border text-center">跳变频率</span>
+                        <span className="bg-white px-1.5 py-0.5 rounded border text-center">模型分布</span>
+                        <span className="bg-white px-1.5 py-0.5 rounded border text-center">Token 规律</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stage 3 */}
+                  <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                      <ShieldBan className="w-16 h-16 text-red-600" />
+                    </div>
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 text-xs font-bold">3</span>
+                      决策执行
+                    </h4>
+                    <p className="text-xs text-slate-500 leading-relaxed z-10">
+                      根据 AI 返回的风险评分 (1-10) 和置信度，执行相应的动作。
+                    </p>
+                    <div className="space-y-2 z-10 flex-1">
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-red-50/50 border border-red-100">
+                        <span className="font-bold text-xs text-red-700">封禁 (Ban)</span>
+                        <span className="text-[10px] text-red-600/80">评分&ge;8 & 置信度&ge;0.8</span>
+                      </div>
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/50 border border-amber-100">
+                        <span className="font-bold text-xs text-amber-700">告警 (Warn)</span>
+                        <span className="text-[10px] text-amber-600/80">评分&ge;6 或 置信度不足</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status Banner - Dynamic Configuration Dashboard */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-5 rounded-2xl bg-slate-50 border border-slate-100 shadow-inner">
+                  {/* Mode Status */}
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-colors",
+                      aiConfig?.dry_run !== false ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
+                    )}>
+                      {aiConfig?.dry_run !== false ? <Activity className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">运行模式</div>
+                      <div className={cn(
+                        "text-xs font-black truncate",
+                        aiConfig?.dry_run !== false ? "text-amber-700" : "text-emerald-700"
+                      )}>
+                        {aiConfig?.dry_run !== false ? "试运行 (仅记录)" : "正式运行 (自动封禁)"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Model Status */}
+                  <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
+                    <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                      <Settings className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">配置模型</div>
+                      <div className="text-xs font-black text-slate-800 truncate" title={aiConfig?.model || "未配置"}>
+                        {aiConfig?.model || "尚未选择模型"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scan Status */}
+                  <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm",
+                      aiConfig?.scan_interval_minutes ? "bg-indigo-100 text-indigo-600" : "bg-slate-200 text-slate-400"
+                    )}>
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">定时扫描</div>
+                      <div className={cn(
+                        "text-xs font-black truncate",
+                        aiConfig?.scan_interval_minutes ? "text-indigo-700" : "text-slate-500"
+                      )}>
+                        {aiConfig?.scan_interval_minutes
+                          ? `每 ${aiConfig.scan_interval_minutes >= 60 ? (aiConfig.scan_interval_minutes / 60).toFixed(0) + " 小时" : aiConfig.scan_interval_minutes + " 分钟"}`
+                          : "已禁用 (手动模式)"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="p-6 pt-0 sm:justify-center">
+                <Button
+                  onClick={() => setIsAiLogicModalOpen(false)}
+                  className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 hover:shadow-slate-900/20 transition-all hover:-translate-y-0.5"
+                >
+                  我明白了
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* 审查记录详情弹窗 */}
+          <Dialog open={!!selectedAuditLog} onOpenChange={(open) => !open && setSelectedAuditLog(null)}>
+            <DialogContent className="max-w-3xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
+              {selectedAuditLog && (
+                <>
+                  {/* Header */}
+                  <div className={cn(
+                    "p-6 border-b",
+                    selectedAuditLog.status === 'success' ? "bg-emerald-50" :
+                      selectedAuditLog.status === 'partial' ? "bg-amber-50" :
+                        selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-50" :
+                          "bg-slate-50"
+                  )}>
                     <DialogHeader>
-                      <DialogTitle className="flex items-center gap-3 text-xl text-slate-800">
-                        <div className="p-2.5 bg-blue-600/10 rounded-xl text-blue-600">
+                      <DialogTitle className="flex items-center gap-3 text-xl">
+                        <div className={cn(
+                          "p-2.5 rounded-xl",
+                          selectedAuditLog.status === 'success' ? "bg-emerald-100 text-emerald-600" :
+                            selectedAuditLog.status === 'partial' ? "bg-amber-100 text-amber-600" :
+                              selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-100 text-red-600" :
+                                "bg-slate-100 text-slate-600"
+                        )}>
                           <Activity className="h-5 w-5" />
                         </div>
-                        AI 自动封禁系统运行逻辑
+                        AI 审查报告
                       </DialogTitle>
-                      <DialogDescription className="text-slate-500 ml-1 mt-1">
-                        系统基于实时流量特征，通过三个阶段进行智能风控决策。
+                      <DialogDescription className="mt-2 flex items-center gap-3">
+                        <span className="font-mono text-sm bg-white/50 px-2 py-0.5 rounded">#{selectedAuditLog.scan_id}</span>
+                        <span>{new Date(selectedAuditLog.created_at * 1000).toLocaleString('zh-CN')}</span>
                       </DialogDescription>
                     </DialogHeader>
                   </div>
 
-                  {/* Body Content - Grid Layout to avoid scrolling */}
-                  <div className="p-6 space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                      {/* Stage 1 */}
-                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <Globe className="w-16 h-16 text-blue-600" />
-                        </div>
-                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
-                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">1</span>
-                          特征筛选
-                        </h4>
-                        <p className="text-xs text-slate-500 leading-relaxed z-10">
-                          系统实时监控并过滤有效流量，仅对满足特定门槛的用户触发评估。
-                        </p>
-                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-2.5 flex-1 z-10 border border-slate-100/50">
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2 font-bold text-slate-700">
-                              <div className="w-1 h-1 rounded-full bg-blue-400"></div>
-                              请求量 &ge; 50 (活跃用户)
-                            </div>
-                            <p className="text-[10px] text-slate-500 pl-3">过滤低频调用，确保 AI 分析样本充足并节省 Token 消耗。</p>
-                          </div>
-
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2 font-bold text-slate-700">
-                              <div className="w-1 h-1 rounded-full bg-orange-400"></div>
-                              命中 IP 异常标签
-                            </div>
-                            <p className="text-[10px] text-slate-500 pl-3">仅对出现多IP、快速切换或地域跳变等风险特征的用户进行研判。</p>
-                          </div>
-
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2 font-bold text-slate-700">
-                              <div className="w-1 h-1 rounded-full bg-slate-400"></div>
-                              非白名单 / VIP 用户
-                            </div>
-                            <p className="text-[10px] text-slate-500 pl-3">管理员、受信任渠道及手动白名单用户受保护，系统永不自动封禁。</p>
-                          </div>
-
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2 font-bold text-slate-700">
-                              <div className="w-1 h-1 rounded-full bg-slate-400"></div>
-                              不在 24h 冷却期内
-                            </div>
-                            <p className="text-[10px] text-slate-500 pl-3">同一用户 24 小时内仅执行一次 AI 评估，防止针对同一对象的重复消耗。</p>
-                          </div>
-                        </div>
+                  {/* Body */}
+                  <div className="p-6 space-y-6">
+                    {/* 状态概览 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
+                        <div className="text-3xl font-black text-slate-700">{selectedAuditLog.total_scanned}</div>
+                        <div className="text-xs text-slate-500 mt-1">扫描用户</div>
                       </div>
-
-                      {/* Stage 2 */}
-                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <Activity className="w-16 h-16 text-purple-600" />
-                        </div>
-                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
-                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-600 text-xs font-bold">2</span>
-                          AI 模型研判
-                        </h4>
-                        <p className="text-xs text-slate-500 leading-relaxed z-10">
-                          将用户的行为指纹发送至大模型，模拟资深风控师进行深度分析。
-                        </p>
-                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1.5 flex-1 z-10 border border-slate-100/50">
-                          <div className="font-medium text-slate-700 mb-1">分析维度：</div>
-                          <div className="grid grid-cols-2 gap-1">
-                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">IP 停留时长</span>
-                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">跳变频率</span>
-                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">模型分布</span>
-                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">Token 规律</span>
-                          </div>
-                        </div>
+                      <div className="text-center p-4 rounded-xl bg-red-50 border border-red-100">
+                        <div className="text-3xl font-black text-red-600">{selectedAuditLog.banned_count}</div>
+                        <div className="text-xs text-red-500 mt-1">封禁用户</div>
                       </div>
-
-                      {/* Stage 3 */}
-                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <ShieldBan className="w-16 h-16 text-red-600" />
-                        </div>
-                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
-                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 text-xs font-bold">3</span>
-                          决策执行
-                        </h4>
-                        <p className="text-xs text-slate-500 leading-relaxed z-10">
-                          根据 AI 返回的风险评分 (1-10) 和置信度，执行相应的动作。
-                        </p>
-                        <div className="space-y-2 z-10 flex-1">
-                          <div className="flex items-center justify-between p-2 rounded-lg bg-red-50/50 border border-red-100">
-                            <span className="font-bold text-xs text-red-700">封禁 (Ban)</span>
-                            <span className="text-[10px] text-red-600/80">评分&ge;8 & 置信度&ge;0.8</span>
-                          </div>
-                          <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/50 border border-amber-100">
-                            <span className="font-bold text-xs text-amber-700">告警 (Warn)</span>
-                            <span className="text-[10px] text-amber-600/80">评分&ge;6 或 置信度不足</span>
-                          </div>
-                        </div>
+                      <div className="text-center p-4 rounded-xl bg-amber-50 border border-amber-100">
+                        <div className="text-3xl font-black text-amber-600">{selectedAuditLog.warned_count}</div>
+                        <div className="text-xs text-amber-500 mt-1">告警用户</div>
+                      </div>
+                      <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
+                        <div className="text-3xl font-black text-slate-600">{selectedAuditLog.skipped_count}</div>
+                        <div className="text-xs text-slate-500 mt-1">跳过用户</div>
                       </div>
                     </div>
 
-                    {/* Status Banner - Dynamic Configuration Dashboard */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-5 rounded-2xl bg-slate-50 border border-slate-100 shadow-inner">
-                      {/* Mode Status */}
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-colors",
-                          aiConfig?.dry_run !== false ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
-                        )}>
-                          {aiConfig?.dry_run !== false ? <Activity className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">运行模式</div>
-                          <div className={cn(
-                            "text-xs font-black truncate",
-                            aiConfig?.dry_run !== false ? "text-amber-700" : "text-emerald-700"
-                          )}>
-                            {aiConfig?.dry_run !== false ? "试运行 (仅记录)" : "正式运行 (自动封禁)"}
-                          </div>
-                        </div>
+                    {/* 执行信息 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">状态:</span>
+                        <Badge
+                          variant={
+                            selectedAuditLog.status === 'success' ? 'success' :
+                              selectedAuditLog.status === 'partial' ? 'warning' :
+                                selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? 'destructive' :
+                                  'secondary'
+                          }
+                        >
+                          {selectedAuditLog.status === 'success' ? '成功' :
+                            selectedAuditLog.status === 'partial' ? '部分成功' :
+                              selectedAuditLog.status === 'failed' ? '失败' :
+                                selectedAuditLog.status === 'empty' ? '无数据' :
+                                  selectedAuditLog.status === 'suspended' ? '已暂停' :
+                                    selectedAuditLog.status === 'skipped' ? '跳过' : selectedAuditLog.status}
+                        </Badge>
                       </div>
-
-                      {/* Model Status */}
-                      <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 shadow-sm">
-                          <Settings className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">配置模型</div>
-                          <div className="text-xs font-black text-slate-800 truncate" title={aiConfig?.model || "未配置"}>
-                            {aiConfig?.model || "尚未选择模型"}
-                          </div>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">模式:</span>
+                        <Badge variant={selectedAuditLog.dry_run ? 'secondary' : 'destructive'}>
+                          {selectedAuditLog.dry_run ? '试运行' : '正式运行'}
+                        </Badge>
                       </div>
-
-                      {/* Scan Status */}
-                      <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
-                        <div className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm",
-                          aiConfig?.scan_interval_minutes ? "bg-indigo-100 text-indigo-600" : "bg-slate-200 text-slate-400"
-                        )}>
-                          <Clock className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">定时扫描</div>
-                          <div className={cn(
-                            "text-xs font-black truncate",
-                            aiConfig?.scan_interval_minutes ? "text-indigo-700" : "text-slate-500"
-                          )}>
-                            {aiConfig?.scan_interval_minutes 
-                              ? `每 ${aiConfig.scan_interval_minutes >= 60 ? (aiConfig.scan_interval_minutes / 60).toFixed(0) + " 小时" : aiConfig.scan_interval_minutes + " 分钟"}` 
-                              : "已禁用 (手动模式)"}
-                          </div>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">时间窗口:</span>
+                        <span className="font-medium">{selectedAuditLog.window}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500">耗时:</span>
+                        <span className="font-mono">{selectedAuditLog.elapsed_seconds}s</span>
                       </div>
                     </div>
+
+                    {/* 错误信息 */}
+                    {selectedAuditLog.error_message && (
+                      <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                        <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
+                          <AlertTriangle className="h-4 w-4" />
+                          错误信息
+                        </div>
+                        <p className="text-sm text-red-600">{selectedAuditLog.error_message}</p>
+                      </div>
+                    )}
+
+                    {/* 处理详情 */}
+                    {selectedAuditLog.details && Array.isArray(selectedAuditLog.details) && selectedAuditLog.details.length > 0 && (
+                      <div className="space-y-3">
+                        <h4 className="font-semibold text-slate-700 flex items-center gap-2">
+                          <Eye className="h-4 w-4" />
+                          处理详情 ({selectedAuditLog.details.length} 条)
+                        </h4>
+                        <div className="max-h-64 overflow-y-auto space-y-2">
+                          {selectedAuditLog.details.map((detail: any, idx: number) => (
+                            <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 text-sm">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{detail.username || `用户 ${detail.user_id}`}</span>
+                                  <span className="text-slate-400 text-xs">ID: {detail.user_id}</span>
+                                </div>
+                                <Badge
+                                  variant={
+                                    detail.action === 'ban' ? 'destructive' :
+                                      detail.action === 'warn' ? 'warning' :
+                                        detail.action === 'error' ? 'destructive' :
+                                          'secondary'
+                                  }
+                                  className="text-xs"
+                                >
+                                  {detail.action === 'ban' ? '封禁' :
+                                    detail.action === 'warn' ? '告警' :
+                                      detail.action === 'monitor' ? '观察' :
+                                        detail.action === 'skip' ? '跳过' :
+                                          detail.action === 'error' ? '错误' : detail.action}
+                                </Badge>
+                              </div>
+                              {detail.assessment && (
+                                <div className="flex items-center gap-4 text-xs text-slate-500">
+                                  <span>风险分: <span className={cn(
+                                    "font-bold",
+                                    detail.assessment.risk_score >= 8 ? "text-red-600" :
+                                      detail.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
+                                  )}>{detail.assessment.risk_score}/10</span></span>
+                                  <span>置信度: <span className="font-bold">{(detail.assessment.confidence * 100).toFixed(0)}%</span></span>
+                                </div>
+                              )}
+                              {detail.assessment?.reason && (
+                                <p className="mt-2 text-xs text-slate-600 bg-white p-2 rounded border border-slate-100">
+                                  {detail.assessment.reason}
+                                </p>
+                              )}
+                              {detail.message && detail.action === 'error' && (
+                                <p className="mt-2 text-xs text-red-600">{detail.message}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 无详情时的提示 */}
+                    {(!selectedAuditLog.details || !Array.isArray(selectedAuditLog.details) || selectedAuditLog.details.length === 0) && selectedAuditLog.total_scanned === 0 && (
+                      <div className="text-center py-8 text-slate-500">
+                        <Clock className="h-10 w-10 mx-auto mb-2 text-slate-300" />
+                        <p>本次扫描未发现可疑用户</p>
+                      </div>
+                    )}
                   </div>
 
                   <DialogFooter className="p-6 pt-0 sm:justify-center">
-                    <Button 
-                      onClick={() => setIsAiLogicModalOpen(false)} 
-                      className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 hover:shadow-slate-900/20 transition-all hover:-translate-y-0.5"
+                    <Button
+                      onClick={() => setSelectedAuditLog(null)}
+                      className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white"
                     >
-                      我明白了
+                      关闭
                     </Button>
                   </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
 
-              {/* 审查记录详情弹窗 */}
-              <Dialog open={!!selectedAuditLog} onOpenChange={(open) => !open && setSelectedAuditLog(null)}>
-                <DialogContent className="max-w-3xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
-                  {selectedAuditLog && (
-                    <>
-                      {/* Header */}
-                      <div className={cn(
-                        "p-6 border-b",
-                        selectedAuditLog.status === 'success' ? "bg-emerald-50" :
-                        selectedAuditLog.status === 'partial' ? "bg-amber-50" :
-                        selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-50" :
-                        "bg-slate-50"
-                      )}>
-                        <DialogHeader>
-                          <DialogTitle className="flex items-center gap-3 text-xl">
-                            <div className={cn(
-                              "p-2.5 rounded-xl",
-                              selectedAuditLog.status === 'success' ? "bg-emerald-100 text-emerald-600" :
-                              selectedAuditLog.status === 'partial' ? "bg-amber-100 text-amber-600" :
-                              selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-100 text-red-600" :
-                              "bg-slate-100 text-slate-600"
-                            )}>
-                              <Activity className="h-5 w-5" />
-                            </div>
-                            AI 审查报告
-                          </DialogTitle>
-                          <DialogDescription className="mt-2 flex items-center gap-3">
-                            <span className="font-mono text-sm bg-white/50 px-2 py-0.5 rounded">#{selectedAuditLog.scan_id}</span>
-                            <span>{new Date(selectedAuditLog.created_at * 1000).toLocaleString('zh-CN')}</span>
-                          </DialogDescription>
-                        </DialogHeader>
-                      </div>
+        </div >
+      )}
 
-                      {/* Body */}
-                      <div className="p-6 space-y-6">
-                        {/* 状态概览 */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                            <div className="text-3xl font-black text-slate-700">{selectedAuditLog.total_scanned}</div>
-                            <div className="text-xs text-slate-500 mt-1">扫描用户</div>
-                          </div>
-                          <div className="text-center p-4 rounded-xl bg-red-50 border border-red-100">
-                            <div className="text-3xl font-black text-red-600">{selectedAuditLog.banned_count}</div>
-                            <div className="text-xs text-red-500 mt-1">封禁用户</div>
-                          </div>
-                          <div className="text-center p-4 rounded-xl bg-amber-50 border border-amber-100">
-                            <div className="text-3xl font-black text-amber-600">{selectedAuditLog.warned_count}</div>
-                            <div className="text-xs text-amber-500 mt-1">告警用户</div>
-                          </div>
-                          <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                            <div className="text-3xl font-black text-slate-600">{selectedAuditLog.skipped_count}</div>
-                            <div className="text-xs text-slate-500 mt-1">跳过用户</div>
-                          </div>
-                        </div>
+      {/* User IPs Dialog */}
+      <Dialog open={userIpsDialogOpen} onOpenChange={setUserIpsDialogOpen}>
+        <DialogContent className="max-w-2xl w-full max-h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          <DialogHeader className="p-5 border-b bg-muted/10 shrink-0">
+            <div className="flex justify-between items-center pr-6">
+              <div>
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-blue-500" />
+                  用户 IP 访问列表
+                </DialogTitle>
+                <DialogDescription className="mt-1 flex items-center gap-2">
+                  <span className="font-semibold text-foreground">{selectedUserForIps?.username}</span>
+                  <span className="text-muted-foreground">(ID: {selectedUserForIps?.id})</span>
+                  <Badge variant="outline" className="ml-2">{WINDOW_LABELS[ipWindow]}</Badge>
+                </DialogDescription>
+              </div>
+              <Badge variant="secondary" className="px-3 py-1 font-mono">{userIpsData.length} IPs</Badge>
+            </div>
+          </DialogHeader>
 
-                        {/* 执行信息 */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="flex-1 overflow-y-auto min-h-0 bg-background">
+            {userIpsLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Loader2 className="h-8 w-8 mb-3 animate-spin text-primary/40" />
+                <p className="text-sm">正在检索所有访问 IP...</p>
+              </div>
+            ) : userIpsData.length > 0 ? (
+              <div className="p-0">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background z-10 border-b">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-2 text-xs uppercase">IP 地址</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">请求数</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">首次访问</TableHead>
+                      <TableHead className="py-2 text-xs uppercase text-right">最近访问</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {userIpsData.map((ip, idx) => (
+                      <TableRow key={ip.ip} className="hover:bg-muted/20 transition-colors">
+                        <TableCell className="py-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-slate-500">状态:</span>
-                            <Badge
-                              variant={
-                                selectedAuditLog.status === 'success' ? 'success' :
-                                selectedAuditLog.status === 'partial' ? 'warning' :
-                                selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? 'destructive' :
-                                'secondary'
-                              }
-                            >
-                              {selectedAuditLog.status === 'success' ? '成功' :
-                               selectedAuditLog.status === 'partial' ? '部分成功' :
-                               selectedAuditLog.status === 'failed' ? '失败' :
-                               selectedAuditLog.status === 'empty' ? '无数据' :
-                               selectedAuditLog.status === 'suspended' ? '已暂停' :
-                               selectedAuditLog.status === 'skipped' ? '跳过' : selectedAuditLog.status}
-                            </Badge>
+                            <span className="text-xs font-bold text-muted-foreground w-5">{idx + 1}</span>
+                            <code className="text-xs font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/40 text-foreground">{ip.ip}</code>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500">模式:</span>
-                            <Badge variant={selectedAuditLog.dry_run ? 'secondary' : 'destructive'}>
-                              {selectedAuditLog.dry_run ? '试运行' : '正式运行'}
-                            </Badge>
+                        </TableCell>
+                        <TableCell className="py-3 text-right">
+                          <div className="flex flex-col items-end">
+                            <span className="text-sm font-bold tabular-nums text-primary">
+                              {formatNumber(ip.request_count)}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Requests</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500">时间窗口:</span>
-                            <span className="font-medium">{selectedAuditLog.window}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500">耗时:</span>
-                            <span className="font-mono">{selectedAuditLog.elapsed_seconds}s</span>
-                          </div>
-                        </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                          {formatTime(ip.first_seen)}
+                        </TableCell>
+                        <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                          {formatTime(ip.last_seen)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Globe className="h-10 w-10 mb-2 opacity-10" />
+                <p>未发现该用户的访问记录</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="p-4 border-t bg-muted/5 sm:justify-start">
+            <div className="text-[10px] text-muted-foreground italic">
+              * 列表按请求量排序，显示该用户在所选时间段内的所有唯一访问 IP 及其首末次访问记录。
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                        {/* 错误信息 */}
-                        {selectedAuditLog.error_message && (
-                          <div className="p-4 rounded-xl bg-red-50 border border-red-200">
-                            <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
-                              <AlertTriangle className="h-4 w-4" />
-                              错误信息
-                            </div>
-                            <p className="text-sm text-red-600">{selectedAuditLog.error_message}</p>
-                          </div>
-                        )}
+      <Dialog open={enableAllDialogOpen} onOpenChange={setEnableAllDialogOpen}>
+        <DialogContent className="max-w-md rounded-xl">
+          <DialogHeader>
+            <DialogTitle>确认开启所有用户 IP 记录</DialogTitle>
+            <DialogDescription>
+              此操作将为所有用户开启 IP 记录功能。当前有 {ipStats?.disabled_count || 0} 个用户未开启。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setEnableAllDialogOpen(false)} disabled={enableAllLoading}>
+              取消
+            </Button>
+            <Button onClick={handleEnableAllIPRecording} disabled={enableAllLoading}>
+              {enableAllLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              确认开启
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                        {/* 处理详情 */}
-                        {selectedAuditLog.details && Array.isArray(selectedAuditLog.details) && selectedAuditLog.details.length > 0 && (
-                          <div className="space-y-3">
-                            <h4 className="font-semibold text-slate-700 flex items-center gap-2">
-                              <Eye className="h-4 w-4" />
-                              处理详情 ({selectedAuditLog.details.length} 条)
-                            </h4>
-                            <div className="max-h-64 overflow-y-auto space-y-2">
-                              {selectedAuditLog.details.map((detail: any, idx: number) => (
-                                <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 text-sm">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-medium">{detail.username || `用户 ${detail.user_id}`}</span>
-                                      <span className="text-slate-400 text-xs">ID: {detail.user_id}</span>
-                                    </div>
-                                    <Badge
-                                      variant={
-                                        detail.action === 'ban' ? 'destructive' :
-                                        detail.action === 'warn' ? 'warning' :
-                                        detail.action === 'error' ? 'destructive' :
-                                        'secondary'
-                                      }
-                                      className="text-xs"
-                                    >
-                                      {detail.action === 'ban' ? '封禁' :
-                                       detail.action === 'warn' ? '告警' :
-                                       detail.action === 'monitor' ? '观察' :
-                                       detail.action === 'skip' ? '跳过' :
-                                       detail.action === 'error' ? '错误' : detail.action}
-                                    </Badge>
-                                  </div>
-                                  {detail.assessment && (
-                                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                                      <span>风险分: <span className={cn(
-                                        "font-bold",
-                                        detail.assessment.risk_score >= 8 ? "text-red-600" :
-                                        detail.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
-                                      )}>{detail.assessment.risk_score}/10</span></span>
-                                      <span>置信度: <span className="font-bold">{(detail.assessment.confidence * 100).toFixed(0)}%</span></span>
-                                    </div>
-                                  )}
-                                  {detail.assessment?.reason && (
-                                    <p className="mt-2 text-xs text-slate-600 bg-white p-2 rounded border border-slate-100">
-                                      {detail.assessment.reason}
-                                    </p>
-                                  )}
-                                  {detail.message && detail.action === 'error' && (
-                                    <p className="mt-2 text-xs text-red-600">{detail.message}</p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
+            <div className="flex justify-between items-start pr-6">
+              <div>
+                <DialogTitle className="text-xl">用户行为分析</DialogTitle>
+                <DialogDescription className="mt-1.5 flex items-center gap-2">
+                  <Badge variant="outline">{selected ? WINDOW_LABELS[selected.window] : '-'}</Badge>
+                  <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
 
-                        {/* 无详情时的提示 */}
-                        {(!selectedAuditLog.details || !Array.isArray(selectedAuditLog.details) || selectedAuditLog.details.length === 0) && selectedAuditLog.total_scanned === 0 && (
-                          <div className="text-center py-8 text-slate-500">
-                            <Clock className="h-10 w-10 mx-auto mb-2 text-slate-300" />
-                            <p>本次扫描未发现可疑用户</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <DialogFooter className="p-6 pt-0 sm:justify-center">
-                        <Button 
-                          onClick={() => setSelectedAuditLog(null)} 
-                          className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white"
-                        >
-                          关闭
-                        </Button>
-                      </DialogFooter>
-                    </>
+          <div className="flex-1 overflow-y-auto p-5 min-h-0 bg-background">
+            {analysisLoading ? (
+              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                <Loader2 className="h-8 w-8 mb-4 animate-spin text-primary/50" />
+                <p>正在分析海量日志...</p>
+              </div>
+            ) : analysis ? (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    RPM: {analysis.risk.requests_per_minute.toFixed(1)}
+                  </Badge>
+                  <Badge variant="secondary" className="px-3 py-1 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                    均额: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}
+                  </Badge>
+                  {analysis.risk.risk_flags.length > 0 ? (
+                    analysis.risk.risk_flags.map((f) => (
+                      <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
+                        <AlertTriangle className="w-3 h-3 mr-1" /> {RISK_FLAG_LABELS[f] || f}
+                      </Badge>
+                    ))
+                  ) : (
+                    <Badge variant="success" className="px-3 py-1 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
+                      <ShieldCheck className="w-3 h-3 mr-1" /> 无明显异常
+                    </Badge>
                   )}
-                </DialogContent>
-              </Dialog>
-
-            </div >
-          )}
-
-          {/* User IPs Dialog */}
-          <Dialog open={userIpsDialogOpen} onOpenChange={setUserIpsDialogOpen}>
-            <DialogContent className="max-w-2xl w-full max-h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
-              <DialogHeader className="p-5 border-b bg-muted/10 shrink-0">
-                <div className="flex justify-between items-center pr-6">
-                  <div>
-                    <DialogTitle className="text-xl flex items-center gap-2">
-                      <Globe className="h-5 w-5 text-blue-500" />
-                      用户 IP 访问列表
-                    </DialogTitle>
-                    <DialogDescription className="mt-1 flex items-center gap-2">
-                      <span className="font-semibold text-foreground">{selectedUserForIps?.username}</span>
-                      <span className="text-muted-foreground">(ID: {selectedUserForIps?.id})</span>
-                      <Badge variant="outline" className="ml-2">{WINDOW_LABELS[ipWindow]}</Badge>
-                    </DialogDescription>
-                  </div>
-                  <Badge variant="secondary" className="px-3 py-1 font-mono">{userIpsData.length} IPs</Badge>
                 </div>
-              </DialogHeader>
 
-              <div className="flex-1 overflow-y-auto min-h-0 bg-background">
-                {userIpsLoading ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                    <Loader2 className="h-8 w-8 mb-3 animate-spin text-primary/40" />
-                    <p className="text-sm">正在检索所有访问 IP...</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <Card className="bg-muted/20 border-none shadow-sm">
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">请求总数</div>
+                      <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.total_requests)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className={cn("border-none shadow-sm", analysis.summary.failure_rate > 0.5 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/20")}>
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">失败率</div>
+                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.failure_rate > 0.5 && "text-red-600")}>
+                        {(analysis.summary.failure_rate * 100).toFixed(1)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className={cn("border-none shadow-sm", analysis.summary.empty_rate > 0.5 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/20")}>
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">空回复率</div>
+                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.empty_rate > 0.5 && "text-yellow-600")}>
+                        {(analysis.summary.empty_rate * 100).toFixed(1)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-muted/20 border-none shadow-sm">
+                    <CardContent className="p-4 text-center">
+                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">IP 来源</div>
+                      <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.unique_ips)}</div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground">模型偏好 (Top 5)</h4>
+                    {analysis.top_models.slice(0, 5).length ? (
+                      analysis.top_models.slice(0, 5).map((m) => {
+                        const pct = analysis.summary.total_requests ? (m.requests / analysis.summary.total_requests) * 100 : 0
+                        return (
+                          <div key={m.model_name} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="font-medium truncate max-w-[180px]">{m.model_name}</span>
+                              <span className="text-muted-foreground">{formatNumber(m.requests)} ({pct.toFixed(0)}%)</span>
+                            </div>
+                            <Progress value={pct} className="h-1.5" />
+                          </div>
+                        )
+                      })
+                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
                   </div>
-                ) : userIpsData.length > 0 ? (
-                  <div className="p-0">
+
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground">来源 IP (Top 5)</h4>
+                    {analysis.top_ips.slice(0, 5).length ? (
+                      analysis.top_ips.slice(0, 5).map((ip) => {
+                        const pct = analysis.summary.total_requests ? (ip.requests / analysis.summary.total_requests) * 100 : 0
+                        return (
+                          <div key={ip.ip} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="font-medium truncate">{ip.ip}</span>
+                              <span className="text-muted-foreground">{formatNumber(ip.requests)} ({pct.toFixed(0)}%)</span>
+                            </div>
+                            <Progress value={pct} className="h-1.5" />
+                          </div>
+                        )
+                      })
+                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
+                  </div>
+                </div>
+
+                {/* IP 切换分析 */}
+                {analysis.risk.ip_switch_analysis && analysis.risk.ip_switch_analysis.switch_count > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      IP 切换分析
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || analysis.risk.ip_switch_analysis.avg_ip_duration < 30) && (
+                        <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                      )}
+                    </h4>
+
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.switch_count}</div>
+                        <div className="text-xs text-muted-foreground">切换次数</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.rapid_switch_count}
+                        </div>
+                        <div className="text-xs text-muted-foreground">快速切换 (60s内)</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3 && "text-red-600 dark:text-red-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.avg_ip_duration}s
+                        </div>
+                        <div className="text-xs text-muted-foreground">平均停留</div>
+                      </div>
+                    </div>
+
+                    {/* 切换记录 */}
+                    {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-semibold text-muted-foreground">最近切换记录 (显示 IP 跳变逻辑):</div>
+                          <div className="text-xs text-muted-foreground italic flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> 间隔越短，共享账号可能性越大
+                          </div>
+                        </div>
+                        <div className="rounded-lg border overflow-hidden shadow-sm">
+                          <div className="bg-muted/30 px-3 py-2 flex text-xs uppercase tracking-wider font-bold text-muted-foreground border-b border-border/60">
+                            <div className="w-[120px]">切换时间</div>
+                            <div className="flex-1 px-2 text-center">源 IP 地址</div>
+                            <div className="w-8"></div>
+                            <div className="flex-1 px-2 text-center">目标 IP 地址</div>
+                            <div className="w-24 text-right">切换间隔</div>
+                          </div>
+                          <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
+                            {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
+                              <div
+                                key={idx}
+                                className={cn(
+                                  "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
+                                  detail.interval <= 60 ? "bg-red-50/40 dark:bg-red-900/10" : "bg-background"
+                                )}
+                              >
+                                <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
+                                  {formatTime(detail.time)}
+                                </div>
+                                <div className="flex-1 px-2 flex justify-center">
+                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                    {detail.from_ip}
+                                  </code>
+                                </div>
+                                <div className="w-8 flex justify-center">
+                                  <span className="text-muted-foreground/50 group-hover:text-primary transition-colors">→</span>
+                                </div>
+                                <div className="flex-1 px-2 flex justify-center">
+                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                    {detail.to_ip}
+                                  </code>
+                                </div>
+                                <div className="w-24 text-right">
+                                  <Badge
+                                    variant={detail.interval <= 60 ? "destructive" : "outline"}
+                                    className={cn(
+                                      "px-2 py-0.5 h-6 text-xs font-mono",
+                                      detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
+                                    )}
+                                  >
+                                    {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
+                                    {detail.interval}s
+                                  </Badge>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>
+                  <div className="rounded-lg border overflow-hidden">
                     <Table>
-                      <TableHeader className="sticky top-0 bg-background z-10 border-b">
-                        <TableRow className="hover:bg-transparent">
-                          <TableHead className="py-2 text-xs uppercase">IP 地址</TableHead>
-                          <TableHead className="py-2 text-xs uppercase text-right">请求数</TableHead>
-                          <TableHead className="py-2 text-xs uppercase text-right">首次访问</TableHead>
-                          <TableHead className="py-2 text-xs uppercase text-right">最近访问</TableHead>
+                      <TableHeader>
+                        <TableRow className="h-8 bg-muted/50 hover:bg-muted/50">
+                          <TableHead className="h-8 text-xs w-[140px]">时间</TableHead>
+                          <TableHead className="h-8 text-xs w-[60px]">状态</TableHead>
+                          <TableHead className="h-8 text-xs">模型</TableHead>
+                          <TableHead className="h-8 text-xs text-right">耗时</TableHead>
+                          <TableHead className="h-8 text-xs text-right w-[120px]">IP</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {userIpsData.map((ip, idx) => (
-                          <TableRow key={ip.ip} className="hover:bg-muted/20 transition-colors">
-                            <TableCell className="py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-muted-foreground w-5">{idx + 1}</span>
-                                <code className="text-xs font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/40 text-foreground">{ip.ip}</code>
-                              </div>
+                        {analysis.recent_logs.slice(0, 10).map((l) => (
+                          <TableRow key={l.id} className="h-8 hover:bg-muted/30">
+                            <TableCell className="py-1.5 text-xs text-muted-foreground whitespace-nowrap">{formatTime(l.created_at)}</TableCell>
+                            <TableCell className="py-1.5 text-xs">
+                              {l.type === 5 ? <span className="text-red-500 font-medium">失败</span> : <span className="text-green-500">成功</span>}
                             </TableCell>
-                            <TableCell className="py-3 text-right">
-                              <div className="flex flex-col items-end">
-                                <span className="text-sm font-bold tabular-nums text-primary">
-                                  {formatNumber(ip.request_count)}
-                                </span>
-                                <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tight opacity-50">Requests</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
-                              {formatTime(ip.first_seen)}
-                            </TableCell>
-                            <TableCell className="py-3 text-right text-[11px] text-muted-foreground tabular-nums">
-                              {formatTime(ip.last_seen)}
-                            </TableCell>
+                            <TableCell className="py-1.5 text-xs font-medium truncate max-w-[150px]" title={l.model_name}>{l.model_name}</TableCell>
+                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground">{l.use_time}ms</TableCell>
+                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground font-mono">{l.ip}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                    <Globe className="h-10 w-10 mb-2 opacity-10" />
-                    <p>未发现该用户的访问记录</p>
-                  </div>
-                )}
-              </div>
-              <DialogFooter className="p-4 border-t bg-muted/5 sm:justify-start">
-                <div className="text-[10px] text-muted-foreground italic">
-                  * 列表按请求量排序，显示该用户在所选时间段内的所有唯一访问 IP 及其首末次访问记录。
-                </div>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={enableAllDialogOpen} onOpenChange={setEnableAllDialogOpen}>
-            <DialogContent className="max-w-md rounded-xl">
-              <DialogHeader>
-                <DialogTitle>确认开启所有用户 IP 记录</DialogTitle>
-                <DialogDescription>
-                  此操作将为所有用户开启 IP 记录功能。当前有 {ipStats?.disabled_count || 0} 个用户未开启。
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-2">
-                <Button variant="outline" onClick={() => setEnableAllDialogOpen(false)} disabled={enableAllLoading}>
-                  取消
-                </Button>
-                <Button onClick={handleEnableAllIPRecording} disabled={enableAllLoading}>
-                  {enableAllLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                  确认开启
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
-              <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
-                <div className="flex justify-between items-start pr-6">
-                  <div>
-                    <DialogTitle className="text-xl">用户行为分析</DialogTitle>
-                    <DialogDescription className="mt-1.5 flex items-center gap-2">
-                      <Badge variant="outline">{selected ? WINDOW_LABELS[selected.window] : '-'}</Badge>
-                      <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
-                    </DialogDescription>
-                  </div>
-                </div>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-y-auto p-5 min-h-0 bg-background">
-                {analysisLoading ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                    <Loader2 className="h-8 w-8 mb-4 animate-spin text-primary/50" />
-                    <p>正在分析海量日志...</p>
-                  </div>
-                ) : analysis ? (
-                  <div className="space-y-6">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        RPM: {analysis.risk.requests_per_minute.toFixed(1)}
-                      </Badge>
-                      <Badge variant="secondary" className="px-3 py-1 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                        均额: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}
-                      </Badge>
-                      {analysis.risk.risk_flags.length > 0 ? (
-                        analysis.risk.risk_flags.map((f) => (
-                          <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
-                            <AlertTriangle className="w-3 h-3 mr-1" /> {RISK_FLAG_LABELS[f] || f}
-                          </Badge>
-                        ))
-                      ) : (
-                        <Badge variant="success" className="px-3 py-1 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
-                          <ShieldCheck className="w-3 h-3 mr-1" /> 无明显异常
-                        </Badge>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <Card className="bg-muted/20 border-none shadow-sm">
-                        <CardContent className="p-4 text-center">
-                          <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">请求总数</div>
-                          <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.total_requests)}</div>
-                        </CardContent>
-                      </Card>
-                      <Card className={cn("border-none shadow-sm", analysis.summary.failure_rate > 0.5 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/20")}>
-                        <CardContent className="p-4 text-center">
-                          <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">失败率</div>
-                          <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.failure_rate > 0.5 && "text-red-600")}>
-                            {(analysis.summary.failure_rate * 100).toFixed(1)}%
-                          </div>
-                        </CardContent>
-                      </Card>
-                      <Card className={cn("border-none shadow-sm", analysis.summary.empty_rate > 0.5 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/20")}>
-                        <CardContent className="p-4 text-center">
-                          <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">空回复率</div>
-                          <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.empty_rate > 0.5 && "text-yellow-600")}>
-                            {(analysis.summary.empty_rate * 100).toFixed(1)}%
-                          </div>
-                        </CardContent>
-                      </Card>
-                      <Card className="bg-muted/20 border-none shadow-sm">
-                        <CardContent className="p-4 text-center">
-                          <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">IP 来源</div>
-                          <div className="text-2xl font-bold tabular-nums">{formatNumber(analysis.summary.unique_ips)}</div>
-                        </CardContent>
-                      </Card>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-3">
-                        <h4 className="text-sm font-semibold text-muted-foreground">模型偏好 (Top 5)</h4>
-                        {analysis.top_models.slice(0, 5).length ? (
-                          analysis.top_models.slice(0, 5).map((m) => {
-                            const pct = analysis.summary.total_requests ? (m.requests / analysis.summary.total_requests) * 100 : 0
-                            return (
-                              <div key={m.model_name} className="space-y-1.5">
-                                <div className="flex justify-between text-xs">
-                                  <span className="font-medium truncate max-w-[180px]">{m.model_name}</span>
-                                  <span className="text-muted-foreground">{formatNumber(m.requests)} ({pct.toFixed(0)}%)</span>
-                                </div>
-                                <Progress value={pct} className="h-1.5" />
-                              </div>
-                            )
-                          })
-                        ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
-                      </div>
-
-                      <div className="space-y-3">
-                        <h4 className="text-sm font-semibold text-muted-foreground">来源 IP (Top 5)</h4>
-                        {analysis.top_ips.slice(0, 5).length ? (
-                          analysis.top_ips.slice(0, 5).map((ip) => {
-                            const pct = analysis.summary.total_requests ? (ip.requests / analysis.summary.total_requests) * 100 : 0
-                            return (
-                              <div key={ip.ip} className="space-y-1.5">
-                                <div className="flex justify-between text-xs">
-                                  <span className="font-medium truncate">{ip.ip}</span>
-                                  <span className="text-muted-foreground">{formatNumber(ip.requests)} ({pct.toFixed(0)}%)</span>
-                                </div>
-                                <Progress value={pct} className="h-1.5" />
-                              </div>
-                            )
-                          })
-                        ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
-                      </div>
-                    </div>
-
-                    {/* IP 切换分析 */}
-                    {analysis.risk.ip_switch_analysis && analysis.risk.ip_switch_analysis.switch_count > 0 && (
-                      <div className="space-y-3">
-                        <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          IP 切换分析
-                          {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || analysis.risk.ip_switch_analysis.avg_ip_duration < 30) && (
-                            <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
-                          )}
-                        </h4>
-
-                        {/* 统计卡片 */}
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
-                            <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.switch_count}</div>
-                            <div className="text-xs text-muted-foreground">切换次数</div>
-                          </div>
-                          <div className={cn(
-                            "rounded-lg border p-2.5 text-center",
-                            analysis.risk.ip_switch_analysis.rapid_switch_count >= 3
-                              ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-                              : "bg-muted/30"
-                          )}>
-                            <div className={cn(
-                              "text-lg font-bold",
-                              analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 && "text-red-600 dark:text-red-400"
-                            )}>
-                              {analysis.risk.ip_switch_analysis.rapid_switch_count}
-                            </div>
-                            <div className="text-xs text-muted-foreground">快速切换 (60s内)</div>
-                          </div>
-                          <div className={cn(
-                            "rounded-lg border p-2.5 text-center",
-                            analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3
-                              ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-                              : "bg-muted/30"
-                          )}>
-                            <div className={cn(
-                              "text-lg font-bold",
-                              analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3 && "text-red-600 dark:text-red-400"
-                            )}>
-                              {analysis.risk.ip_switch_analysis.avg_ip_duration}s
-                            </div>
-                            <div className="text-xs text-muted-foreground">平均停留</div>
-                          </div>
-                        </div>
-
-                        {/* 切换记录 */}
-                        {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div className="text-xs font-semibold text-muted-foreground">最近切换记录 (显示 IP 跳变逻辑):</div>
-                              <div className="text-xs text-muted-foreground italic flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" /> 间隔越短，共享账号可能性越大
-                              </div>
-                            </div>
-                            <div className="rounded-lg border overflow-hidden shadow-sm">
-                              <div className="bg-muted/30 px-3 py-2 flex text-xs uppercase tracking-wider font-bold text-muted-foreground border-b border-border/60">
-                                <div className="w-[120px]">切换时间</div>
-                                <div className="flex-1 px-2 text-center">源 IP 地址</div>
-                                <div className="w-8"></div>
-                                <div className="flex-1 px-2 text-center">目标 IP 地址</div>
-                                <div className="w-24 text-right">切换间隔</div>
-                              </div>
-                              <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
-                                {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
-                                  <div
-                                    key={idx}
-                                    className={cn(
-                                      "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
-                                      detail.interval <= 60 ? "bg-red-50/40 dark:bg-red-900/10" : "bg-background"
-                                    )}
-                                  >
-                                    <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
-                                      {formatTime(detail.time)}
-                                    </div>
-                                    <div className="flex-1 px-2 flex justify-center">
-                                      <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                        {detail.from_ip}
-                                      </code>
-                                    </div>
-                                    <div className="w-8 flex justify-center">
-                                      <span className="text-muted-foreground/50 group-hover:text-primary transition-colors">→</span>
-                                    </div>
-                                    <div className="flex-1 px-2 flex justify-center">
-                                      <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                        {detail.to_ip}
-                                      </code>
-                                    </div>
-                                    <div className="w-24 text-right">
-                                      <Badge
-                                        variant={detail.interval <= 60 ? "destructive" : "outline"}
-                                        className={cn(
-                                          "px-2 py-0.5 h-6 text-xs font-mono",
-                                          detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
-                                        )}
-                                      >
-                                        {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
-                                        {detail.interval}s
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="space-y-3">
-                      <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>
-                      <div className="rounded-lg border overflow-hidden">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="h-8 bg-muted/50 hover:bg-muted/50">
-                              <TableHead className="h-8 text-xs w-[140px]">时间</TableHead>
-                              <TableHead className="h-8 text-xs w-[60px]">状态</TableHead>
-                              <TableHead className="h-8 text-xs">模型</TableHead>
-                              <TableHead className="h-8 text-xs text-right">耗时</TableHead>
-                              <TableHead className="h-8 text-xs text-right w-[120px]">IP</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {analysis.recent_logs.slice(0, 10).map((l) => (
-                              <TableRow key={l.id} className="h-8 hover:bg-muted/30">
-                                <TableCell className="py-1.5 text-xs text-muted-foreground whitespace-nowrap">{formatTime(l.created_at)}</TableCell>
-                                <TableCell className="py-1.5 text-xs">
-                                  {l.type === 5 ? <span className="text-red-500 font-medium">失败</span> : <span className="text-green-500">成功</span>}
-                                </TableCell>
-                                <TableCell className="py-1.5 text-xs font-medium truncate max-w-[150px]" title={l.model_name}>{l.model_name}</TableCell>
-                                <TableCell className="py-1.5 text-xs text-right text-muted-foreground">{l.use_time}ms</TableCell>
-                                <TableCell className="py-1.5 text-xs text-right text-muted-foreground font-mono">{l.ip}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-muted-foreground">
-                    暂无分析数据
-                  </div>
-                )}
-              </div>
-
-              <div className="p-5 border-t bg-muted/10 flex-shrink-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span>当前状态:</span>
-                    {analysis ? (
-                      analysis.user.status === 2 ? (
-                        <Badge variant="destructive">已禁用</Badge>
-                      ) : (
-                        <Badge variant="success">正常</Badge>
-                      )
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </div>
-                  <div className="flex gap-3">
-                    <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
-                    {analysis?.user.status === 2 ? (
-                      <Button
-                        onClick={() => {
-                          if (!analysis) return
-                          setBanConfirmDialog({
-                            open: true,
-                            type: 'unban',
-                            userId: analysis.user.id,
-                            username: analysis.user.username,
-                            reason: '',
-                            disableTokens: false,
-                            enableTokens: true,
-                          })
-                        }}
-                        disabled={mutating || analysisLoading}
-                        className="min-w-28 bg-green-600 hover:bg-green-700"
-                      >
-                        <ShieldCheck className="h-4 w-4 mr-2" />
-                        解除封禁
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="destructive"
-                        onClick={() => {
-                          if (!analysis) return
-                          setBanConfirmDialog({
-                            open: true,
-                            type: 'ban',
-                            userId: analysis.user.id,
-                            username: analysis.user.username,
-                            reason: '',
-                            disableTokens: true,
-                            enableTokens: false,
-                          })
-                        }}
-                        disabled={mutating || analysisLoading}
-                        className="min-w-28"
-                      >
-                        <ShieldBan className="h-4 w-4 mr-2" />
-                        立即封禁
-                      </Button>
-                    )}
-                  </div>
                 </div>
               </div>
-            </DialogContent>
-          </Dialog>
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                暂无分析数据
+              </div>
+            )}
+          </div>
 
-          <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}>
-            <DialogContent className="max-w-md rounded-xl">
-              <DialogHeader>
-                <DialogTitle>{confirmDialog.title}</DialogTitle>
-                <DialogDescription>{confirmDialog.description}</DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-2">
-                <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
-                  取消
-                </Button>
-                <Button
-                  variant={confirmDialog.variant || 'default'}
-                  onClick={confirmDialog.onConfirm}
-                >
-                  {confirmDialog.confirmText || '确认'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={banConfirmDialog.open} onOpenChange={(open) => setBanConfirmDialog(prev => ({ ...prev, open }))}>
-            <DialogContent className="max-w-[600px] w-full rounded-xl gap-6 p-6 overflow-visible">
-              <DialogHeader className="space-y-2">
-                <DialogTitle className="flex items-center gap-2 text-lg">
-                  {banConfirmDialog.type === 'ban' ? (
-                    <>
-                      <ShieldBan className="h-5 w-5 text-destructive" />
-                      确认封禁用户
-                    </>
+          <div className="p-5 border-t bg-muted/10 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <span>当前状态:</span>
+                {analysis ? (
+                  analysis.user.status === 2 ? (
+                    <Badge variant="destructive">已禁用</Badge>
                   ) : (
-                    <>
-                      <ShieldCheck className="h-5 w-5 text-green-600" />
-                      确认解封用户
-                    </>
-                  )}
-                </DialogTitle>
-                <DialogDescription className="text-sm">
-                  {banConfirmDialog.type === 'ban'
-                    ? <span className="block break-words">即将封禁用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>
-                    : <span className="block break-words">即将解封用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex flex-col gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    {banConfirmDialog.type === 'ban' ? '请选择封禁原因' : '请选择解封原因'}
-                  </label>
-                  <Select
-                    value={banConfirmDialog.reason}
-                    onChange={(e) => setBanConfirmDialog(prev => ({ ...prev, reason: e.target.value }))}
-                    className="w-full"
-                  >
-                    {(banConfirmDialog.type === 'ban' ? BAN_REASONS : UNBAN_REASONS).map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </Select>
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none bg-muted/30 p-2 rounded-md border border-transparent hover:border-border">
-                  <input
-                    type="checkbox"
-                    checked={banConfirmDialog.type === 'ban' ? banConfirmDialog.disableTokens : banConfirmDialog.enableTokens}
-                    onChange={(e) => banConfirmDialog.type === 'ban'
-                      ? setBanConfirmDialog(prev => ({ ...prev, disableTokens: e.target.checked }))
-                      : setBanConfirmDialog(prev => ({ ...prev, enableTokens: e.target.checked }))
-                    }
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  {banConfirmDialog.type === 'ban' ? '同时禁用该用户所有令牌' : '同时启用该用户所有令牌'}
-                </label>
+                    <Badge variant="success">正常</Badge>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
               </div>
-
-              <DialogFooter className="gap-2 sm:gap-0 mt-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => setBanConfirmDialog(prev => ({ ...prev, open: false }))}
-                  disabled={mutating}
-                  className="flex-1 sm:flex-none"
-                >
-                  取消
-                </Button>
-                {banConfirmDialog.type === 'ban' ? (
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
+                {analysis?.user.status === 2 ? (
+                  <Button
+                    onClick={() => {
+                      if (!analysis) return
+                      setBanConfirmDialog({
+                        open: true,
+                        type: 'unban',
+                        userId: analysis.user.id,
+                        username: analysis.user.username,
+                        reason: '',
+                        disableTokens: false,
+                        enableTokens: true,
+                      })
+                    }}
+                    disabled={mutating || analysisLoading}
+                    className="min-w-28 bg-green-600 hover:bg-green-700"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2" />
+                    解除封禁
+                  </Button>
+                ) : (
                   <Button
                     variant="destructive"
-                    disabled={mutating}
-                    className="flex-1 sm:flex-none min-w-[100px]"
-                    onClick={async () => {
-                      setMutating(true)
-                      try {
-                        const response = await fetch(`${apiUrl}/api/users/${banConfirmDialog.userId}/ban`, {
-                          method: 'POST',
-                          headers: getAuthHeaders(),
-                          body: JSON.stringify({
-                            reason: banConfirmDialog.reason || null,
-                            disable_tokens: banConfirmDialog.disableTokens,
-                            context: {
-                              source: 'risk_center',
-                              window: selected?.window,
-                              generated_at: generatedAt,
-                              risk: analysis?.risk || null,
-                            },
-                          }),
-                        })
-                        const res = await response.json()
-                        if (res.success) {
-                          showToast('success', res.message || '已封禁')
-                          setBanConfirmDialog(prev => ({ ...prev, open: false }))
-                          setDialogOpen(false)
-                          fetchLeaderboards()
-                          fetchBannedUsers(1)
-                          fetchBanRecords(1)
-                        } else {
-                          showToast('error', res.message || '封禁失败')
-                        }
-                      } catch (e) {
-                        console.error('Failed to ban user:', e)
-                        showToast('error', '封禁失败')
-                      } finally {
-                        setMutating(false)
-                      }
+                    onClick={() => {
+                      if (!analysis) return
+                      setBanConfirmDialog({
+                        open: true,
+                        type: 'ban',
+                        userId: analysis.user.id,
+                        username: analysis.user.username,
+                        reason: '',
+                        disableTokens: true,
+                        enableTokens: false,
+                      })
                     }}
+                    disabled={mutating || analysisLoading}
+                    className="min-w-28"
                   >
-                    {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldBan className="h-4 w-4 mr-2" />}
-                    确认封禁
-                  </Button>
-                ) : (
-                  <Button
-                    className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none min-w-[100px]"
-                    disabled={mutating}
-                    onClick={async () => {
-                      setMutating(true)
-                      try {
-                        const response = await fetch(`${apiUrl}/api/users/${banConfirmDialog.userId}/unban`, {
-                          method: 'POST',
-                          headers: getAuthHeaders(),
-                          body: JSON.stringify({
-                            reason: banConfirmDialog.reason || null,
-                            enable_tokens: banConfirmDialog.enableTokens,
-                            context: {
-                              source: 'risk_center',
-                            },
-                          }),
-                        })
-                        const res = await response.json()
-                        if (res.success) {
-                          showToast('success', res.message || '已解封')
-                          setBanConfirmDialog(prev => ({ ...prev, open: false }))
-                          setDialogOpen(false)
-                          fetchLeaderboards()
-                          fetchBannedUsers(bannedPage)
-                          fetchBanRecords(recordsPage)
-                        } else {
-                          showToast('error', res.message || '解封失败')
-                        }
-                      } catch (e) {
-                        console.error('Failed to unban user:', e)
-                        showToast('error', '解封失败')
-                      } finally {
-                        setMutating(false)
-                      }
-                    }}
-                  >
-                    {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
-                    确认解封
+                    <ShieldBan className="h-4 w-4 mr-2" />
+                    立即封禁
                   </Button>
                 )}
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div >
-      )
-      }
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-md rounded-xl">
+          <DialogHeader>
+            <DialogTitle>{confirmDialog.title}</DialogTitle>
+            <DialogDescription>{confirmDialog.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+              取消
+            </Button>
+            <Button
+              variant={confirmDialog.variant || 'default'}
+              onClick={confirmDialog.onConfirm}
+            >
+              {confirmDialog.confirmText || '确认'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={banConfirmDialog.open} onOpenChange={(open) => setBanConfirmDialog(prev => ({ ...prev, open }))}>
+        <DialogContent className="max-w-[600px] w-full rounded-xl gap-6 p-6 overflow-visible">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              {banConfirmDialog.type === 'ban' ? (
+                <>
+                  <ShieldBan className="h-5 w-5 text-destructive" />
+                  确认封禁用户
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="h-5 w-5 text-green-600" />
+                  确认解封用户
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              {banConfirmDialog.type === 'ban'
+                ? <span className="block break-words">即将封禁用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>
+                : <span className="block break-words">即将解封用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                {banConfirmDialog.type === 'ban' ? '请选择封禁原因' : '请选择解封原因'}
+              </label>
+              <Select
+                value={banConfirmDialog.reason}
+                onChange={(e) => setBanConfirmDialog(prev => ({ ...prev, reason: e.target.value }))}
+                className="w-full"
+              >
+                {(banConfirmDialog.type === 'ban' ? BAN_REASONS : UNBAN_REASONS).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none bg-muted/30 p-2 rounded-md border border-transparent hover:border-border">
+              <input
+                type="checkbox"
+                checked={banConfirmDialog.type === 'ban' ? banConfirmDialog.disableTokens : banConfirmDialog.enableTokens}
+                onChange={(e) => banConfirmDialog.type === 'ban'
+                  ? setBanConfirmDialog(prev => ({ ...prev, disableTokens: e.target.checked }))
+                  : setBanConfirmDialog(prev => ({ ...prev, enableTokens: e.target.checked }))
+                }
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              {banConfirmDialog.type === 'ban' ? '同时禁用该用户所有令牌' : '同时启用该用户所有令牌'}
+            </label>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <Button
+              variant="ghost"
+              onClick={() => setBanConfirmDialog(prev => ({ ...prev, open: false }))}
+              disabled={mutating}
+              className="flex-1 sm:flex-none"
+            >
+              取消
+            </Button>
+            {banConfirmDialog.type === 'ban' ? (
+              <Button
+                variant="destructive"
+                disabled={mutating}
+                className="flex-1 sm:flex-none min-w-[100px]"
+                onClick={async () => {
+                  setMutating(true)
+                  try {
+                    const response = await fetch(`${apiUrl}/api/users/${banConfirmDialog.userId}/ban`, {
+                      method: 'POST',
+                      headers: getAuthHeaders(),
+                      body: JSON.stringify({
+                        reason: banConfirmDialog.reason || null,
+                        disable_tokens: banConfirmDialog.disableTokens,
+                        context: {
+                          source: 'risk_center',
+                          window: selected?.window,
+                          generated_at: generatedAt,
+                          risk: analysis?.risk || null,
+                        },
+                      }),
+                    })
+                    const res = await response.json()
+                    if (res.success) {
+                      showToast('success', res.message || '已封禁')
+                      setBanConfirmDialog(prev => ({ ...prev, open: false }))
+                      setDialogOpen(false)
+                      fetchLeaderboards()
+                      fetchBannedUsers(1)
+                      fetchBanRecords(1)
+                    } else {
+                      showToast('error', res.message || '封禁失败')
+                    }
+                  } catch (e) {
+                    console.error('Failed to ban user:', e)
+                    showToast('error', '封禁失败')
+                  } finally {
+                    setMutating(false)
+                  }
+                }}
+              >
+                {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldBan className="h-4 w-4 mr-2" />}
+                确认封禁
+              </Button>
+            ) : (
+              <Button
+                className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none min-w-[100px]"
+                disabled={mutating}
+                onClick={async () => {
+                  setMutating(true)
+                  try {
+                    const response = await fetch(`${apiUrl}/api/users/${banConfirmDialog.userId}/unban`, {
+                      method: 'POST',
+                      headers: getAuthHeaders(),
+                      body: JSON.stringify({
+                        reason: banConfirmDialog.reason || null,
+                        enable_tokens: banConfirmDialog.enableTokens,
+                        context: {
+                          source: 'risk_center',
+                        },
+                      }),
+                    })
+                    const res = await response.json()
+                    if (res.success) {
+                      showToast('success', res.message || '已解封')
+                      setBanConfirmDialog(prev => ({ ...prev, open: false }))
+                      setDialogOpen(false)
+                      fetchLeaderboards()
+                      fetchBannedUsers(bannedPage)
+                      fetchBanRecords(recordsPage)
+                    } else {
+                      showToast('error', res.message || '解封失败')
+                    }
+                  } catch (e) {
+                    console.error('Failed to unban user:', e)
+                    showToast('error', '解封失败')
+                  } finally {
+                    setMutating(false)
+                  }
+                }}
+              >
+                {mutating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
+                确认解封
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div >
+  )
+}
