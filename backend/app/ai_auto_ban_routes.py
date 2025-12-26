@@ -27,6 +27,7 @@ class SaveConfigRequest(BaseModel):
     model: Optional[str] = None
     enabled: Optional[bool] = None
     dry_run: Optional[bool] = None
+    scan_interval_minutes: Optional[int] = None  # 定时扫描间隔（分钟），0表示关闭
 
 
 class FetchModelsRequest(BaseModel):
@@ -71,7 +72,13 @@ async def save_config(
         config["enabled"] = request.enabled
     if request.dry_run is not None:
         config["dry_run"] = request.dry_run
-    
+    if request.scan_interval_minutes is not None:
+        # 限制扫描间隔范围：0（关闭）或 15-1440 分钟（15分钟到24小时）
+        interval = request.scan_interval_minutes
+        if interval != 0 and (interval < 15 or interval > 1440):
+            raise HTTPException(status_code=400, detail="扫描间隔必须为0（关闭）或15-1440分钟")
+        config["scan_interval_minutes"] = interval
+
     if not config:
         raise HTTPException(status_code=400, detail="没有要保存的配置")
     

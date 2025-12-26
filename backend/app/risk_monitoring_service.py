@@ -342,17 +342,12 @@ class RiskMonitoringService:
         quota_used = int(summary.get("quota_used") or 0)
         avg_quota_per_request = (quota_used / total_requests) if total_requests else 0.0
 
-        # Risk flags
+        # Risk flags - 只关注 IP 相关风险
+        # 注意：空回复率和失败率不作为风险标签，因为嵌入模型本身不返回文本内容
         risk_flags: List[str] = []
-        if requests_per_minute >= 120:
-            risk_flags.append("HIGH_RPM")
-        if int(summary.get("unique_ips") or 0) >= 5:
+        if int(summary.get("unique_ips") or 0) >= 10:
             risk_flags.append("MANY_IPS")
-        if failure_rate >= 0.2:
-            risk_flags.append("HIGH_FAILURE_RATE")
-        if empty_rate >= 0.3 and success_requests >= 20:
-            risk_flags.append("HIGH_EMPTY_RATE")
-        
+
         # IP切换频率风险检测
         if ip_switch_analysis.get("rapid_switch_count", 0) >= 3:
             risk_flags.append("IP_RAPID_SWITCH")

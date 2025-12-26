@@ -518,6 +518,7 @@ class DatabaseManager:
             ("idx_logs_created_ip_token", "logs"),
             ("idx_logs_created_user_ip", "logs"),
             ("idx_logs_token_created_ip", "logs"),
+            ("idx_logs_user_created_ip", "logs"),  # IP switch analysis
             ("idx_users_deleted_status", "users"),
             ("idx_users_request_count", "users"),
             ("idx_tokens_user_deleted", "tokens"),

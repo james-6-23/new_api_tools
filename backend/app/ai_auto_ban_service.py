@@ -70,14 +70,17 @@ class AIAutoBanService:
     def _reload_config(self):
         """从本地存储加载配置（仅从SQLite读取，不再使用环境变量）"""
         stored_config = self._storage.get_config(AI_CONFIG_KEY) or {}
-        
+
         # 所有配置仅从本地存储读取
         self._openai_api_key = stored_config.get("api_key", "")
         self._openai_base_url = stored_config.get("base_url", DEFAULT_BASE_URL)
         self._ai_model = stored_config.get("model", DEFAULT_AI_MODEL)
         self._enabled = stored_config.get("enabled", False)
         self._dry_run = stored_config.get("dry_run", True)
-        
+
+        # 定时扫描配置（0 表示关闭，单位：分钟）
+        self._scan_interval_minutes = int(stored_config.get("scan_interval_minutes", 0))
+
         # 白名单用户ID（从本地存储读取）
         whitelist_ids = stored_config.get("whitelist_ids", [])
         if isinstance(whitelist_ids, str):
@@ -135,16 +138,18 @@ class AIAutoBanService:
     def get_suspicious_users(self, window: str = "1h", limit: int = 20) -> List[Dict[str, Any]]:
         """
         获取可疑用户列表（触发风险阈值的用户）
-        
-        筛选条件（满足任一）：
-        - RPM >= 100
-        - IP快速切换 >= 3
-        - 空回复率 >= 80%
-        - 失败率 >= 30%
-        - 多项风险标签叠加
+
+        筛选条件：
+        1. 请求量 >= 50（低活跃用户不进入可疑列表）
+        2. 满足任一 IP 风险标签：
+           - IP数量过多 (>= 10)
+           - IP快速切换 (>= 3次/60秒内)
+           - IP跳动异常 (平均停留<30秒且切换>=3次)
+
+        注意：空回复率和失败率不作为筛选条件，因为嵌入模型本身不返回文本内容
         """
         window_seconds = WINDOW_SECONDS.get(window, 3600)
-        
+
         # 获取排行榜数据
         leaderboards = self._risk_service.get_leaderboards(
             windows=[window],
@@ -152,50 +157,47 @@ class AIAutoBanService:
             sort_by="requests",
             use_cache=False,
         )
-        
+
         candidates = leaderboards.get("windows", {}).get(window, [])
         suspicious = []
-        
+
+        # 只关注 IP 相关的风险标签
+        ip_risk_flags = {"MANY_IPS", "IP_RAPID_SWITCH", "IP_HOPPING"}
+        # 最低请求量门槛
+        min_requests_threshold = 50
+
         for user in candidates:
             user_id = user.get("user_id")
             if not user_id:
                 continue
-                
+
             # 跳过冷却期内的用户
             if self._is_in_cooldown(user_id):
                 continue
-            
+
             # 获取详细分析
             analysis = self._risk_service.get_user_analysis(user_id, window_seconds)
-            risk_flags = analysis.get("risk", {}).get("risk_flags", [])
-            
-            # 判断是否可疑
-            is_suspicious = False
-            
-            # 条件1: 有任何风险标签
-            if risk_flags:
-                is_suspicious = True
-            
-            # 条件2: RPM过高
-            rpm = analysis.get("risk", {}).get("requests_per_minute", 0)
-            if rpm >= 100:
-                is_suspicious = True
-            
-            # 条件3: 空回复率过高
-            empty_rate = analysis.get("summary", {}).get("empty_rate", 0)
-            if empty_rate >= 0.8:
-                is_suspicious = True
-            
+
+            # 检查请求量门槛
+            total_requests = analysis.get("summary", {}).get("total_requests", 0)
+            if total_requests < min_requests_threshold:
+                continue
+
+            risk_flags = set(analysis.get("risk", {}).get("risk_flags", []))
+
+            # 判断是否可疑 - 只检查 IP 相关风险
+            is_suspicious = bool(risk_flags & ip_risk_flags)
+
             if is_suspicious:
                 suspicious.append({
                     "user_id": user_id,
                     "username": user.get("username", ""),
                     "analysis": analysis,
                 })
-                
+
                 if len(suspicious) >= limit:
                     break
-        
+
         return suspicious
 
     def _build_assessment_prompt(self, analysis: Dict[str, Any]) -> str:
@@ -205,41 +207,34 @@ class AIAutoBanService:
         ip_switch = risk.get("ip_switch_analysis", {})
         user = analysis.get("user", {})
         
-        return f"""你是一个 API 风控系统的 AI 助手。请分析以下用户行为数据，判断是否应该封禁该用户。
+        return f"""你是一个 API 风控系统的 AI 助手。请分析以下用户的 IP 行为数据，判断是否存在异常的 IP 切换行为。
 
 ## 用户信息
 - 用户ID: {user.get('id')}
 - 用户名: {user.get('username')}
 - 用户组: {user.get('group') or '默认'}
 
-## 行为数据（最近1小时）
+## 请求概况（最近1小时）
 - 请求总数: {summary.get('total_requests', 0)}
-- 成功请求: {summary.get('success_requests', 0)}
-- 失败请求: {summary.get('failure_requests', 0)}
-- 失败率: {summary.get('failure_rate', 0) * 100:.1f}%
-- 空回复数: {summary.get('empty_count', 0)}
-- 空回复率: {summary.get('empty_rate', 0) * 100:.1f}%
 - 使用模型数: {summary.get('unique_models', 0)}
 - 使用令牌数: {summary.get('unique_tokens', 0)}
 
-## 风险指标
-- 每分钟请求数 (RPM): {risk.get('requests_per_minute', 0):.1f}
-- 平均每请求消耗: ${risk.get('avg_quota_per_request', 0) / 500000:.4f}
-- 已触发风险标签: {risk.get('risk_flags', [])}
-
-## IP 行为分析
+## IP 行为分析（核心判断依据）
 - 使用 IP 数量: {summary.get('unique_ips', 0)}
 - IP 切换次数: {ip_switch.get('switch_count', 0)}
 - 快速切换次数（60秒内）: {ip_switch.get('rapid_switch_count', 0)}
 - 平均 IP 停留时间: {ip_switch.get('avg_ip_duration', 0)} 秒
 - 最短切换间隔: {ip_switch.get('min_switch_interval', 0)} 秒
+- 已触发风险标签: {risk.get('risk_flags', [])}
 
 ## 判断标准
 1. 正常机场用户 IP 切换间隔通常 > 5 分钟
-2. 几秒内频繁切换 IP 是明显异常行为
-3. 高空回复率 + 高请求量 = 疑似 API 滥用/探测
-4. 多项风险标签叠加时风险更高
-5. 低请求量用户即使有异常也风险较低
+2. 几秒内频繁切换 IP 是明显异常行为（可能是多人共用账号或恶意爬取）
+3. 使用 IP 数量 >= 10 且切换频繁是高风险
+4. 多项 IP 风险标签叠加时风险更高
+5. 该用户已通过请求量门槛（>= 50次），属于活跃用户
+
+注意：空回复率和失败率不作为判断依据，因为嵌入模型（如 text-embedding）本身不返回文本内容。
 
 ## 请返回 JSON 格式（严格遵循）:
 ```json
@@ -686,7 +681,12 @@ class AIAutoBanService:
             "risk_score_threshold": RISK_SCORE_BAN_THRESHOLD,
             "confidence_threshold": CONFIDENCE_THRESHOLD,
             "cooldown_hours": AI_ASSESSMENT_COOLDOWN // 3600,
+            "scan_interval_minutes": self._scan_interval_minutes,
         }
+
+    def get_scan_interval(self) -> int:
+        """获取定时扫描间隔（分钟），0 表示关闭"""
+        return self._scan_interval_minutes
 
 
 # 全局实例

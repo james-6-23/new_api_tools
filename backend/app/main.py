@@ -133,20 +133,28 @@ async def lifespan(app: FastAPI):
 
     # 启动后台日志同步任务
     sync_task = asyncio.create_task(background_log_sync())
-    
+
     # 启动后台索引创建任务（仅当有缺失索引时）
     index_task = None
     if db and not index_status.get("all_ready", True):
         index_task = asyncio.create_task(background_ensure_indexes())
 
+    # 启动 AI 自动封禁后台任务
+    ai_ban_task = asyncio.create_task(background_ai_auto_ban_scan())
+
     yield
 
     # 停止后台任务
     sync_task.cancel()
+    ai_ban_task.cancel()
     if index_task:
         index_task.cancel()
     try:
         await sync_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await ai_ban_task
     except asyncio.CancelledError:
         pass
     if index_task:
@@ -220,6 +228,57 @@ async def background_log_sync():
 
         # 每 5 分钟同步一次
         await asyncio.sleep(300)
+
+
+async def background_ai_auto_ban_scan():
+    """后台定时执行 AI 自动封禁扫描"""
+    from .ai_auto_ban_service import get_ai_auto_ban_service
+
+    # 启动后等待 30 秒再开始
+    await asyncio.sleep(30)
+    logger.system("AI 自动封禁后台任务已启动")
+
+    while True:
+        try:
+            service = get_ai_auto_ban_service()
+
+            # 检查是否启用定时扫描
+            scan_interval = service.get_scan_interval()
+            if scan_interval <= 0:
+                # 定时扫描已关闭，等待 1 分钟后再检查配置
+                await asyncio.sleep(60)
+                continue
+
+            # 检查服务是否启用
+            if not service.is_enabled():
+                await asyncio.sleep(60)
+                continue
+
+            # 执行扫描
+            logger.system(f"AI 自动封禁: 开始定时扫描 (间隔: {scan_interval}分钟)")
+            result = await service.run_scan(window="1h", limit=10)
+
+            if result.get("success"):
+                stats = result.get("stats", {})
+                if stats.get("total_scanned", 0) > 0:
+                    logger.business(
+                        "AI 自动封禁定时扫描完成",
+                        scanned=stats.get("total_scanned", 0),
+                        banned=stats.get("banned", 0),
+                        warned=stats.get("warned", 0),
+                        dry_run=result.get("dry_run", True),
+                    )
+
+            # 等待配置的扫描间隔
+            await asyncio.sleep(scan_interval * 60)
+
+        except asyncio.CancelledError:
+            logger.system("AI 自动封禁后台任务已取消")
+            break
+        except Exception as e:
+            logger.error(f"AI 自动封禁后台任务异常: {e}", category="任务")
+            # 出错后等待 5 分钟再重试
+            await asyncio.sleep(300)
 
 
 # Import routes after app is created to avoid circular imports
