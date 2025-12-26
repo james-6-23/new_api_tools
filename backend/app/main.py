@@ -254,6 +254,15 @@ async def background_ai_auto_ban_scan():
                 await asyncio.sleep(60)
                 continue
 
+            # 先等待配置的扫描间隔，再执行扫描
+            logger.system(f"AI 自动封禁: 等待 {scan_interval} 分钟后执行定时扫描")
+            await asyncio.sleep(scan_interval * 60)
+            
+            # 再次检查配置（可能在等待期间被修改）
+            service = get_ai_auto_ban_service()
+            if not service.is_enabled() or service.get_scan_interval() <= 0:
+                continue
+
             # 执行扫描
             logger.system(f"AI 自动封禁: 开始定时扫描 (间隔: {scan_interval}分钟)")
             result = await service.run_scan(window="1h", limit=10)
@@ -268,9 +277,6 @@ async def background_ai_auto_ban_scan():
                         warned=stats.get("warned", 0),
                         dry_run=result.get("dry_run", True),
                     )
-
-            # 等待配置的扫描间隔
-            await asyncio.sleep(scan_interval * 60)
 
         except asyncio.CancelledError:
             logger.system("AI 自动封禁后台任务已取消")

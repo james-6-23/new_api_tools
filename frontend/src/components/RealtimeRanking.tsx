@@ -1726,25 +1726,25 @@ export function RealtimeRanking() {
                             <TableRow
                               key={r.id}
                               className={cn(
-                                "group transition-all duration-200 border-b last:border-0 relative overflow-hidden",
+                                "group transition-all duration-200 border-b last:border-0",
                                 r.action === 'ban' ? "hover:bg-red-50/30 dark:hover:bg-red-950/10" : "hover:bg-green-50/30 dark:hover:bg-green-950/10"
                               )}
                             >
-                              {/* 侧边状态指示条 */}
-                              <div className={cn(
-                                "absolute left-0 top-0 bottom-0 w-1",
-                                r.action === 'ban' ? "bg-red-500/80" : "bg-green-500/80"
-                              )} />
-
                               {/* 时间列 */}
-                              <TableCell className="py-4 pl-6">
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="font-mono text-sm font-bold text-foreground tabular-nums">
-                                    {dateObj.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                                    {dateObj.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-')}
-                                  </span>
+                              <TableCell className="py-4 pl-4">
+                                <div className="flex items-center gap-2">
+                                  <div className={cn(
+                                    "w-1 h-10 rounded-full shrink-0",
+                                    r.action === 'ban' ? "bg-red-500" : "bg-green-500"
+                                  )} />
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-mono text-sm font-bold text-foreground tabular-nums">
+                                      {dateObj.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-medium">
+                                      {dateObj.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-')}
+                                    </span>
+                                  </div>
                                 </div>
                               </TableCell>
 
@@ -1830,7 +1830,7 @@ export function RealtimeRanking() {
 
                               {/* 原因与指标列 */}
                               <TableCell className="py-4">
-                                <div className="flex flex-col gap-2.5">
+                                <div className="flex flex-col gap-2">
                                   {/* 原因标签行 */}
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     {renderReasonBadge(r.reason)}
@@ -1844,8 +1844,8 @@ export function RealtimeRanking() {
                                     )}
                                   </div>
 
-                                  {/* 指标数据行 - 整合的指标组 */}
-                                  {r.context && (r.context.risk || r.context.summary || r.context.risk_score !== undefined) && (
+                                  {/* 指标数据行 - 仅封禁操作显示 */}
+                                  {r.action === 'ban' && r.context && (r.context.risk || r.context.summary || r.context.risk_score !== undefined) && (
                                     <div className="flex flex-wrap items-center gap-2">
                                       <div className="flex items-center bg-muted/30 rounded-lg p-1 border border-border/40 gap-1">
                                         {r.context.risk?.requests_per_minute > 0 && (
@@ -1855,7 +1855,7 @@ export function RealtimeRanking() {
                                             <span className="text-xs font-mono font-black text-foreground">{r.context.risk.requests_per_minute.toFixed(1)}</span>
                                           </div>
                                         )}
-                                        {r.context.summary?.failure_rate !== undefined && (
+                                        {r.context.summary?.failure_rate !== undefined && r.context.summary.failure_rate > 0 && (
                                           <div className={cn(
                                             "flex items-center gap-1.5 px-2 py-1 rounded-md border shadow-xs",
                                             r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-200 text-red-700" : "bg-background"
@@ -1865,7 +1865,7 @@ export function RealtimeRanking() {
                                             <span className="text-xs font-mono font-black">{(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
                                           </div>
                                         )}
-                                        {r.context.summary?.unique_ips > 0 && (
+                                        {r.context.summary?.unique_ips > 1 && (
                                           <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-background border shadow-xs">
                                             <Globe className="w-3 h-3 text-indigo-500" />
                                             <span className="text-[10px] font-bold text-muted-foreground">IP</span>
@@ -2560,7 +2560,7 @@ export function RealtimeRanking() {
           )}
 
           {/* API 配置面板 */}
-          <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <Card className="rounded-xl shadow-sm border border-slate-200">
             <div
               className="px-6 py-4 border-b border-slate-100 bg-white flex justify-between items-center"
             >

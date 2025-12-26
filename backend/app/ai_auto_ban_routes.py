@@ -262,7 +262,7 @@ async def run_scan(
     if window not in WINDOW_SECONDS:
         raise HTTPException(status_code=400, detail=f"无效的时间窗口: {window}")
     
-    result = await service.run_scan(window=window, limit=limit)
+    result = await service.run_scan(window=window, limit=limit, manual=True)
     
     return {
         "success": result.get("success", False),

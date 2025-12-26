@@ -681,27 +681,23 @@ class AIAutoBanService:
         
         return result
 
-    async def run_scan(self, window: str = "1h", limit: int = 10) -> Dict[str, Any]:
+    async def run_scan(self, window: str = "1h", limit: int = 10, manual: bool = False) -> Dict[str, Any]:
         """
         执行一次扫描
         
         Args:
             window: 时间窗口
             limit: 最大处理用户数
+            manual: 是否为手动触发
             
         Returns:
             扫描结果
         """
         scan_id = str(uuid.uuid4())[:8]
+        scan_type = "手动扫描" if manual else "定时扫描"
         
         if not self.is_enabled():
-            # 记录未启用的扫描尝试
-            self._storage.add_ai_audit_log(
-                scan_id=scan_id,
-                status="skipped",
-                window=window,
-                error_message="AI 自动封禁服务未启用",
-            )
+            logger.warning(f"AI封禁{scan_type}: 服务未启用，跳过扫描")
             return {
                 "success": False,
                 "message": "AI 自动封禁服务未启用",
@@ -711,23 +707,22 @@ class AIAutoBanService:
         # 检查 API 是否暂停
         if self._api_suspended:
             remaining = max(0, int(API_FAILURE_COOLDOWN - (time.time() - self._last_failure_time)))
-            self._storage.add_ai_audit_log(
-                scan_id=scan_id,
-                status="suspended",
-                window=window,
-                error_message=f"API 服务暂停中，剩余冷却时间 {remaining} 秒",
-            )
+            logger.warning(f"AI封禁{scan_type}: API服务暂停中，剩余冷却时间 {remaining} 秒")
             return {
                 "success": False,
                 "message": f"API 服务暂停中，剩余冷却时间 {remaining} 秒",
                 "api_suspended": True,
             }
         
+        logger.info(f"AI封禁{scan_type}: 开始扫描 (scan_id={scan_id}, window={window}, limit={limit})")
+        
         start_time = time.time()
         results = []
         
         # 获取可疑用户
         suspicious_users = self.get_suspicious_users(window=window, limit=limit)
+        
+        logger.info(f"AI封禁{scan_type}: 发现 {len(suspicious_users)} 个可疑用户")
         
         for user_data in suspicious_users:
             user_id = user_data["user_id"]
@@ -737,8 +732,9 @@ class AIAutoBanService:
             try:
                 result = await self.process_user(user_id, username, analysis)
                 results.append(result)
+                logger.info(f"AI封禁{scan_type}: 用户 {username}(ID:{user_id}) 处理完成 - 动作: {result.get('action')}")
             except Exception as e:
-                logger.error(f"AI自动封禁: 处理用户 {user_id} 失败 - {e}")
+                logger.error(f"AI封禁{scan_type}: 处理用户 {username}(ID:{user_id}) 失败 - {e}")
                 results.append({
                     "user_id": user_id,
                     "username": username,
@@ -768,24 +764,26 @@ class AIAutoBanService:
         else:
             status = "success"
         
-        # 记录审查日志
-        self._storage.add_ai_audit_log(
-            scan_id=scan_id,
-            status=status,
-            window=window,
-            total_scanned=stats["total_scanned"],
-            total_processed=stats["total_processed"],
-            banned_count=stats["banned"],
-            warned_count=stats["warned"],
-            skipped_count=stats["skipped"],
-            error_count=stats["errors"],
-            dry_run=self._dry_run,
-            elapsed_seconds=round(elapsed, 2),
-            details=results if results else None,
-        )
+        # 只有扫描到用户时才记录审查日志
+        if stats["total_scanned"] > 0:
+            self._storage.add_ai_audit_log(
+                scan_id=scan_id,
+                status=status,
+                window=window,
+                total_scanned=stats["total_scanned"],
+                total_processed=stats["total_processed"],
+                banned_count=stats["banned"],
+                warned_count=stats["warned"],
+                skipped_count=stats["skipped"],
+                error_count=stats["errors"],
+                dry_run=self._dry_run,
+                elapsed_seconds=round(elapsed, 2),
+                details=results if results else None,
+            )
         
+        # 输出扫描完成日志
         logger.business(
-            "AI自动封禁扫描完成",
+            f"AI封禁{scan_type}完成",
             scan_id=scan_id,
             window=window,
             dry_run=self._dry_run,
