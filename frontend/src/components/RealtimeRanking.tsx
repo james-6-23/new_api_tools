@@ -714,6 +714,11 @@ export function RealtimeRanking() {
       } else {
         showToast('error', res.message || '测试失败')
       }
+      
+      // 3秒后自动清除测试结果
+      setTimeout(() => {
+        setAiTestResult(null)
+      }, 3000)
     } catch (e) {
       console.error('Failed to test model:', e)
       showToast('error', '测试失败')
@@ -741,7 +746,7 @@ export function RealtimeRanking() {
       if (res.success) {
         showToast('success', '配置已保存')
         setAiConfig(res.data)
-        setAiConfigExpanded(false)
+        // 移除自动折叠逻辑，保持展开状态
       } else {
         showToast('error', res.message || '保存失败')
       }
@@ -1592,111 +1597,152 @@ export function RealtimeRanking() {
                         {records.length ? records.map((r) => {
                           const isTokenBan = r.context?.token_id !== undefined
                           const tokenName = r.context?.token_name || ''
+                          const dateObj = new Date(r.created_at * 1000)
 
                           return (
-                            <TableRow key={r.id} className="group hover:bg-muted/20 transition-colors">
-                              <TableCell className="text-[12px] text-muted-foreground font-mono whitespace-nowrap py-3">
-                                {formatTime(r.created_at)}
+                            <TableRow key={r.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
+                              <TableCell className="py-4 align-top">
+                                <div className="flex flex-col">
+                                  <span className="font-mono text-xs font-medium text-foreground">
+                                    {dateObj.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                                    {dateObj.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
+                                  </span>
+                                </div>
                               </TableCell>
-                              <TableCell className="py-3">
-                                <div className="flex flex-col gap-1">
+                              
+                              <TableCell className="py-4 align-top">
+                                <div className="flex flex-col items-start gap-1.5">
                                   {r.action === 'ban' ? (
-                                    <div className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30">
+                                      <ShieldBan className="w-3.5 h-3.5" />
                                       <span className="text-xs font-bold">封禁</span>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-green-50 text-green-700 border border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30">
+                                      <ShieldCheck className="w-3.5 h-3.5" />
                                       <span className="text-xs font-bold">解封</span>
                                     </div>
                                   )}
                                   {isTokenBan && (
-                                    <Badge variant="outline" className="text-[10px] h-3.5 px-1 w-fit bg-orange-50/50 dark:bg-orange-950/20 text-orange-600 border-orange-200">令牌</Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3">
-                                <div className="flex flex-col gap-1">
-                                  <div
-                                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
-                                    onClick={() => {
-                                      const mockItem: LeaderboardItem = {
-                                        user_id: r.user_id,
-                                        username: r.username,
-                                        user_status: r.action === 'ban' ? 2 : 1,
-                                        request_count: 0,
-                                        failure_requests: 0,
-                                        failure_rate: 0,
-                                        quota_used: 0,
-                                        prompt_tokens: 0,
-                                        completion_tokens: 0,
-                                        unique_ips: 0
-                                      }
-                                      openUserDialog(mockItem, '24h')
-                                    }}
-                                    title="查看用户分析"
-                                  >
-                                    <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
-                                      {(r.username || `U`)[0]?.toUpperCase()}
-                                    </div>
-                                    <span className="text-xs font-medium truncate max-w-[100px]">{r.username || `User#${r.user_id}`}</span>
-                                  </div>
-                                  <span className="text-[11px] text-muted-foreground tabular-nums pl-2">ID: {r.user_id}</span>
-                                  {isTokenBan && tokenName && (
-                                    <span className="text-[10px] text-orange-600/80 dark:text-orange-400/80 truncate max-w-[140px] mt-0.5" title={tokenName}>
-                                      <code className="bg-orange-100/50 dark:bg-orange-900/30 px-1 rounded ml-2">{tokenName}</code>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 ml-0.5">
+                                      令牌级
                                     </span>
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="py-3">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary border border-primary/20">
-                                    {(r.operator || '系')[0].toUpperCase()}
+
+                              <TableCell className="py-4 align-top">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">
+                                      {(r.username || `U`)[0]?.toUpperCase()}
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span 
+                                        className="text-xs font-bold text-foreground truncate max-w-[120px] hover:text-primary cursor-pointer transition-colors"
+                                        onClick={() => {
+                                          const mockItem: LeaderboardItem = {
+                                            user_id: r.user_id,
+                                            username: r.username,
+                                            user_status: r.action === 'ban' ? 2 : 1,
+                                            request_count: 0,
+                                            failure_requests: 0,
+                                            failure_rate: 0,
+                                            quota_used: 0,
+                                            prompt_tokens: 0,
+                                            completion_tokens: 0,
+                                            unique_ips: 0
+                                          }
+                                          openUserDialog(mockItem, '24h')
+                                        }}
+                                      >
+                                        {r.username || `User#${r.user_id}`}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground font-mono">ID: {r.user_id}</span>
+                                    </div>
                                   </div>
-                                  <span className="text-xs text-muted-foreground">{r.operator || '系统'}</span>
+                                  
+                                  {isTokenBan && tokenName && (
+                                    <div className="flex items-center gap-1.5 pl-8">
+                                      <div className="w-1 h-1 rounded-full bg-slate-300" />
+                                      <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground truncate max-w-[140px]" title={tokenName}>
+                                        {tokenName}
+                                      </code>
+                                    </div>
+                                  )}
                                 </div>
                               </TableCell>
-                              <TableCell className="py-3">
-                                <div className="flex flex-col gap-1.5">
+
+                              <TableCell className="py-4 align-top">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-[10px] font-bold text-indigo-600 border border-indigo-100">
+                                    {(r.operator || '系')[0].toUpperCase()}
+                                  </div>
+                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{r.operator || '系统'}</span>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="py-4 align-top">
+                                <div className="flex flex-col gap-2">
+                                  {/* 原因标签行 */}
                                   <div className="flex flex-wrap items-center gap-1.5">
                                     {renderReasonBadge(r.reason)}
                                     {r.context?.source && (
-                                      <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1 opacity-60">
-                                        {r.context.source === 'risk_center' ? '风控' :
+                                      <Badge variant="secondary" className="text-[10px] h-5 font-normal px-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
+                                        {r.context.source === 'risk_center' ? '自动' :
                                           r.context.source === 'ip_monitoring' ? 'IP监控' :
-                                            r.context.source === 'ban_records' ? '记录' : r.context.source}
+                                            r.context.source === 'ban_records' ? '手动' : 
+                                            r.context.source === 'ai_auto_ban' ? 'AI决策' : r.context.source}
                                       </Badge>
                                     )}
                                   </div>
 
+                                  {/* 指标数据行 - 仅当有相关数据时显示 */}
                                   {r.context && (r.context.risk || r.context.summary) && (
-                                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/80 tabular-nums font-mono">
+                                    <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
                                       {r.context.risk?.requests_per_minute > 0 && (
-                                        <span className="flex items-center gap-1">
-                                          <Activity className="w-2.5 h-2.5" /> RPM:{r.context.risk.requests_per_minute.toFixed(1)}
-                                        </span>
+                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100">
+                                          <Activity className="w-3 h-3 text-blue-500" />
+                                          <span className="font-mono">RPM: {r.context.risk.requests_per_minute.toFixed(1)}</span>
+                                        </div>
                                       )}
                                       {r.context.summary?.failure_rate !== undefined && (
-                                        <span className={cn("flex items-center gap-1", r.context.summary.failure_rate > 0.3 && "text-red-500/80")}>
-                                          <AlertTriangle className="w-2.5 h-2.5" /> 失败:{(r.context.summary.failure_rate * 100).toFixed(0)}%
-                                        </span>
+                                        <div className={cn(
+                                          "flex items-center gap-1 px-1.5 py-0.5 rounded border",
+                                          r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-100 text-red-600" : "bg-slate-50 border-slate-100"
+                                        )}>
+                                          <AlertTriangle className="w-3 h-3" />
+                                          <span className="font-mono">失败: {(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
+                                        </div>
                                       )}
                                       {r.context.summary?.unique_ips > 0 && (
-                                        <span className="flex items-center gap-1">
-                                          <Globe className="w-2.5 h-2.5" /> IP:{r.context.summary.unique_ips}
-                                        </span>
+                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100">
+                                          <Globe className="w-3 h-3 text-indigo-500" />
+                                          <span className="font-mono">IP: {r.context.summary.unique_ips}</span>
+                                        </div>
+                                      )}
+                                      {/* AI 评分展示 */}
+                                      {r.context.risk_score !== undefined && (
+                                        <div className={cn(
+                                          "flex items-center gap-1 px-1.5 py-0.5 rounded border",
+                                          r.context.risk_score >= 8 ? "bg-red-50 border-red-100 text-red-600" : "bg-amber-50 border-amber-100 text-amber-600"
+                                        )}>
+                                          <Activity className="w-3 h-3" />
+                                          <span className="font-mono font-bold">Risk: {r.context.risk_score}</span>
+                                        </div>
                                       )}
                                     </div>
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="text-right py-3">
+
+                              <TableCell className="py-4 align-top text-right">
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                                  className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
                                   onClick={() => {
                                     const mockItem: LeaderboardItem = {
                                       user_id: r.user_id,
@@ -2349,13 +2395,13 @@ export function RealtimeRanking() {
                             onChange={(e) => setAiConfigEdit(prev => ({ ...prev, base_url: e.target.value }))}
                             className="h-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
                           />
-                          <p className="text-xs text-slate-500 px-1">
-                            只需填写 API 地址，系统会自动补全 /v1/chat/completions
-                          </p>
                           {aiConfigEdit.base_url && (
-                            <p className="text-[10px] text-slate-400 font-mono px-1 truncate opacity-70" title={`${aiConfigEdit.base_url.replace(/\/+$/, "")}${/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions`}>
-                              预览路径: {aiConfigEdit.base_url.replace(/\/+$/, "")}{/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions
-                            </p>
+                            <div className="px-1 py-0.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                              <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight mb-0.5">最终请求路径预览:</p>
+                              <p className="text-sm font-bold text-blue-600 font-mono break-all" title={`${aiConfigEdit.base_url.replace(/\/+$/, "")}${/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions`}>
+                                {aiConfigEdit.base_url.replace(/\/+$/, "")}{/\/v1$/.test(aiConfigEdit.base_url.replace(/\/+$/, "")) ? "" : "/v1"}/chat/completions
+                              </p>
+                            </div>
                           )}
                         </div>
 
@@ -2424,6 +2470,17 @@ export function RealtimeRanking() {
                               测试
                             </Button>
                           </div>
+                          {/* Test Result Message - Positioned here for better UX */}
+                          {aiTestResult && (
+                            <div className={cn(
+                              "mt-2 rounded-lg border px-3 py-2 text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300",
+                              aiTestResult.success ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"
+                            )}>
+                              {aiTestResult.success ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+                              <span className="font-medium">{aiTestResult.message}</span>
+                              {aiTestResult.latency_ms && <span className="opacity-70 ml-auto tabular-nums">{aiTestResult.latency_ms}ms</span>}
+                            </div>
+                          )}
                         </div>
 
                         <div className="pt-2 space-y-3">
@@ -2475,20 +2532,6 @@ export function RealtimeRanking() {
                         </div>
                       </div>
                     </div>
-
-                    {/* Test Result Message */}
-                    {aiTestResult && (
-                      <div className={cn(
-                        "rounded-lg border p-4 text-sm flex items-start gap-3",
-                        aiTestResult.success ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"
-                      )}>
-                        {aiTestResult.success ? <Check className="h-5 w-5 shrink-0 mt-0.5" /> : <X className="h-5 w-5 shrink-0 mt-0.5" />}
-                        <div>
-                          <p className="font-semibold">{aiTestResult.message}</p>
-                          {aiTestResult.latency_ms && <p className="text-xs opacity-80 mt-1">延迟: {aiTestResult.latency_ms}ms</p>}
-                        </div>
-                      </div>
-                    )}
 
                     <div className="flex justify-end pt-4 border-t border-slate-100 gap-3">
                       <Button variant="outline" onClick={() => setAiConfigExpanded(false)}>
@@ -2746,79 +2789,124 @@ export function RealtimeRanking() {
 
               {/* AI 运行逻辑说明弹窗 */}
               <Dialog open={isAiLogicModalOpen} onOpenChange={setIsAiLogicModalOpen}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2 text-xl">
-                      <Activity className="h-5 w-5 text-blue-600" />
-                      AI 自动封禁系统运行逻辑
-                    </DialogTitle>
-                    <DialogDescription>
-                      基于多维度行为分析和人工智能决策的风控系统。
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <div className="space-y-6 pt-4">
-                    <section className="space-y-3">
-                      <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs">1</span>
-                        数据筛选与触发门槛
-                      </h4>
-                      <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 leading-relaxed border border-slate-100">
-                        <ul className="list-disc list-inside space-y-1.5 ml-1">
-                          <li><strong>活跃度检查</strong>：仅对最近 1 小时内请求次数超过 <span className="text-blue-600 font-semibold">50 次</span> 的活跃用户进行评估。</li>
-                          <li><strong>风险信号捕捉</strong>：实时捕获命中 <span className="text-orange-600">IP 多地访问</span>、<span className="text-orange-600">快速切换</span> 或 <span className="text-orange-600">区域跳变分析</span> 的特征信号。</li>
-                          <li><strong>白名单保护</strong>：系统自动跳过管理员、VIP 组或手动添加至白名单的 ID。</li>
-                          <li><strong>冷却隔离</strong>：同一用户在 <span className="text-slate-900 font-medium">24 小时</span> 内仅会进行一次深度 AI 评估，避免重复消耗。</li>
-                        </ul>
-                      </div>
-                    </section>
-
-                    <section className="space-y-3">
-                      <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs">2</span>
-                        AI 深度模型评估
-                      </h4>
-                      <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 leading-relaxed border border-slate-100">
-                        <p>系统会将用户的详细行为指纹（包含 IP 停留均值、跳变频率、模型使用分布等数据）发送至模型：</p>
-                        <div className="my-2 flex items-center justify-center">
-                          <code className="px-3 py-1 rounded-md bg-white border border-blue-100 text-blue-700 font-mono font-bold shadow-sm">
-                            {aiConfig?.model || "未配置"}
-                          </code>
+                <DialogContent className="max-w-4xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
+                  {/* Header with decorative background */}
+                  <div className="bg-slate-50/80 border-b border-slate-100 p-6 pb-5">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-3 text-xl text-slate-800">
+                        <div className="p-2.5 bg-blue-600/10 rounded-xl text-blue-600">
+                          <Activity className="h-5 w-5" />
                         </div>
-                        <p>AI 将模拟资深风控师，通过语义分析和行为建模，识别该用户是属于“代理网络跳变”还是“多人共享/大规模爬取行为”。</p>
-                      </div>
-                    </section>
+                        AI 自动封禁系统运行逻辑
+                      </DialogTitle>
+                      <DialogDescription className="text-slate-500 ml-1 mt-1">
+                        系统基于实时流量特征，通过三个阶段进行智能风控决策。
+                      </DialogDescription>
+                    </DialogHeader>
+                  </div>
 
-                    <section className="space-y-3">
-                      <h4 className="font-bold text-slate-900 flex items-center gap-2">
-                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs">3</span>
-                        决策执行标准
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="p-3 rounded-lg border border-red-100 bg-red-50/50">
-                          <div className="text-red-800 font-bold text-xs mb-1 uppercase">执行封禁 (Ban)</div>
-                          <p className="text-xs text-red-700">风险评分 &ge; 8 且 置信度 &ge; 0.8。系统判断为确定性的违规行为。</p>
+                  {/* Body Content - Grid Layout to avoid scrolling */}
+                  <div className="p-6 space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      {/* Stage 1 */}
+                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                          <Globe className="w-16 h-16 text-blue-600" />
                         </div>
-                        <div className="p-3 rounded-lg border border-amber-100 bg-amber-50/50">
-                          <div className="text-amber-800 font-bold text-xs mb-1 uppercase">风险告警 (Warn)</div>
-                          <p className="text-xs text-amber-700">风险评分 &ge; 6 或 建议封禁但置信度不足。仅记录审计日志并发送提醒。</p>
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-600 text-xs font-bold">1</span>
+                          特征筛选
+                        </h4>
+                        <p className="text-xs text-slate-500 leading-relaxed z-10">
+                          系统实时监控并过滤有效流量，仅对满足特定门槛的用户触发评估。
+                        </p>
+                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1.5 flex-1 z-10 border border-slate-100/50">
+                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-blue-400"></div>请求量 &ge; 50 (活跃用户)</div>
+                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-orange-400"></div>命中 IP 异常标签</div>
+                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-400"></div>非白名单/VIP 用户</div>
+                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-400"></div>不在 24h 冷却期内</div>
                         </div>
                       </div>
-                    </section>
 
-                    <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 flex items-start gap-3">
-                      <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg">
-                        <ShieldCheck className="w-4 h-4" />
+                      {/* Stage 2 */}
+                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                          <Activity className="w-16 h-16 text-purple-600" />
+                        </div>
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-600 text-xs font-bold">2</span>
+                          AI 模型研判
+                        </h4>
+                        <p className="text-xs text-slate-500 leading-relaxed z-10">
+                          将用户的行为指纹发送至大模型，模拟资深风控师进行深度分析。
+                        </p>
+                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1.5 flex-1 z-10 border border-slate-100/50">
+                          <div className="font-medium text-slate-700 mb-1">分析维度：</div>
+                          <div className="grid grid-cols-2 gap-1">
+                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">IP 停留时长</span>
+                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">跳变频率</span>
+                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">模型分布</span>
+                            <span className="bg-white px-1.5 py-0.5 rounded border text-center">Token 规律</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-xs text-blue-800 leading-normal">
-                        <p className="font-bold mb-1">系统当前策略：</p>
-                        <p>当前运行在 <span className="font-bold">{aiConfig?.dry_run !== false ? "试运行模式" : "正式运行模式"}</span>。{aiConfig?.scan_interval_minutes ? `系统将每隔 ${aiConfig?.scan_interval_minutes} 分钟自动执行一次全量扫描。` : "目前需手动触发扫描。"}</p>
+
+                      {/* Stage 3 */}
+                      <div className="flex flex-col space-y-3 p-4 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow h-full relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                          <ShieldBan className="w-16 h-16 text-red-600" />
+                        </div>
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2 z-10">
+                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 text-xs font-bold">3</span>
+                          决策执行
+                        </h4>
+                        <p className="text-xs text-slate-500 leading-relaxed z-10">
+                          根据 AI 返回的风险评分 (1-10) 和置信度，执行相应的动作。
+                        </p>
+                        <div className="space-y-2 z-10 flex-1">
+                          <div className="flex items-center justify-between p-2 rounded-lg bg-red-50/50 border border-red-100">
+                            <span className="font-bold text-xs text-red-700">封禁 (Ban)</span>
+                            <span className="text-[10px] text-red-600/80">评分&ge;8 & 置信度&ge;0.8</span>
+                          </div>
+                          <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/50 border border-amber-100">
+                            <span className="font-bold text-xs text-amber-700">告警 (Warn)</span>
+                            <span className="text-[10px] text-amber-600/80">评分&ge;6 或 置信度不足</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status Banner */}
+                    <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                      <div className={cn(
+                        "w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm",
+                        aiConfig?.dry_run !== false ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
+                      )}>
+                        {aiConfig?.dry_run !== false ? <Activity className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-sm font-bold text-slate-800">系统当前策略</span>
+                          {aiConfig?.dry_run !== false ? (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold border border-amber-200">试运行模式</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold border border-emerald-200">正式运行模式</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 truncate">
+                          {aiConfig?.scan_interval_minutes 
+                            ? `自动扫描开启中，周期: ${aiConfig?.scan_interval_minutes} 分钟` 
+                            : "自动扫描已关闭，仅支持手动触发"}
+                        </p>
                       </div>
                     </div>
                   </div>
 
-                  <DialogFooter className="mt-6">
-                    <Button onClick={() => setIsAiLogicModalOpen(false)} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                  <DialogFooter className="p-6 pt-0 sm:justify-center">
+                    <Button 
+                      onClick={() => setIsAiLogicModalOpen(false)} 
+                      className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 hover:shadow-slate-900/20 transition-all hover:-translate-y-0.5"
+                    >
                       我明白了
                     </Button>
                   </DialogFooter>
