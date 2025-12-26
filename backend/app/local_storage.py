@@ -133,6 +133,35 @@ class LocalStorage:
                 ON security_audit(user_id)
             """)
 
+            # AI 审查记录表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    window TEXT DEFAULT '1h',
+                    total_scanned INTEGER DEFAULT 0,
+                    total_processed INTEGER DEFAULT 0,
+                    banned_count INTEGER DEFAULT 0,
+                    warned_count INTEGER DEFAULT 0,
+                    skipped_count INTEGER DEFAULT 0,
+                    error_count INTEGER DEFAULT 0,
+                    dry_run INTEGER DEFAULT 1,
+                    elapsed_seconds REAL DEFAULT 0,
+                    error_message TEXT DEFAULT '',
+                    details TEXT DEFAULT '',
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_time
+                ON ai_audit_logs(created_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_status
+                ON ai_audit_logs(status)
+            """)
+
             conn.commit()
             logger.info(f"LocalStorage initialized at {self.db_path}")
 
@@ -486,6 +515,125 @@ class LocalStorage:
             deleted = cursor.rowcount
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old snapshots")
+            return deleted
+
+    # ==================== AI Audit Log Methods ====================
+
+    def add_ai_audit_log(
+        self,
+        scan_id: str,
+        status: str,
+        window: str = "1h",
+        total_scanned: int = 0,
+        total_processed: int = 0,
+        banned_count: int = 0,
+        warned_count: int = 0,
+        skipped_count: int = 0,
+        error_count: int = 0,
+        dry_run: bool = True,
+        elapsed_seconds: float = 0,
+        error_message: str = "",
+        details: Any = None,
+    ) -> int:
+        """添加 AI 审查记录"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO ai_audit_logs 
+                (scan_id, status, window, total_scanned, total_processed, 
+                 banned_count, warned_count, skipped_count, error_count,
+                 dry_run, elapsed_seconds, error_message, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    scan_id,
+                    status,
+                    window,
+                    total_scanned,
+                    total_processed,
+                    banned_count,
+                    warned_count,
+                    skipped_count,
+                    error_count,
+                    1 if dry_run else 0,
+                    elapsed_seconds,
+                    error_message,
+                    json.dumps(details) if details else "",
+                    int(time.time()),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_ai_audit_logs(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """获取 AI 审查记录列表"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 构建查询
+            where_clause = ""
+            params = []
+            if status:
+                where_clause = "WHERE status = ?"
+                params.append(status)
+            
+            # 获取总数
+            cursor.execute(
+                f"SELECT COUNT(*) FROM ai_audit_logs {where_clause}",
+                params
+            )
+            total = cursor.fetchone()[0]
+            
+            # 获取记录
+            cursor.execute(
+                f"""
+                SELECT * FROM ai_audit_logs 
+                {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params + [limit, offset]
+            )
+            
+            rows = cursor.fetchall()
+            items = []
+            for row in rows:
+                item = dict(row)
+                # 解析 details JSON
+                if item.get("details"):
+                    try:
+                        item["details"] = json.loads(item["details"])
+                    except json.JSONDecodeError:
+                        pass
+                item["dry_run"] = bool(item.get("dry_run"))
+                items.append(item)
+            
+            return {
+                "items": items,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    def cleanup_old_ai_audit_logs(self, max_age_days: int = 30) -> int:
+        """清理旧的 AI 审查记录"""
+        cutoff_time = int(time.time()) - (max_age_days * 86400)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM ai_audit_logs WHERE created_at < ?",
+                (cutoff_time,)
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old AI audit logs")
             return deleted
 
     # ==================== Utility Methods ====================

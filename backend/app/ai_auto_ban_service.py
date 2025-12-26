@@ -19,6 +19,7 @@ AI 自动封禁服务 - NewAPI Middleware Tool
 import json
 import time
 import asyncio
+import uuid
 import httpx
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -57,6 +58,12 @@ DEFAULT_AI_MODEL = ""    # 不预设模型，用户需手动选择
 DEFAULT_BASE_URL = ""  # 不预设API地址，用户需手动配置
 AI_CONFIG_KEY = "ai_ban_config"     # 本地存储配置键名
 
+# API 重试配置
+API_MAX_RETRIES = 3                 # 最大重试次数
+API_RETRY_DELAY = 2                 # 重试间隔（秒）
+API_FAILURE_COOLDOWN = 300          # API 失败后冷却时间（秒），5分钟
+API_MAX_CONSECUTIVE_FAILURES = 5    # 连续失败次数阈值，超过后暂停服务
+
 
 class AIAutoBanService:
     """AI 自动封禁服务"""
@@ -65,6 +72,13 @@ class AIAutoBanService:
         self._storage = get_local_storage()
         self._risk_service = get_risk_monitoring_service()
         self._user_service = get_user_management_service()
+        
+        # API 健康状态
+        self._consecutive_failures = 0      # 连续失败次数
+        self._last_failure_time = 0         # 上次失败时间
+        self._api_suspended = False         # API 是否暂停
+        self._last_error_message = ""       # 最后一次错误信息
+        
         self._reload_config()
 
     def _reload_config(self):
@@ -265,10 +279,23 @@ class AIAutoBanService:
         return f"{base}/v1{endpoint}"
 
     async def _call_openai_api(self, prompt: str) -> Optional[str]:
-        """调用 OpenAI API"""
+        """调用 OpenAI API（带重试和故障处理）"""
         if not self._openai_api_key:
             logger.warning("AI自动封禁: OpenAI API Key 未配置")
             return None
+        
+        # 检查 API 是否处于暂停状态
+        if self._api_suspended:
+            # 检查冷却期是否已过
+            if time.time() - self._last_failure_time < API_FAILURE_COOLDOWN:
+                remaining = int(API_FAILURE_COOLDOWN - (time.time() - self._last_failure_time))
+                logger.warning(f"AI自动封禁: API 服务暂停中，剩余冷却时间 {remaining} 秒")
+                return None
+            else:
+                # 冷却期已过，重置状态尝试恢复
+                logger.info("AI自动封禁: API 冷却期结束，尝试恢复服务")
+                self._api_suspended = False
+                self._consecutive_failures = 0
         
         headers = {
             "Authorization": f"Bearer {self._openai_api_key}",
@@ -285,23 +312,62 @@ class AIAutoBanService:
             "max_tokens": 500,
         }
         
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                url = self._get_endpoint_url(self._openai_base_url, "/chat/completions")
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        except httpx.HTTPStatusError as e:
-            logger.error(f"AI自动封禁: OpenAI API 请求失败 - {e.response.status_code}: {e.response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"AI自动封禁: OpenAI API 调用异常 - {e}")
-            return None
+        last_error = None
+        url = self._get_endpoint_url(self._openai_base_url, "/chat/completions")
+        
+        for attempt in range(1, API_MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # 成功调用，重置失败计数
+                    if self._consecutive_failures > 0:
+                        logger.info(f"AI自动封禁: API 调用恢复正常，之前连续失败 {self._consecutive_failures} 次")
+                    self._consecutive_failures = 0
+                    self._last_error_message = ""
+                    
+                    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                logger.warning(f"AI自动封禁: API 请求失败 (尝试 {attempt}/{API_MAX_RETRIES}) - {last_error}")
+            except httpx.TimeoutException:
+                last_error = "请求超时"
+                logger.warning(f"AI自动封禁: API 请求超时 (尝试 {attempt}/{API_MAX_RETRIES})")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"AI自动封禁: API 调用异常 (尝试 {attempt}/{API_MAX_RETRIES}) - {e}")
+            
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < API_MAX_RETRIES:
+                await asyncio.sleep(API_RETRY_DELAY * attempt)  # 递增延迟
+        
+        # 所有重试都失败了
+        self._consecutive_failures += 1
+        self._last_failure_time = time.time()
+        self._last_error_message = last_error or "未知错误"
+        
+        logger.error(f"AI自动封禁: API 调用失败，已重试 {API_MAX_RETRIES} 次，连续失败 {self._consecutive_failures} 次，错误: {last_error}")
+        
+        # 检查是否需要暂停服务
+        if self._consecutive_failures >= API_MAX_CONSECUTIVE_FAILURES:
+            self._api_suspended = True
+            logger.error(f"AI自动封禁: 连续失败 {self._consecutive_failures} 次，API 服务已暂停，将在 {API_FAILURE_COOLDOWN} 秒后自动尝试恢复")
+            logger.business(
+                "AI封禁服务暂停",
+                reason="API连续调用失败",
+                consecutive_failures=self._consecutive_failures,
+                last_error=self._last_error_message,
+                cooldown_seconds=API_FAILURE_COOLDOWN,
+            )
+        
+        return None
 
     async def fetch_models(self, base_url: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -626,11 +692,35 @@ class AIAutoBanService:
         Returns:
             扫描结果
         """
+        scan_id = str(uuid.uuid4())[:8]
+        
         if not self.is_enabled():
+            # 记录未启用的扫描尝试
+            self._storage.add_ai_audit_log(
+                scan_id=scan_id,
+                status="skipped",
+                window=window,
+                error_message="AI 自动封禁服务未启用",
+            )
             return {
                 "success": False,
                 "message": "AI 自动封禁服务未启用",
                 "enabled": False,
+            }
+        
+        # 检查 API 是否暂停
+        if self._api_suspended:
+            remaining = max(0, int(API_FAILURE_COOLDOWN - (time.time() - self._last_failure_time)))
+            self._storage.add_ai_audit_log(
+                scan_id=scan_id,
+                status="suspended",
+                window=window,
+                error_message=f"API 服务暂停中，剩余冷却时间 {remaining} 秒",
+            )
+            return {
+                "success": False,
+                "message": f"API 服务暂停中，剩余冷却时间 {remaining} 秒",
+                "api_suspended": True,
             }
         
         start_time = time.time()
@@ -668,8 +758,35 @@ class AIAutoBanService:
             "errors": sum(1 for r in results if r.get("action") == "error"),
         }
         
+        # 确定状态
+        if stats["errors"] > 0 and stats["errors"] == stats["total_processed"]:
+            status = "failed"
+        elif stats["errors"] > 0:
+            status = "partial"
+        elif stats["total_scanned"] == 0:
+            status = "empty"
+        else:
+            status = "success"
+        
+        # 记录审查日志
+        self._storage.add_ai_audit_log(
+            scan_id=scan_id,
+            status=status,
+            window=window,
+            total_scanned=stats["total_scanned"],
+            total_processed=stats["total_processed"],
+            banned_count=stats["banned"],
+            warned_count=stats["warned"],
+            skipped_count=stats["skipped"],
+            error_count=stats["errors"],
+            dry_run=self._dry_run,
+            elapsed_seconds=round(elapsed, 2),
+            details=results if results else None,
+        )
+        
         logger.business(
             "AI自动封禁扫描完成",
+            scan_id=scan_id,
             window=window,
             dry_run=self._dry_run,
             **stats,
@@ -678,6 +795,7 @@ class AIAutoBanService:
         
         return {
             "success": True,
+            "scan_id": scan_id,
             "dry_run": self._dry_run,
             "window": window,
             "elapsed_seconds": round(elapsed, 2),
@@ -696,6 +814,11 @@ class AIAutoBanService:
             else:
                 masked_api_key = "*" * len(key)
         
+        # 计算 API 暂停剩余时间
+        api_cooldown_remaining = 0
+        if self._api_suspended:
+            api_cooldown_remaining = max(0, int(API_FAILURE_COOLDOWN - (time.time() - self._last_failure_time)))
+        
         return {
             "enabled": self._enabled,
             "dry_run": self._dry_run,
@@ -709,7 +832,27 @@ class AIAutoBanService:
             "confidence_threshold": CONFIDENCE_THRESHOLD,
             "cooldown_hours": AI_ASSESSMENT_COOLDOWN // 3600,
             "scan_interval_minutes": self._scan_interval_minutes,
+            # API 健康状态
+            "api_health": {
+                "suspended": self._api_suspended,
+                "consecutive_failures": self._consecutive_failures,
+                "last_error": self._last_error_message if self._consecutive_failures > 0 else None,
+                "cooldown_remaining": api_cooldown_remaining,
+            },
         }
+    
+    def reset_api_health(self) -> bool:
+        """手动重置 API 健康状态（用于管理员手动恢复服务）"""
+        self._api_suspended = False
+        self._consecutive_failures = 0
+        self._last_failure_time = 0
+        self._last_error_message = ""
+        logger.business("AI封禁服务手动恢复", action="reset_api_health")
+        return True
+
+    def get_audit_logs(self, limit: int = 50, offset: int = 0, status: Optional[str] = None) -> Dict[str, Any]:
+        """获取审查记录"""
+        return self._storage.get_ai_audit_logs(limit=limit, offset=offset, status=status)
 
     def get_scan_interval(self) -> int:
         """获取定时扫描间隔（分钟），0 表示关闭"""

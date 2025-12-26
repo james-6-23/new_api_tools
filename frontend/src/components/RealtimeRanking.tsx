@@ -142,7 +142,7 @@ const getReasonStyle = (reason: string) => {
 const renderReasonBadge = (reason: string | null) => {
   if (!reason) return <span className="text-muted-foreground">-</span>
   return (
-    <Badge variant="outline" className={cn("font-normal py-0 h-5", getReasonStyle(reason))}>
+    <Badge variant="outline" className={cn("font-medium px-2.5 py-0.5 h-6 text-xs", getReasonStyle(reason))}>
       {reason}
     </Badge>
   )
@@ -383,7 +383,35 @@ export function RealtimeRanking() {
     api_key?: string
     masked_api_key?: string
     scan_interval_minutes?: number
+    api_health?: {
+      suspended: boolean
+      consecutive_failures: number
+      last_error: string | null
+      cooldown_remaining: number
+    }
   } | null>(null)
+  
+  // AI 审查记录
+  const [aiAuditLogs, setAiAuditLogs] = useState<Array<{
+    id: number
+    scan_id: string
+    status: string
+    window: string
+    total_scanned: number
+    total_processed: number
+    banned_count: number
+    warned_count: number
+    skipped_count: number
+    error_count: number
+    dry_run: boolean
+    elapsed_seconds: number
+    error_message: string
+    details: any
+    created_at: number
+  }>>([])
+  const [aiAuditLogsTotal, setAiAuditLogsTotal] = useState(0)
+  const [aiAuditLogsLoading, setAiAuditLogsLoading] = useState(false)
+  
   const [aiSuspiciousUsers, setAiSuspiciousUsers] = useState<Array<{
     user_id: number
     username: string
@@ -431,6 +459,23 @@ export function RealtimeRanking() {
   const [aiConfigExpanded, setAiConfigExpanded] = useState(false)
   const [isAiLogicModalOpen, setIsAiLogicModalOpen] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [selectedAuditLog, setSelectedAuditLog] = useState<{
+    id: number
+    scan_id: string
+    status: string
+    window: string
+    total_scanned: number
+    total_processed: number
+    banned_count: number
+    warned_count: number
+    skipped_count: number
+    error_count: number
+    dry_run: boolean
+    elapsed_seconds: number
+    error_message: string
+    details: any
+    created_at: number
+  } | null>(null)
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -586,6 +631,42 @@ export function RealtimeRanking() {
       console.error('Failed to fetch AI config:', e)
     }
   }, [apiUrl, getAuthHeaders])
+
+  const fetchAiAuditLogs = useCallback(async (showSuccessToast = false) => {
+    setAiAuditLogsLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/audit-logs?limit=20`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setAiAuditLogs(res.data?.items || [])
+        setAiAuditLogsTotal(res.data?.total || 0)
+        if (showSuccessToast) showToast('success', '已刷新')
+      }
+    } catch (e) {
+      console.error('Failed to fetch AI audit logs:', e)
+    } finally {
+      setAiAuditLogsLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
+
+  const handleResetApiHealth = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/reset-api-health`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const res = await response.json()
+      if (res.success) {
+        setAiConfig(res.data)
+        showToast('success', 'API 健康状态已重置')
+      } else {
+        showToast('error', res.message || '重置失败')
+      }
+    } catch (e) {
+      console.error('Failed to reset API health:', e)
+      showToast('error', '重置失败')
+    }
+  }
 
   const fetchAiSuspiciousUsers = useCallback(async (showSuccessToast = false) => {
     setAiLoading(true)
@@ -910,8 +991,9 @@ export function RealtimeRanking() {
     if (view === 'ai_ban') {
       fetchAiConfig()
       fetchAiSuspiciousUsers()
+      fetchAiAuditLogs()
     }
-  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, fetchAiConfig, fetchAiSuspiciousUsers, view])
+  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, fetchAiConfig, fetchAiSuspiciousUsers, fetchAiAuditLogs, view])
 
   useEffect(() => {
     if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on window change
@@ -1393,114 +1475,156 @@ export function RealtimeRanking() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {bannedUsers.length ? bannedUsers.map((user) => (
-                          <TableRow key={user.id} className="group hover:bg-muted/20 transition-colors">
-                            <TableCell className="text-[12px] text-muted-foreground font-mono py-3">
-                              {user.id}
-                            </TableCell>
-                            <TableCell className="py-3">
-                              <div className="flex flex-col gap-1">
-                                <div
-                                  className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer w-fit"
-                                  onClick={() => {
-                                    const mockItem: LeaderboardItem = {
-                                      user_id: user.id,
-                                      username: user.username,
-                                      user_status: 2,
-                                      request_count: 0,
-                                      failure_requests: 0,
-                                      failure_rate: 0,
-                                      quota_used: 0,
-                                      prompt_tokens: 0,
-                                      completion_tokens: 0,
-                                      unique_ips: 0
-                                    }
-                                    openUserDialog(mockItem, '24h')
-                                  }}
-                                  title="查看用户分析"
-                                >
-                                  <div className="w-4 h-4 rounded-full bg-background flex items-center justify-center border text-[10px] text-muted-foreground font-bold">
-                                    {String(user.username)[0]?.toUpperCase()}
+                        {bannedUsers.length ? bannedUsers.map((user) => {
+                          const bannedDate = user.banned_at ? new Date(user.banned_at * 1000) : null
+                          
+                          return (
+                            <TableRow key={user.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
+                              {/* ID 列 */}
+                              <TableCell className="py-5 align-top w-[80px]">
+                                <span className="font-mono text-xs font-bold text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                                  #{user.id}
+                                </span>
+                              </TableCell>
+                              
+                              {/* 用户详情列 */}
+                              <TableCell className="py-5 align-top w-[240px]">
+                                <div className="flex items-start gap-3">
+                                  <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-600 border border-slate-200 shadow-sm shrink-0">
+                                    {(user.username)[0]?.toUpperCase()}
                                   </div>
-                                  <span className="text-xs font-medium truncate max-w-[120px]">{user.username}</span>
+                                  <div className="flex flex-col min-w-0 gap-1">
+                                    <div
+                                      className="flex items-center gap-1.5 cursor-pointer group/name"
+                                      onClick={() => {
+                                        const mockItem: LeaderboardItem = {
+                                          user_id: user.id,
+                                          username: user.username,
+                                          user_status: 2,
+                                          request_count: 0,
+                                          failure_requests: 0,
+                                          failure_rate: 0,
+                                          quota_used: 0,
+                                          prompt_tokens: 0,
+                                          completion_tokens: 0,
+                                          unique_ips: 0
+                                        }
+                                        openUserDialog(mockItem, '24h')
+                                      }}
+                                    >
+                                      <span className="text-sm font-bold text-foreground truncate group-hover/name:text-primary transition-colors">
+                                        {user.username}
+                                      </span>
+                                    </div>
+                                    {user.display_name && user.display_name !== user.username && (
+                                      <span className="text-xs text-muted-foreground truncate">
+                                        {user.display_name}
+                                      </span>
+                                    )}
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-mono">
+                                        Reqs: {formatNumber(user.request_count)}
+                                      </span>
+                                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-mono">
+                                        Quota: {formatQuota(user.used_quota)}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
-                                {user.display_name && user.display_name !== user.username && (
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[160px] pl-2">
-                                    {user.display_name}
+                              </TableCell>
+                              
+                              {/* 封禁时间列 */}
+                              <TableCell className="py-5 align-top w-[140px]">
+                                {bannedDate ? (
+                                  <div className="flex flex-col">
+                                    <span className="font-mono text-sm font-semibold text-foreground tracking-tight">
+                                      {bannedDate.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground mt-1 font-medium">
+                                      {bannedDate.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )}
+                              </TableCell>
+                              
+                              {/* 操作者列 */}
+                              <TableCell className="py-5 align-top w-[120px]">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-200 shrink-0">
+                                    {(user.ban_operator || '系')[0].toUpperCase()}
+                                  </div>
+                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                    {user.ban_operator || '系统'}
                                   </span>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-[12px] text-muted-foreground font-mono whitespace-nowrap py-3">
-                              {user.banned_at ? formatTime(user.banned_at) : '-'}
-                            </TableCell>
-                            <TableCell className="py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500 border">
-                                  {(user.ban_operator || '系')[0].toUpperCase()}
                                 </div>
-                                <span className="text-xs text-muted-foreground">{user.ban_operator || '系统'}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="py-3">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                {renderReasonBadge(user.ban_reason)}
-                                {user.ban_context?.source && (
-                                  <Badge variant="secondary" className="text-[10px] h-4 font-normal px-1 opacity-60">
-                                    {user.ban_context.source === 'risk_center' ? '自动' :
-                                      user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
-                                  </Badge>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right py-3">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-xs text-green-600 hover:bg-green-500/10 hover:text-green-700 font-medium"
-                                  disabled={mutating}
-                                  onClick={() => {
-                                    setBanConfirmDialog({
-                                      open: true,
-                                      type: 'unban',
-                                      userId: user.id,
-                                      username: user.username,
-                                      reason: '',
-                                      disableTokens: false,
-                                      enableTokens: true,
-                                    })
-                                  }}
-                                >
-                                  <ShieldCheck className="h-3.5 w-3.5 mr-1" />
-                                  解封
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                                  onClick={() => {
-                                    const mockItem: LeaderboardItem = {
-                                      user_id: user.id,
-                                      username: user.username,
-                                      user_status: 2,
-                                      request_count: user.request_count,
-                                      failure_requests: 0,
-                                      failure_rate: 0,
-                                      quota_used: user.used_quota,
-                                      prompt_tokens: 0,
-                                      completion_tokens: 0,
-                                      unique_ips: 0
-                                    }
-                                    openUserDialog(mockItem, '24h')
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )) : (
+                              </TableCell>
+                              
+                              {/* 封禁原因列 */}
+                              <TableCell className="py-5 align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {renderReasonBadge(user.ban_reason)}
+                                  {user.ban_context?.source && (
+                                    <Badge variant="secondary" className="text-xs h-6 font-medium px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
+                                      {user.ban_context.source === 'risk_center' ? '自动' :
+                                        user.ban_context.source === 'ip_monitoring' ? 'IP监控' : user.ban_context.source}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              
+                              {/* 操作列 */}
+                              <TableCell className="py-5 align-top text-right">
+                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 bg-white hover:bg-green-50 text-green-600 hover:text-green-700 border-green-200 hover:border-green-300 shadow-sm transition-all"
+                                    disabled={mutating}
+                                    onClick={() => {
+                                      setBanConfirmDialog({
+                                        open: true,
+                                        type: 'unban',
+                                        userId: user.id,
+                                        username: user.username,
+                                        reason: '',
+                                        disableTokens: false,
+                                        enableTokens: true,
+                                      })
+                                    }}
+                                  >
+                                    <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                                    解封
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                                    onClick={() => {
+                                      const mockItem: LeaderboardItem = {
+                                        user_id: user.id,
+                                        username: user.username,
+                                        user_status: 2,
+                                        request_count: user.request_count,
+                                        failure_requests: 0,
+                                        failure_rate: 0,
+                                        quota_used: user.used_quota,
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        unique_ips: 0
+                                      }
+                                      openUserDialog(mockItem, '24h')
+                                    }}
+                                    title="查看用户分析"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        }) : (
                           <TableRow>
                             <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                               <div className="flex flex-col items-center justify-center gap-2">
@@ -1601,47 +1725,50 @@ export function RealtimeRanking() {
 
                           return (
                             <TableRow key={r.id} className="group hover:bg-muted/30 transition-colors border-b last:border-0">
-                              <TableCell className="py-4 align-top">
+                              {/* 时间列 */}
+                              <TableCell className="py-5 align-top w-[140px]">
                                 <div className="flex flex-col">
-                                  <span className="font-mono text-xs font-medium text-foreground">
+                                  <span className="font-mono text-sm font-semibold text-foreground tracking-tight">
                                     {dateObj.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                   </span>
-                                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                                  <span className="text-xs text-muted-foreground mt-1 font-medium">
                                     {dateObj.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
                                   </span>
                                 </div>
                               </TableCell>
                               
-                              <TableCell className="py-4 align-top">
-                                <div className="flex flex-col items-start gap-1.5">
+                              {/* 动作列 */}
+                              <TableCell className="py-5 align-top w-[110px]">
+                                <div className="flex flex-col items-start gap-2">
                                   {r.action === 'ban' ? (
-                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30">
-                                      <ShieldBan className="w-3.5 h-3.5" />
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 text-red-700 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 shadow-sm">
+                                      <ShieldBan className="w-4 h-4" />
                                       <span className="text-xs font-bold">封禁</span>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-green-50 text-green-700 border border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30">
-                                      <ShieldCheck className="w-3.5 h-3.5" />
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 text-green-700 border border-green-100 dark:bg-green-900/20 dark:text-green-400 dark:border-green-900/30 shadow-sm">
+                                      <ShieldCheck className="w-4 h-4" />
                                       <span className="text-xs font-bold">解封</span>
                                     </div>
                                   )}
                                   {isTokenBan && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 ml-0.5">
+                                    <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-orange-50 text-orange-600 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 ml-0.5">
                                       令牌级
                                     </span>
                                   )}
                                 </div>
                               </TableCell>
 
-                              <TableCell className="py-4 align-top">
-                                <div className="flex flex-col gap-1.5">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-600 border border-slate-200">
+                              {/* 用户列 */}
+                              <TableCell className="py-5 align-top w-[180px]">
+                                <div className="flex flex-col gap-2">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-sm font-bold text-slate-600 border border-slate-200 shadow-sm shrink-0">
                                       {(r.username || `U`)[0]?.toUpperCase()}
                                     </div>
                                     <div className="flex flex-col min-w-0">
                                       <span 
-                                        className="text-xs font-bold text-foreground truncate max-w-[120px] hover:text-primary cursor-pointer transition-colors"
+                                        className="text-sm font-bold text-foreground truncate max-w-[130px] hover:text-primary cursor-pointer transition-colors leading-tight mb-0.5"
                                         onClick={() => {
                                           const mockItem: LeaderboardItem = {
                                             user_id: r.user_id,
@@ -1660,14 +1787,14 @@ export function RealtimeRanking() {
                                       >
                                         {r.username || `User#${r.user_id}`}
                                       </span>
-                                      <span className="text-[10px] text-muted-foreground font-mono">ID: {r.user_id}</span>
+                                      <span className="text-xs text-muted-foreground font-mono font-medium">ID: {r.user_id}</span>
                                     </div>
                                   </div>
                                   
                                   {isTokenBan && tokenName && (
-                                    <div className="flex items-center gap-1.5 pl-8">
-                                      <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                      <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground truncate max-w-[140px]" title={tokenName}>
+                                    <div className="flex items-center gap-2 pl-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                      <code className="text-xs bg-muted/60 px-2 py-1 rounded border border-border/50 text-muted-foreground truncate max-w-[160px]" title={tokenName}>
                                         {tokenName}
                                       </code>
                                     </div>
@@ -1675,22 +1802,24 @@ export function RealtimeRanking() {
                                 </div>
                               </TableCell>
 
-                              <TableCell className="py-4 align-top">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-[10px] font-bold text-indigo-600 border border-indigo-100">
+                              {/* 操作者列 */}
+                              <TableCell className="py-5 align-top w-[120px]">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center text-xs font-bold text-indigo-600 border border-indigo-100 shrink-0">
                                     {(r.operator || '系')[0].toUpperCase()}
                                   </div>
-                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{r.operator || '系统'}</span>
+                                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{r.operator || '系统'}</span>
                                 </div>
                               </TableCell>
 
-                              <TableCell className="py-4 align-top">
-                                <div className="flex flex-col gap-2">
+                              {/* 原因与指标列 */}
+                              <TableCell className="py-5 align-top">
+                                <div className="flex flex-col gap-3">
                                   {/* 原因标签行 */}
-                                  <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     {renderReasonBadge(r.reason)}
                                     {r.context?.source && (
-                                      <Badge variant="secondary" className="text-[10px] h-5 font-normal px-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
+                                      <Badge variant="secondary" className="text-xs h-6 font-medium px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
                                         {r.context.source === 'risk_center' ? '自动' :
                                           r.context.source === 'ip_monitoring' ? 'IP监控' :
                                             r.context.source === 'ban_records' ? '手动' : 
@@ -1699,38 +1828,42 @@ export function RealtimeRanking() {
                                     )}
                                   </div>
 
-                                  {/* 指标数据行 - 仅当有相关数据时显示 */}
+                                  {/* 指标数据行 - 独立卡片样式 */}
                                   {r.context && (r.context.risk || r.context.summary) && (
-                                    <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
+                                    <div className="flex flex-wrap gap-3 text-xs text-slate-600">
                                       {r.context.risk?.requests_per_minute > 0 && (
-                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100">
-                                          <Activity className="w-3 h-3 text-blue-500" />
-                                          <span className="font-mono">RPM: {r.context.risk.requests_per_minute.toFixed(1)}</span>
+                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
+                                          <Activity className="w-3.5 h-3.5 text-blue-500" />
+                                          <span className="font-semibold text-slate-500">RPM</span>
+                                          <span className="font-mono font-bold text-slate-700 text-sm">{r.context.risk.requests_per_minute.toFixed(1)}</span>
                                         </div>
                                       )}
                                       {r.context.summary?.failure_rate !== undefined && (
                                         <div className={cn(
-                                          "flex items-center gap-1 px-1.5 py-0.5 rounded border",
-                                          r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-100 text-red-600" : "bg-slate-50 border-slate-100"
+                                          "flex items-center gap-2 px-2.5 py-1.5 rounded-lg border shadow-sm transition-shadow hover:shadow-md",
+                                          r.context.summary.failure_rate > 0.3 ? "bg-red-50 border-red-100 text-red-700" : "bg-white border-slate-200"
                                         )}>
-                                          <AlertTriangle className="w-3 h-3" />
-                                          <span className="font-mono">失败: {(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
+                                          <AlertTriangle className="w-3.5 h-3.5" />
+                                          <span className="font-semibold opacity-70">失败率</span>
+                                          <span className="font-mono font-bold text-sm">{(r.context.summary.failure_rate * 100).toFixed(0)}%</span>
                                         </div>
                                       )}
                                       {r.context.summary?.unique_ips > 0 && (
-                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100">
-                                          <Globe className="w-3 h-3 text-indigo-500" />
-                                          <span className="font-mono">IP: {r.context.summary.unique_ips}</span>
+                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
+                                          <Globe className="w-3.5 h-3.5 text-indigo-500" />
+                                          <span className="font-semibold text-slate-500">IP</span>
+                                          <span className="font-mono font-bold text-slate-700 text-sm">{r.context.summary.unique_ips}</span>
                                         </div>
                                       )}
                                       {/* AI 评分展示 */}
                                       {r.context.risk_score !== undefined && (
                                         <div className={cn(
-                                          "flex items-center gap-1 px-1.5 py-0.5 rounded border",
-                                          r.context.risk_score >= 8 ? "bg-red-50 border-red-100 text-red-600" : "bg-amber-50 border-amber-100 text-amber-600"
+                                          "flex items-center gap-2 px-2.5 py-1.5 rounded-lg border shadow-sm transition-shadow hover:shadow-md",
+                                          r.context.risk_score >= 8 ? "bg-red-50 border-red-100 text-red-700" : "bg-amber-50 border-amber-100 text-amber-700"
                                         )}>
-                                          <Activity className="w-3 h-3" />
-                                          <span className="font-mono font-bold">Risk: {r.context.risk_score}</span>
+                                          <Activity className="w-3.5 h-3.5" />
+                                          <span className="font-semibold opacity-70">Risk</span>
+                                          <span className="font-mono font-bold text-sm">{r.context.risk_score}</span>
                                         </div>
                                       )}
                                     </div>
@@ -1738,11 +1871,11 @@ export function RealtimeRanking() {
                                 </div>
                               </TableCell>
 
-                              <TableCell className="py-4 align-top text-right">
+                              <TableCell className="py-5 align-top text-right">
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
+                                  className="h-9 w-9 text-slate-400 hover:text-primary hover:bg-primary/10 transition-colors"
                                   onClick={() => {
                                     const mockItem: LeaderboardItem = {
                                       user_id: r.user_id,
@@ -2359,6 +2492,56 @@ export function RealtimeRanking() {
                 </div>
               </div>
 
+              {/* API 健康状态警告 */}
+              {aiConfig?.api_health?.suspended && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-amber-800">API 服务已暂停</p>
+                      <p className="text-sm text-amber-600">
+                        连续失败 {aiConfig.api_health.consecutive_failures} 次
+                        {aiConfig.api_health.cooldown_remaining > 0 && (
+                          <span>，剩余冷却时间 {aiConfig.api_health.cooldown_remaining} 秒</span>
+                        )}
+                        {aiConfig.api_health.last_error && (
+                          <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleResetApiHealth}
+                    className="border-amber-300 text-amber-700 hover:bg-amber-100"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    手动恢复
+                  </Button>
+                </div>
+              )}
+
+              {/* API 连续失败警告（未暂停但有失败） */}
+              {aiConfig?.api_health && !aiConfig.api_health.suspended && aiConfig.api_health.consecutive_failures > 0 && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-yellow-100 text-yellow-600 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-yellow-800">API 调用异常</p>
+                    <p className="text-sm text-yellow-600">
+                      最近连续失败 {aiConfig.api_health.consecutive_failures} 次
+                      {aiConfig.api_health.last_error && (
+                        <span className="block mt-1 text-xs">错误: {aiConfig.api_health.last_error}</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* API 配置面板 */}
               <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div
@@ -2787,6 +2970,122 @@ export function RealtimeRanking() {
                 </Card>
               )}
 
+              {/* AI 审查记录 */}
+              <Card className="rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white flex flex-row items-center justify-between">
+                  <h3 className="font-bold text-lg text-slate-800">审查记录</h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-500">共 {aiAuditLogsTotal} 条</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fetchAiAuditLogs(true)}
+                      disabled={aiAuditLogsLoading}
+                      className="h-8"
+                    >
+                      {aiAuditLogsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <div className="bg-white overflow-x-auto">
+                  {aiAuditLogs.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                          <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
+                          <TableHead className="font-bold text-slate-600 w-[80px]">状态</TableHead>
+                          <TableHead className="font-bold text-slate-600 w-[80px]">模式</TableHead>
+                          <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
+                          <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
+                          <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
+                          <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
+                          <TableHead className="font-bold text-slate-600 w-[80px]">耗时</TableHead>
+                          <TableHead className="font-bold text-slate-600">时间</TableHead>
+                          <TableHead className="font-bold text-slate-600">错误信息</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {aiAuditLogs.map((log) => (
+                          <TableRow 
+                            key={log.id} 
+                            className="hover:bg-slate-50/50 cursor-pointer"
+                            onClick={() => setSelectedAuditLog(log)}
+                          >
+                            <TableCell className="font-mono text-xs text-slate-500">{log.scan_id}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  log.status === 'success' ? 'success' :
+                                  log.status === 'partial' ? 'warning' :
+                                  log.status === 'failed' ? 'destructive' :
+                                  log.status === 'empty' ? 'secondary' :
+                                  log.status === 'suspended' ? 'destructive' :
+                                  'outline'
+                                }
+                                className="text-xs"
+                              >
+                                {log.status === 'success' ? '成功' :
+                                 log.status === 'partial' ? '部分成功' :
+                                 log.status === 'failed' ? '失败' :
+                                 log.status === 'empty' ? '无数据' :
+                                 log.status === 'suspended' ? '已暂停' :
+                                 log.status === 'skipped' ? '跳过' : log.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={log.dry_run ? 'secondary' : 'destructive'} className="text-xs">
+                                {log.dry_run ? '试运行' : '正式'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-center font-mono">{log.total_scanned}</TableCell>
+                            <TableCell className="text-center">
+                              {log.banned_count > 0 ? (
+                                <span className="font-bold text-red-600">{log.banned_count}</span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {log.warned_count > 0 ? (
+                                <span className="font-bold text-amber-600">{log.warned_count}</span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {log.error_count > 0 ? (
+                                <span className="font-bold text-red-600">{log.error_count}</span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{log.elapsed_seconds}s</TableCell>
+                            <TableCell className="text-xs text-slate-500">
+                              {new Date(log.created_at * 1000).toLocaleString('zh-CN')}
+                            </TableCell>
+                            <TableCell className="max-w-[200px]">
+                              {log.error_message ? (
+                                <span className="text-xs text-red-600 truncate block" title={log.error_message}>
+                                  {log.error_message}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="h-40 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
+                      <Clock className="h-10 w-10 mb-2 text-slate-300" />
+                      <p className="font-medium text-slate-500">暂无审查记录</p>
+                      <p className="text-xs text-slate-400 mt-1">启用定时扫描后将自动记录</p>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
               {/* AI 运行逻辑说明弹窗 */}
               <Dialog open={isAiLogicModalOpen} onOpenChange={setIsAiLogicModalOpen}>
                 <DialogContent className="max-w-4xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
@@ -2820,11 +3119,38 @@ export function RealtimeRanking() {
                         <p className="text-xs text-slate-500 leading-relaxed z-10">
                           系统实时监控并过滤有效流量，仅对满足特定门槛的用户触发评估。
                         </p>
-                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1.5 flex-1 z-10 border border-slate-100/50">
-                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-blue-400"></div>请求量 &ge; 50 (活跃用户)</div>
-                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-orange-400"></div>命中 IP 异常标签</div>
-                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-400"></div>非白名单/VIP 用户</div>
-                          <div className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-slate-400"></div>不在 24h 冷却期内</div>
+                        <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-2.5 flex-1 z-10 border border-slate-100/50">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2 font-bold text-slate-700">
+                              <div className="w-1 h-1 rounded-full bg-blue-400"></div>
+                              请求量 &ge; 50 (活跃用户)
+                            </div>
+                            <p className="text-[10px] text-slate-500 pl-3">过滤低频调用，确保 AI 分析样本充足并节省 Token 消耗。</p>
+                          </div>
+
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2 font-bold text-slate-700">
+                              <div className="w-1 h-1 rounded-full bg-orange-400"></div>
+                              命中 IP 异常标签
+                            </div>
+                            <p className="text-[10px] text-slate-500 pl-3">仅对出现多IP、快速切换或地域跳变等风险特征的用户进行研判。</p>
+                          </div>
+
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2 font-bold text-slate-700">
+                              <div className="w-1 h-1 rounded-full bg-slate-400"></div>
+                              非白名单 / VIP 用户
+                            </div>
+                            <p className="text-[10px] text-slate-500 pl-3">管理员、受信任渠道及手动白名单用户受保护，系统永不自动封禁。</p>
+                          </div>
+
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2 font-bold text-slate-700">
+                              <div className="w-1 h-1 rounded-full bg-slate-400"></div>
+                              不在 24h 冷却期内
+                            </div>
+                            <p className="text-[10px] text-slate-500 pl-3">同一用户 24 小时内仅执行一次 AI 评估，防止针对同一对象的重复消耗。</p>
+                          </div>
                         </div>
                       </div>
 
@@ -2876,28 +3202,59 @@ export function RealtimeRanking() {
                       </div>
                     </div>
 
-                    {/* Status Banner */}
-                    <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
-                      <div className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm",
-                        aiConfig?.dry_run !== false ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
-                      )}>
-                        {aiConfig?.dry_run !== false ? <Activity className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-sm font-bold text-slate-800">系统当前策略</span>
-                          {aiConfig?.dry_run !== false ? (
-                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold border border-amber-200">试运行模式</span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold border border-emerald-200">正式运行模式</span>
-                          )}
+                    {/* Status Banner - Dynamic Configuration Dashboard */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-5 rounded-2xl bg-slate-50 border border-slate-100 shadow-inner">
+                      {/* Mode Status */}
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-colors",
+                          aiConfig?.dry_run !== false ? "bg-amber-100 text-amber-600" : "bg-emerald-100 text-emerald-600"
+                        )}>
+                          {aiConfig?.dry_run !== false ? <Activity className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
                         </div>
-                        <p className="text-xs text-slate-500 truncate">
-                          {aiConfig?.scan_interval_minutes 
-                            ? `自动扫描开启中，周期: ${aiConfig?.scan_interval_minutes} 分钟` 
-                            : "自动扫描已关闭，仅支持手动触发"}
-                        </p>
+                        <div className="min-w-0">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">运行模式</div>
+                          <div className={cn(
+                            "text-xs font-black truncate",
+                            aiConfig?.dry_run !== false ? "text-amber-700" : "text-emerald-700"
+                          )}>
+                            {aiConfig?.dry_run !== false ? "试运行 (仅记录)" : "正式运行 (自动封禁)"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Model Status */}
+                      <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 shadow-sm">
+                          <Settings className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">配置模型</div>
+                          <div className="text-xs font-black text-slate-800 truncate" title={aiConfig?.model || "未配置"}>
+                            {aiConfig?.model || "尚未选择模型"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Scan Status */}
+                      <div className="flex items-center gap-3 border-l border-slate-200/60 pl-6">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm",
+                          aiConfig?.scan_interval_minutes ? "bg-indigo-100 text-indigo-600" : "bg-slate-200 text-slate-400"
+                        )}>
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-0.5">定时扫描</div>
+                          <div className={cn(
+                            "text-xs font-black truncate",
+                            aiConfig?.scan_interval_minutes ? "text-indigo-700" : "text-slate-500"
+                          )}>
+                            {aiConfig?.scan_interval_minutes 
+                              ? `每 ${aiConfig.scan_interval_minutes >= 60 ? (aiConfig.scan_interval_minutes / 60).toFixed(0) + " 小时" : aiConfig.scan_interval_minutes + " 分钟"}` 
+                              : "已禁用 (手动模式)"}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2910,6 +3267,185 @@ export function RealtimeRanking() {
                       我明白了
                     </Button>
                   </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* 审查记录详情弹窗 */}
+              <Dialog open={!!selectedAuditLog} onOpenChange={(open) => !open && setSelectedAuditLog(null)}>
+                <DialogContent className="max-w-3xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
+                  {selectedAuditLog && (
+                    <>
+                      {/* Header */}
+                      <div className={cn(
+                        "p-6 border-b",
+                        selectedAuditLog.status === 'success' ? "bg-emerald-50" :
+                        selectedAuditLog.status === 'partial' ? "bg-amber-50" :
+                        selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-50" :
+                        "bg-slate-50"
+                      )}>
+                        <DialogHeader>
+                          <DialogTitle className="flex items-center gap-3 text-xl">
+                            <div className={cn(
+                              "p-2.5 rounded-xl",
+                              selectedAuditLog.status === 'success' ? "bg-emerald-100 text-emerald-600" :
+                              selectedAuditLog.status === 'partial' ? "bg-amber-100 text-amber-600" :
+                              selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-100 text-red-600" :
+                              "bg-slate-100 text-slate-600"
+                            )}>
+                              <Activity className="h-5 w-5" />
+                            </div>
+                            AI 审查报告
+                          </DialogTitle>
+                          <DialogDescription className="mt-2 flex items-center gap-3">
+                            <span className="font-mono text-sm bg-white/50 px-2 py-0.5 rounded">#{selectedAuditLog.scan_id}</span>
+                            <span>{new Date(selectedAuditLog.created_at * 1000).toLocaleString('zh-CN')}</span>
+                          </DialogDescription>
+                        </DialogHeader>
+                      </div>
+
+                      {/* Body */}
+                      <div className="p-6 space-y-6">
+                        {/* 状态概览 */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="text-3xl font-black text-slate-700">{selectedAuditLog.total_scanned}</div>
+                            <div className="text-xs text-slate-500 mt-1">扫描用户</div>
+                          </div>
+                          <div className="text-center p-4 rounded-xl bg-red-50 border border-red-100">
+                            <div className="text-3xl font-black text-red-600">{selectedAuditLog.banned_count}</div>
+                            <div className="text-xs text-red-500 mt-1">封禁用户</div>
+                          </div>
+                          <div className="text-center p-4 rounded-xl bg-amber-50 border border-amber-100">
+                            <div className="text-3xl font-black text-amber-600">{selectedAuditLog.warned_count}</div>
+                            <div className="text-xs text-amber-500 mt-1">告警用户</div>
+                          </div>
+                          <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
+                            <div className="text-3xl font-black text-slate-600">{selectedAuditLog.skipped_count}</div>
+                            <div className="text-xs text-slate-500 mt-1">跳过用户</div>
+                          </div>
+                        </div>
+
+                        {/* 执行信息 */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500">状态:</span>
+                            <Badge
+                              variant={
+                                selectedAuditLog.status === 'success' ? 'success' :
+                                selectedAuditLog.status === 'partial' ? 'warning' :
+                                selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? 'destructive' :
+                                'secondary'
+                              }
+                            >
+                              {selectedAuditLog.status === 'success' ? '成功' :
+                               selectedAuditLog.status === 'partial' ? '部分成功' :
+                               selectedAuditLog.status === 'failed' ? '失败' :
+                               selectedAuditLog.status === 'empty' ? '无数据' :
+                               selectedAuditLog.status === 'suspended' ? '已暂停' :
+                               selectedAuditLog.status === 'skipped' ? '跳过' : selectedAuditLog.status}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500">模式:</span>
+                            <Badge variant={selectedAuditLog.dry_run ? 'secondary' : 'destructive'}>
+                              {selectedAuditLog.dry_run ? '试运行' : '正式运行'}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500">时间窗口:</span>
+                            <span className="font-medium">{selectedAuditLog.window}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500">耗时:</span>
+                            <span className="font-mono">{selectedAuditLog.elapsed_seconds}s</span>
+                          </div>
+                        </div>
+
+                        {/* 错误信息 */}
+                        {selectedAuditLog.error_message && (
+                          <div className="p-4 rounded-xl bg-red-50 border border-red-200">
+                            <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
+                              <AlertTriangle className="h-4 w-4" />
+                              错误信息
+                            </div>
+                            <p className="text-sm text-red-600">{selectedAuditLog.error_message}</p>
+                          </div>
+                        )}
+
+                        {/* 处理详情 */}
+                        {selectedAuditLog.details && Array.isArray(selectedAuditLog.details) && selectedAuditLog.details.length > 0 && (
+                          <div className="space-y-3">
+                            <h4 className="font-semibold text-slate-700 flex items-center gap-2">
+                              <Eye className="h-4 w-4" />
+                              处理详情 ({selectedAuditLog.details.length} 条)
+                            </h4>
+                            <div className="max-h-64 overflow-y-auto space-y-2">
+                              {selectedAuditLog.details.map((detail: any, idx: number) => (
+                                <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 text-sm">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium">{detail.username || `用户 ${detail.user_id}`}</span>
+                                      <span className="text-slate-400 text-xs">ID: {detail.user_id}</span>
+                                    </div>
+                                    <Badge
+                                      variant={
+                                        detail.action === 'ban' ? 'destructive' :
+                                        detail.action === 'warn' ? 'warning' :
+                                        detail.action === 'error' ? 'destructive' :
+                                        'secondary'
+                                      }
+                                      className="text-xs"
+                                    >
+                                      {detail.action === 'ban' ? '封禁' :
+                                       detail.action === 'warn' ? '告警' :
+                                       detail.action === 'monitor' ? '观察' :
+                                       detail.action === 'skip' ? '跳过' :
+                                       detail.action === 'error' ? '错误' : detail.action}
+                                    </Badge>
+                                  </div>
+                                  {detail.assessment && (
+                                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                                      <span>风险分: <span className={cn(
+                                        "font-bold",
+                                        detail.assessment.risk_score >= 8 ? "text-red-600" :
+                                        detail.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
+                                      )}>{detail.assessment.risk_score}/10</span></span>
+                                      <span>置信度: <span className="font-bold">{(detail.assessment.confidence * 100).toFixed(0)}%</span></span>
+                                    </div>
+                                  )}
+                                  {detail.assessment?.reason && (
+                                    <p className="mt-2 text-xs text-slate-600 bg-white p-2 rounded border border-slate-100">
+                                      {detail.assessment.reason}
+                                    </p>
+                                  )}
+                                  {detail.message && detail.action === 'error' && (
+                                    <p className="mt-2 text-xs text-red-600">{detail.message}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 无详情时的提示 */}
+                        {(!selectedAuditLog.details || !Array.isArray(selectedAuditLog.details) || selectedAuditLog.details.length === 0) && selectedAuditLog.total_scanned === 0 && (
+                          <div className="text-center py-8 text-slate-500">
+                            <Clock className="h-10 w-10 mx-auto mb-2 text-slate-300" />
+                            <p>本次扫描未发现可疑用户</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <DialogFooter className="p-6 pt-0 sm:justify-center">
+                        <Button 
+                          onClick={() => setSelectedAuditLog(null)} 
+                          className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white"
+                        >
+                          关闭
+                        </Button>
+                      </DialogFooter>
+                    </>
+                  )}
                 </DialogContent>
               </Dialog>
 

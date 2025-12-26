@@ -313,8 +313,16 @@ class DashboardService:
         Returns:
             List of DailyTrend for each day.
         """
+        # Ensure we include today
+        now = datetime.now()
+        date_list = [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
+        date_list.reverse()  # Sort ascending
+        
+        # Calculate start timestamp from the first date in our list (at 00:00:00)
+        start_date_str = date_list[0]
+        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
+        start_time = int(start_dt.timestamp())
         end_time = int(time.time())
-        start_time = end_time - (days * 86400)
 
         # 根据数据库类型选择正确的日期函数
         from .database import DatabaseEngine
@@ -323,27 +331,27 @@ class DashboardService:
         if is_pg:
             sql = """
                 SELECT
-                    DATE(TO_TIMESTAMP(created_at)) as date,
+                    TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD') as date,
                     COUNT(*) as request_count,
                     COALESCE(SUM(quota), 0) as quota_used,
                     COUNT(DISTINCT user_id) as unique_users
                 FROM logs
                 WHERE created_at >= :start_time AND created_at <= :end_time
                     AND type = 2
-                GROUP BY DATE(TO_TIMESTAMP(created_at))
+                GROUP BY TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')
                 ORDER BY date ASC
             """
         else:
             sql = """
                 SELECT
-                    DATE(FROM_UNIXTIME(created_at)) as date,
+                    DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as date,
                     COUNT(*) as request_count,
                     COALESCE(SUM(quota), 0) as quota_used,
                     COUNT(DISTINCT user_id) as unique_users
                 FROM logs
                 WHERE created_at >= :start_time AND created_at <= :end_time
                     AND type = 2
-                GROUP BY DATE(FROM_UNIXTIME(created_at))
+                GROUP BY DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d')
                 ORDER BY date ASC
             """
 
@@ -352,12 +360,7 @@ class DashboardService:
         # Build a dict of existing data
         data_by_date: Dict[str, DailyTrend] = {}
         for row in result:
-            date_val = row["date"]
-            if isinstance(date_val, datetime):
-                date_str = date_val.strftime("%Y-%m-%d")
-            else:
-                date_str = str(date_val)
-
+            date_str = str(row["date"])
             data_by_date[date_str] = DailyTrend(
                 date=date_str,
                 request_count=int(row["request_count"] or 0),
@@ -365,11 +368,9 @@ class DashboardService:
                 unique_users=int(row["unique_users"] or 0),
             )
 
-        # Fill in all dates in the range (including days with no data)
+        # Fill in all dates in the range
         trends = []
-        for i in range(days):
-            day_ts = start_time + (i * 86400)
-            date_str = datetime.fromtimestamp(day_ts).strftime("%Y-%m-%d")
+        for date_str in date_list:
             if date_str in data_by_date:
                 trends.append(data_by_date[date_str])
             else:
@@ -393,7 +394,17 @@ class DashboardService:
             List of hourly trend data.
         """
         end_time = int(time.time())
-        start_time = end_time - (hours * 3600)
+        # Round down start time to the beginning of the hour
+        start_time_raw = end_time - (hours * 3600)
+        
+        # Generate full list of hour timestamps (rounded to hour)
+        hour_timestamps = []
+        current_hour_ts = (end_time // 3600) * 3600
+        for i in range(hours):
+            hour_timestamps.append(current_hour_ts - (i * 3600))
+        hour_timestamps.reverse() # Ascending order
+        
+        start_time = hour_timestamps[0]
 
         # Group by hour
         sql = """
@@ -409,17 +420,37 @@ class DashboardService:
             ORDER BY hour_ts ASC
         """
         result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
-
-        return [
-            {
-                "hour": datetime.fromtimestamp(int(row["hour_ts"])).strftime("%H:%M"),
-                "timestamp": int(row["hour_ts"]),
+        
+        # Map results to dict
+        data_by_hour = {}
+        for row in result:
+            ts = int(row["hour_ts"])
+            data_by_hour[ts] = {
                 "request_count": int(row["request_count"] or 0),
                 "quota_used": int(row["quota_used"] or 0),
                 "unique_users": int(row["unique_users"] or 0),
             }
-            for row in result
-        ]
+
+        # Fill gaps
+        trends = []
+        for ts in hour_timestamps:
+            hour_str = datetime.fromtimestamp(ts).strftime("%H:%M")
+            if ts in data_by_hour:
+                trends.append({
+                    "hour": hour_str,
+                    "timestamp": ts,
+                    **data_by_hour[ts]
+                })
+            else:
+                trends.append({
+                    "hour": hour_str,
+                    "timestamp": ts,
+                    "request_count": 0,
+                    "quota_used": 0,
+                    "unique_users": 0,
+                })
+                
+        return trends
 
     def get_top_users(
         self,

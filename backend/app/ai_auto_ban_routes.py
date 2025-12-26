@@ -94,6 +94,34 @@ async def save_config(
         raise HTTPException(status_code=500, detail="保存配置失败")
 
 
+@router.post("/reset-api-health")
+async def reset_api_health(_: str = Depends(verify_auth)):
+    """手动重置 API 健康状态，恢复暂停的服务"""
+    service = get_ai_auto_ban_service()
+    success = service.reset_api_health()
+    return {
+        "success": success,
+        "message": "API 健康状态已重置" if success else "重置失败",
+        "data": service.get_config(),
+    }
+
+
+@router.get("/audit-logs")
+async def get_audit_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    status: Optional[str] = Query(default=None),
+    _: str = Depends(verify_auth),
+):
+    """获取 AI 审查记录"""
+    service = get_ai_auto_ban_service()
+    result = service.get_audit_logs(limit=limit, offset=offset, status=status)
+    return {
+        "success": True,
+        "data": result,
+    }
+
+
 @router.post("/models")
 async def fetch_models(
     request: FetchModelsRequest,

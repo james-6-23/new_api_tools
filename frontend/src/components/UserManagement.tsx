@@ -934,36 +934,61 @@ export function UserManagement() {
 
                     {/* 切换记录 */}
                     {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="text-xs text-muted-foreground">最近切换记录:</div>
-                        <div className="rounded-lg border overflow-hidden max-h-[180px] overflow-y-auto">
-                          {analysis.risk.ip_switch_analysis.switch_details.slice(-8).reverse().map((detail, idx) => (
-                            <div 
-                              key={idx} 
-                              className={cn(
-                                "flex items-center justify-between px-2.5 py-1.5 text-xs border-b last:border-b-0",
-                                detail.interval <= 60 ? "bg-red-50/50 dark:bg-red-900/10" : "bg-background"
-                              )}
-                            >
-                              <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <span className="text-muted-foreground whitespace-nowrap">{formatAnalysisTime(detail.time)}</span>
-                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.from_ip}>{detail.from_ip}</code>
-                                <span className="text-muted-foreground">→</span>
-                                <code className="font-mono text-xs truncate max-w-[90px]" title={detail.to_ip}>{detail.to_ip}</code>
-                              </div>
-                              <div className={cn(
-                                "flex items-center gap-1 whitespace-nowrap ml-2",
-                                detail.interval <= 60 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
-                              )}>
-                                {detail.interval <= 60 ? (
-                                  <AlertTriangle className="w-3 h-3" />
-                                ) : (
-                                  <ShieldCheck className="w-3 h-3" />
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-semibold text-muted-foreground">最近切换记录 (显示 IP 跳变逻辑):</div>
+                          <div className="text-xs text-muted-foreground italic flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> 间隔越短，共享账号可能性越大
+                          </div>
+                        </div>
+                        <div className="rounded-lg border overflow-hidden shadow-sm">
+                          <div className="bg-muted/30 px-3 py-2 flex text-xs uppercase tracking-wider font-bold text-muted-foreground border-b border-border/60">
+                            <div className="w-[120px]">切换时间</div>
+                            <div className="flex-1 px-2 text-center">源 IP 地址</div>
+                            <div className="w-8"></div>
+                            <div className="flex-1 px-2 text-center">目标 IP 地址</div>
+                            <div className="w-24 text-right">切换间隔</div>
+                          </div>
+                          <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
+                            {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
+                              <div
+                                key={idx}
+                                className={cn(
+                                  "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
+                                  detail.interval <= 60 ? "bg-red-50/40 dark:bg-red-900/10" : "bg-background"
                                 )}
-                                <span>{detail.interval}s</span>
+                              >
+                                <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
+                                  {formatAnalysisTime(detail.time)}
+                                </div>
+                                <div className="flex-1 px-2 flex justify-center">
+                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                    {detail.from_ip}
+                                  </code>
+                                </div>
+                                <div className="w-8 flex justify-center">
+                                  <span className="text-muted-foreground/50 group-hover:text-primary transition-colors">→</span>
+                                </div>
+                                <div className="flex-1 px-2 flex justify-center">
+                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                    {detail.to_ip}
+                                  </code>
+                                </div>
+                                <div className="w-24 text-right">
+                                  <Badge
+                                    variant={detail.interval <= 60 ? "destructive" : "outline"}
+                                    className={cn(
+                                      "px-2 py-0.5 h-6 text-xs font-mono",
+                                      detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
+                                    )}
+                                  >
+                                    {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
+                                    {detail.interval}s
+                                  </Badge>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}

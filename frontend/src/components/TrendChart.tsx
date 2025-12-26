@@ -87,12 +87,11 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
             </div>
 
             {/* Chart Area */}
-            <div className="absolute inset-0 ml-0 flex items-end justify-between gap-0.5 sm:gap-1 pl-2 z-10">
+            <div className="absolute inset-0 ml-0 flex items-end justify-between gap-1.5 sm:gap-2 pl-2 z-10">
               {processedData.map((item, index) => {
                  // Determine if we should show the label
                  const total = processedData.length;
                  const isHourly = !!item.hour;
-                 // Always show if hourly, otherwise use adaptive logic
                  const showLabel = isHourly || (total <= 12) || (index % 2 === 0) || (index === total - 1);
 
                  return (
@@ -102,27 +101,24 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
                     onMouseEnter={() => setHoveredIndex(index)}
                     onMouseLeave={() => setHoveredIndex(null)}
                   >
-                    {/* Hover Line */}
-                    <div 
-                      className={cn(
-                        "absolute bottom-0 w-[1px] bg-primary/20 transition-all duration-300 pointer-events-none",
-                        hoveredIndex === index ? "h-full opacity-100" : "h-0 opacity-0"
-                      )} 
-                    />
+                    {/* Ghost Background Bar */}
+                    <div className="absolute inset-x-0 bottom-0 top-0 bg-muted/20 rounded-t-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                    {/* Bar */}
+                    {/* Active Bar */}
                     <div 
-                      className="relative w-full flex items-end transition-all duration-500 ease-out"
+                      className="relative w-full flex items-end transition-all duration-500 ease-out z-10"
                       style={{ height: '100%' }}
                     >
                        <div 
                           className={cn(
-                            "w-full rounded-t-[1px] transition-all duration-300 relative",
-                            "bg-gradient-to-t from-primary/70 to-primary",
-                            hoveredIndex === index ? "opacity-100 scale-x-110 shadow-[0_0_10px_rgba(var(--primary),0.2)]" : "opacity-80"
+                            "w-full rounded-t-sm transition-all duration-300 relative border-t border-x border-white/10",
+                            "bg-gradient-to-b from-primary to-primary/80 dark:from-primary/90 dark:to-primary/60",
+                            hoveredIndex === index 
+                              ? "opacity-100 shadow-[0_0_15px_rgba(var(--primary),0.3)] brightness-110" 
+                              : "opacity-85 hover:opacity-100"
                           )}
                           style={{ 
-                            height: `${Math.max(item.height, 2)}%`,
+                            height: `${Math.max(item.height, 1.5)}%`,
                           }}
                        >
                        </div>
