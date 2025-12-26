@@ -69,7 +69,7 @@ class AIAutoBanService:
 
     def _reload_config(self):
         """从本地存储加载配置（仅从SQLite读取，不再使用环境变量）"""
-        stored_config = self._storage.get_data(AI_CONFIG_KEY) or {}
+        stored_config = self._storage.get_config(AI_CONFIG_KEY) or {}
         
         # 所有配置仅从本地存储读取
         self._openai_api_key = stored_config.get("api_key", "")
@@ -92,9 +92,9 @@ class AIAutoBanService:
     def save_config(self, config: Dict[str, Any]) -> bool:
         """保存配置到本地存储"""
         try:
-            current = self._storage.get_data(AI_CONFIG_KEY) or {}
+            current = self._storage.get_config(AI_CONFIG_KEY) or {}
             current.update(config)
-            self._storage.set_data(AI_CONFIG_KEY, current)
+            self._storage.set_config(AI_CONFIG_KEY, current)
             self._reload_config()
             logger.business("AI封禁配置已更新", **{k: v if k != "api_key" else "***" for k, v in config.items()})
             return True
@@ -104,7 +104,7 @@ class AIAutoBanService:
 
     def get_saved_config(self) -> Dict[str, Any]:
         """获取保存的配置"""
-        return self._storage.get_data(AI_CONFIG_KEY) or {}
+        return self._storage.get_config(AI_CONFIG_KEY) or {}
 
     def is_enabled(self) -> bool:
         """检查服务是否启用"""

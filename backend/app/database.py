@@ -63,11 +63,13 @@ class DBConfig:
 
 # Recommended indexes for IP monitoring and risk analysis
 RECOMMENDED_INDEXES = [
-    # IP monitoring indexes
+    # IP monitoring indexes - optimized for common queries
     ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
     ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
     ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),
     ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
+    # Composite index for IP switch analysis (ORDER BY created_at with ip filter)
+    ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
     # Risk monitoring indexes
     ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
     # Analytics optimization - for incremental log processing
@@ -399,11 +401,13 @@ class DatabaseManager:
             ("idx_logs_type_created", "logs", ["type", "created_at"]),
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),
 
-            # Lower priority: IP monitoring (can be created later)
+            # IP monitoring indexes - optimized for common queries
             ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
             ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
             ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),
             ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
+            # IP switch analysis (user + time + ip for ORDER BY queries)
+            ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
 
             # Other tables (usually small, fast to index)
             ("idx_users_deleted_status", "users", ["deleted_at", "status"]),
