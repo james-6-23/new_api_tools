@@ -222,3 +222,37 @@ async def invalidate_dashboard_cache(
         message=f"Invalidated {deleted} cache entries",
         data={"deleted": deleted},
     )
+
+
+class IPDistributionResponse(BaseModel):
+    """Response model for IP distribution."""
+    success: bool
+    data: dict
+
+
+@router.get("/ip-distribution", response_model=IPDistributionResponse)
+async def get_ip_distribution(
+    window: str = Query(default="24h", description="时间窗口 (1h/6h/24h/7d)"),
+    no_cache: bool = Query(default=False, description="跳过缓存"),
+    _: str = Depends(verify_auth),
+):
+    """
+    获取 IP 地区分布统计。
+
+    返回按国家、省份、城市维度的 IP 访问分布数据。
+    
+    - **window**: 时间窗口
+        - 1h: 最近1小时
+        - 6h: 最近6小时
+        - 24h: 最近24小时
+        - 7d: 最近7天
+    """
+    valid_windows = ["1h", "6h", "24h", "7d"]
+    if window not in valid_windows:
+        raise InvalidParamsError(message=f"Invalid window: {window}")
+
+    from .ip_distribution_service import get_ip_distribution_service
+    service = get_ip_distribution_service()
+    data = await service.get_distribution(window=window, use_cache=not no_cache)
+
+    return IPDistributionResponse(success=True, data=data)
