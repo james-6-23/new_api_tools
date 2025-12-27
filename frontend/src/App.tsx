@@ -47,6 +47,14 @@ function App() {
             'Authorization': `Bearer ${token}`,
           },
         })
+        
+        // 处理 401 未授权错误 - token 失效，需要重新登录
+        if (response.status === 401) {
+          console.warn('Token invalid or expired, logging out...')
+          logout()
+          return
+        }
+        
         const data = await response.json()
         
         if (data.success && data.data.status === 'ready') {
@@ -63,7 +71,7 @@ function App() {
     }
 
     checkWarmupStatus()
-  }, [isAuthenticated, token, apiUrl])
+  }, [isAuthenticated, token, apiUrl, logout])
 
   // Sync tab with URL pathname (History API)
   // Only update if main path segment changes, preserve sub-routes

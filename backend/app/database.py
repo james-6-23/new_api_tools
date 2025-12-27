@@ -55,10 +55,18 @@ class DBConfig:
 
     def get_connection_url(self) -> str:
         """Generate SQLAlchemy connection URL."""
+        # 处理 IPv6 地址格式 - 需要用方括号包裹
+        host = self.host
+        if ':' in host and not host.startswith('['):
+            # IPv6 地址需要用方括号包裹
+            host = f'[{host}]'
+        
         if self.engine == DatabaseEngine.POSTGRESQL:
-            return f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+            return f"postgresql+psycopg2://{self.user}:{self.password}@{host}:{self.port}/{self.database}"
         else:
-            return f"mysql+pymysql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}?charset=utf8mb4"
+            # MySQL 连接参数
+            # charset=utf8mb4 支持完整 Unicode
+            return f"mysql+pymysql://{self.user}:{self.password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
 
 
 # Recommended indexes for IP monitoring and risk analysis

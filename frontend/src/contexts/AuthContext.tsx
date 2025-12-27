@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
+import { setGlobalLogout, clearGlobalLogout } from '../lib/api'
 
 const TOKEN_KEY = 'newapi_tools_token'
 const TOKEN_EXPIRY_KEY = 'newapi_tools_token_expiry'
@@ -101,6 +102,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(TOKEN_EXPIRY_KEY)
   }, [])
+
+  // Set global logout function for API interceptor
+  useEffect(() => {
+    setGlobalLogout(logout)
+    return () => clearGlobalLogout()
+  }, [logout])
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, token, login, logout }}>

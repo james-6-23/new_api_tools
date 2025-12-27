@@ -26,7 +26,7 @@ interface WarmupScreenProps {
 }
 
 export function WarmupScreen({ onReady }: WarmupScreenProps) {
-  const { token } = useAuth()
+  const { token, logout } = useAuth()
   const [status, setStatus] = useState<WarmupStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isExiting, setIsExiting] = useState(false)
@@ -45,6 +45,16 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
             'Authorization': `Bearer ${token}`,
           },
         })
+        
+        // 处理 401 未授权错误 - token 失效，需要重新登录
+        if (response.status === 401) {
+          console.warn('Token invalid or expired, logging out...')
+          if (mounted) {
+            logout()
+          }
+          return
+        }
+        
         const data = await response.json()
         
         if (!mounted) return
@@ -75,7 +85,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
       mounted = false
       clearInterval(interval)
     }
-  }, [apiUrl, token, onReady])
+  }, [apiUrl, token, onReady, logout])
 
   // Determine which step is currently "active"
   const activeStepIndex = useMemo(() => {

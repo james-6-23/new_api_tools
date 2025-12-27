@@ -130,6 +130,12 @@ detect_db_container_by_exposed_port() {
   return 0
 }
 
+# 获取容器在指定网络上的 IPv4 地址
+get_container_ipv4() {
+  local container="$1" network="$2"
+  docker inspect -f "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$container" 2>/dev/null || true
+}
+
 #######################################
 # 检测 NewAPI 环境
 #######################################
@@ -225,8 +231,15 @@ detect_environment() {
   [[ -n "$db_container" ]] || die "在网络 '$NEWAPI_NETWORK' 上找不到数据库容器"
   DB_CONTAINER="$db_container"
 
-  # 设置 DB_DNS
-  if [[ -n "$db_service" ]]; then
+  # 设置 DB_DNS - 优先使用 IPv4 地址以避免 IPv6 连接问题
+  local db_ipv4=""
+  db_ipv4="$(get_container_ipv4 "$db_container" "$NEWAPI_NETWORK" | trim)"
+  
+  if [[ -n "$db_ipv4" ]]; then
+    # 使用 IPv4 地址，避免 IPv6 DNS 解析问题
+    DB_DNS="${DB_DNS:-$db_ipv4}"
+    log_info "使用数据库 IPv4 地址: $db_ipv4"
+  elif [[ -n "$db_service" ]]; then
     DB_DNS="${DB_DNS:-$db_service}"
   else
     db_service="$(docker_inspect_label "$db_container" 'com.docker.compose.service' | trim)"
