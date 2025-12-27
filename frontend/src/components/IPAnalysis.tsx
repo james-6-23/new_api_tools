@@ -102,31 +102,50 @@ export function IPAnalysis() {
   const mapLoadedRef = useRef(false)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
+  const [mapError, setMapError] = useState(false)
   
-  // 加载世界地图
+  // 加载世界地图 - 多源备用 + 超时处理
   useEffect(() => {
     if (mapLoadedRef.current) return
     mapLoadedRef.current = true
     
-    fetch('https://cdn.jsdelivr.net/npm/echarts@5/map/json/world.json')
-      .then(res => res.json())
-      .then(worldJson => {
-        echarts.registerMap('world', worldJson)
-        setMapLoaded(true)
-      })
-      .catch(err => {
-        console.error('Failed to load world map:', err)
-        // 尝试备用源
-        fetch('https://unpkg.com/echarts@5/map/json/world.json')
-          .then(res => res.json())
-          .then(worldJson => {
-            echarts.registerMap('world', worldJson)
-            setMapLoaded(true)
-          })
-          .catch(() => {
-            console.error('All map sources failed')
-          })
-      })
+    const MAP_SOURCES = [
+      '/world.json', // 本地文件优先
+      'https://cdn.jsdelivr.net/gh/mouday/echarts-map@master/echarts-4.2.1-rc1-map/json/world.json',
+      'https://fastly.jsdelivr.net/gh/mouday/echarts-map@master/echarts-4.2.1-rc1-map/json/world.json',
+      'https://gcore.jsdelivr.net/gh/mouday/echarts-map@master/echarts-4.2.1-rc1-map/json/world.json',
+    ]
+    
+    const fetchWithTimeout = (url: string, timeout = 8000): Promise<Response> => {
+      return Promise.race([
+        fetch(url),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout')), timeout)
+        )
+      ])
+    }
+    
+    const tryLoadMap = async () => {
+      for (const url of MAP_SOURCES) {
+        try {
+          console.log(`[Map] Trying: ${url}`)
+          const res = await fetchWithTimeout(url)
+          if (!res.ok) continue
+          const worldJson = await res.json()
+          echarts.registerMap('world', worldJson)
+          setMapLoaded(true)
+          console.log(`[Map] Loaded from: ${url}`)
+          return
+        } catch (err) {
+          console.warn(`[Map] Failed: ${url}`, err)
+        }
+      }
+      // 所有源都失败
+      console.error('[Map] All sources failed')
+      setMapError(true)
+    }
+    
+    tryLoadMap()
   }, [])
 
   const getAuthHeaders = useCallback(() => ({
@@ -347,7 +366,15 @@ export function IPAnalysis() {
           </div>
         </CardHeader>
         <CardContent>
-          {!mapLoaded ? (
+          {mapError ? (
+            <div className="h-[400px] flex flex-col items-center justify-center text-muted-foreground bg-muted/20 rounded-lg gap-3">
+              <AlertTriangle className="h-10 w-10 text-yellow-500" />
+              <span>地图加载失败，请刷新页面重试</span>
+              <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                刷新页面
+              </Button>
+            </div>
+          ) : !mapLoaded ? (
             <div className="h-[400px] flex items-center justify-center text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin mr-2" />
               加载地图中...

@@ -364,6 +364,14 @@ async def background_cache_warmup():
         logger.system(f"[完成] 所有缓存有效，无需预热，耗时 {elapsed:.2f}s")
         logger.system("=" * 50)
         
+        # 延迟预热 IP 地区分布（低优先级）
+        await asyncio.sleep(10)
+        try:
+            from .ip_distribution_service import warmup_ip_distribution
+            await warmup_ip_distribution()
+        except Exception as e:
+            logger.warning(f"[IP分布] 预热异常: {e}")
+        
         # 进入定时刷新循环
         await _background_refresh_loop(cache)
         return
