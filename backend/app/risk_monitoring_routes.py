@@ -35,13 +35,14 @@ async def get_leaderboards(
     windows: str = Query(default="1h,3h,6h,12h,24h", description="逗号分隔窗口 (1h/3h/6h/12h/24h)"),
     limit: int = Query(default=10, ge=1, le=50, description="每个榜单返回数量"),
     sort_by: str = Query(default="requests", description="排序维度 (requests/quota/failure_rate)"),
+    no_cache: bool = Query(default=False, description="强制刷新，跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     service = get_risk_monitoring_service()
     if sort_by not in ["requests", "quota", "failure_rate"]:
         raise InvalidParamsError(message=f"Invalid sort_by: {sort_by}")
     window_list = [w.strip() for w in windows.split(",") if w.strip()]
-    data = service.get_leaderboards(windows=window_list, limit=limit, sort_by=sort_by)
+    data = service.get_leaderboards(windows=window_list, limit=limit, sort_by=sort_by, use_cache=not no_cache)
     return LeaderboardsResponse(success=True, data=data)
 
 

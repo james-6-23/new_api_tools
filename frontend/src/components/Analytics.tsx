@@ -140,10 +140,13 @@ export function Analytics() {
     refreshIntervalRef.current = val
     if (val > 0) {
       localStorage.setItem(REFRESH_INTERVAL_KEY, val.toString())
+      const label = val >= 60 ? `${val / 60}分钟` : `${val}秒`
+      showToast('success', `日志分析自动刷新已设置为 ${label}`)
     } else {
       localStorage.removeItem(REFRESH_INTERVAL_KEY)
+      showToast('info', '日志分析自动刷新已关闭')
     }
-  }, [])
+  }, [showToast])
   
   // 检测是否是浏览器刷新（而不是页面切换）
   useEffect(() => {

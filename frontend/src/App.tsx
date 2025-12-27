@@ -6,11 +6,24 @@ import { WarmupScreen } from './components/WarmupScreen'
 // Valid tabs
 const validTabs: TabType[] = ['dashboard', 'topups', 'risk', 'analytics', 'users', 'generator', 'redemptions', 'history']
 
-// Get initial tab from URL hash
+// Get initial tab from URL pathname (supports sub-routes like /risk/ip)
 const getInitialTab = (): TabType => {
-  const hash = window.location.hash.slice(1) // Remove #
-  if (validTabs.includes(hash as TabType)) {
-    return hash as TabType
+  const pathname = window.location.pathname.slice(1) // Remove leading /
+  const mainPath = pathname.split('/')[0] // Get first segment for main tab
+
+  if (validTabs.includes(mainPath as TabType)) {
+    return mainPath as TabType
+  }
+  // 兼容旧的 hash 路由，自动迁移
+  const hash = window.location.hash.slice(1)
+  // 处理 #risk/ip 等格式
+  const hashMain = hash.split('/')[0].replace('risk-', 'risk/')
+  if (validTabs.includes(hashMain as TabType)) {
+    // 重定向到新路由
+    const subPath = hash.includes('/') ? hash.split('/').slice(1).join('/') : ''
+    const newPath = subPath ? `/${hashMain}/${subPath}` : `/${hashMain}`
+    window.history.replaceState(null, '', newPath)
+    return hashMain as TabType
   }
   return 'dashboard'
 }
@@ -52,21 +65,29 @@ function App() {
     checkWarmupStatus()
   }, [isAuthenticated, token, apiUrl])
 
-  // Sync tab with URL hash
+  // Sync tab with URL pathname (History API)
+  // Only update if main path segment changes, preserve sub-routes
   useEffect(() => {
-    window.location.hash = activeTab
+    const pathname = window.location.pathname.slice(1)
+    const currentMainPath = pathname.split('/')[0]
+    if (currentMainPath !== activeTab) {
+      window.history.pushState(null, '', `/${activeTab}`)
+    }
   }, [activeTab])
 
-  // Listen for hash changes (browser back/forward)
+  // Listen for popstate (browser back/forward)
   useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.slice(1)
-      if (validTabs.includes(hash as TabType)) {
-        setActiveTab(hash as TabType)
+    const handlePopState = () => {
+      const pathname = window.location.pathname.slice(1)
+      const mainPath = pathname.split('/')[0] // Extract main tab from path
+      if (validTabs.includes(mainPath as TabType)) {
+        setActiveTab(mainPath as TabType)
+      } else {
+        setActiveTab('dashboard')
       }
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   const handleWarmupReady = () => {

@@ -53,6 +53,7 @@ async def get_shared_ips(
     window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
     min_tokens: int = Query(default=2, ge=2, le=100, description="最小令牌数阈值"),
     limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
+    no_cache: bool = Query(default=False, description="强制刷新，跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """Get IPs used by multiple tokens."""
@@ -65,6 +66,7 @@ async def get_shared_ips(
         window_seconds=seconds,
         min_tokens=min_tokens,
         limit=limit,
+        use_cache=not no_cache,
     )
     return SharedIPsResponse(success=True, data=data)
 
@@ -74,6 +76,7 @@ async def get_multi_ip_tokens(
     window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
     min_ips: int = Query(default=2, ge=2, le=100, description="最小 IP 数阈值"),
     limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
+    no_cache: bool = Query(default=False, description="强制刷新，跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """Get tokens used from multiple IPs."""
@@ -86,6 +89,7 @@ async def get_multi_ip_tokens(
         window_seconds=seconds,
         min_ips=min_ips,
         limit=limit,
+        use_cache=not no_cache,
     )
     return MultiIPTokensResponse(success=True, data=data)
 
@@ -95,6 +99,7 @@ async def get_multi_ip_users(
     window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
     min_ips: int = Query(default=3, ge=2, le=100, description="最小 IP 数阈值"),
     limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
+    no_cache: bool = Query(default=False, description="强制刷新，跳过缓存"),
     _: str = Depends(verify_auth),
 ):
     """Get users accessing from multiple IPs."""
@@ -107,6 +112,7 @@ async def get_multi_ip_users(
         window_seconds=seconds,
         min_ips=min_ips,
         limit=limit,
+        use_cache=not no_cache,
     )
     return MultiIPUsersResponse(success=True, data=data)
 

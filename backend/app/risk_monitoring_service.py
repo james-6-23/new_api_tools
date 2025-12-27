@@ -98,37 +98,46 @@ class RiskMonitoringService:
     ) -> Dict[str, Any]:
         """
         Get leaderboards for multiple time windows.
-        
+
         Performance optimization:
-        - Uses cache to reduce database load (30s TTL)
+        - Per-window cache to support independent refresh
         - No JOIN with users table (fetch user info separately for top N only)
         - Each window queried separately for accurate data
         """
         now = int(time.time())
-        cache_key = f"leaderboards:{','.join(sorted(windows))}:{limit}:{sort_by}"
-        
-        # Check cache
-        if use_cache:
-            cached = _cache.get(cache_key)
-            if cached is not None:
-                return cached
-        
-        # Query each window separately for accurate data
+        cache_ttl = _get_cache_ttl()
+
+        # Query each window separately, using per-window cache
         data: Dict[str, Any] = {}
         all_user_ids = set()
         window_results: Dict[str, List[Dict]] = {}
-        
+
         for w in windows:
             seconds = WINDOW_SECONDS.get(w)
             if not seconds:
                 continue
-            
-            # Get raw stats without user info
+
+            # Per-window cache key
+            window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
+
+            # Check per-window cache
+            if use_cache:
+                cached = _cache.get(window_cache_key)
+                if cached is not None:
+                    window_results[w] = cached
+                    for item in cached:
+                        all_user_ids.add(item["user_id"])
+                    continue
+
+            # Cache miss or no_cache - query database
             raw_data = self._get_leaderboard_raw(
                 window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
             )
             window_results[w] = raw_data
-            
+
+            # Update per-window cache
+            _cache.set(window_cache_key, raw_data, cache_ttl)
+
             # Collect user IDs for batch fetch
             for item in raw_data:
                 all_user_ids.add(item["user_id"])
@@ -155,10 +164,8 @@ class RiskMonitoringService:
                 })
         
         result = {"generated_at": now, "windows": data}
-        
-        # Store in cache with dynamic TTL based on system scale
-        _cache.set(cache_key, result, _get_cache_ttl())
-        
+
+        # Per-window cache already updated above, no need for combined cache
         return result
 
     def _get_leaderboard_raw(

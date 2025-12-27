@@ -241,8 +241,8 @@ interface MultiIPUserItem {
   top_ips: Array<{ ip: string; request_count: number }>
 }
 
-// Hash路径映射
-const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban'> = {
+// URL 路径映射 (History API)
+const VIEW_PATH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban'> = {
   '': 'leaderboards',
   'leaderboards': 'leaderboards',
   'ip': 'ip_monitoring',
@@ -255,7 +255,7 @@ const VIEW_HASH_MAP: Record<string, 'leaderboards' | 'banned_list' | 'ip_monitor
   'ai_ban': 'ai_ban',
 }
 
-const HASH_VIEW_MAP: Record<string, string> = {
+const PATH_VIEW_MAP: Record<string, string> = {
   'leaderboards': '',
   'ip_monitoring': 'ip',
   'banned_list': 'banned',
@@ -264,11 +264,21 @@ const HASH_VIEW_MAP: Record<string, string> = {
 }
 
 function getInitialView(): 'leaderboards' | 'banned_list' | 'ip_monitoring' | 'audit_logs' | 'ai_ban' {
-  const hash = window.location.hash
-  // 匹配 #risk, #risk/, #risk/audit, #risk-audit 等格式
-  const match = hash.match(/#risk(?:[/-](\w+))?/)
+  const pathname = window.location.pathname
+  // 匹配 /risk, /risk/, /risk/audit 等格式
+  const match = pathname.match(/\/risk(?:\/(\w+))?/)
   if (match && match[1]) {
-    return VIEW_HASH_MAP[match[1]] || 'leaderboards'
+    return VIEW_PATH_MAP[match[1]] || 'leaderboards'
+  }
+  // 兼容旧的 hash 路由，自动迁移
+  const hash = window.location.hash
+  const hashMatch = hash.match(/#risk(?:[/-](\w+))?/)
+  if (hashMatch && hashMatch[1]) {
+    const view = VIEW_PATH_MAP[hashMatch[1]] || 'leaderboards'
+    const subPath = PATH_VIEW_MAP[view]
+    const newPath = subPath ? `/risk/${subPath}` : '/risk'
+    window.history.replaceState(null, '', newPath)
+    return view
   }
   return 'leaderboards'
 }
@@ -302,7 +312,7 @@ export function RealtimeRanking() {
   const [data, setData] = useState<Record<WindowKey, LeaderboardItem[]>>({ '1h': [], '3h': [], '6h': [], '12h': [], '24h': [], '3d': [], '7d': [] })
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [refreshing, setRefreshing] = useState<WindowKey | 'all' | null>(null)  // 追踪哪个窗口正在刷新
   
   // 刷新间隔状态 - 从 localStorage 恢复，支持持久化
   const LEADERBOARD_REFRESH_KEY = 'risk_leaderboard_refresh_interval'
@@ -580,20 +590,26 @@ export function RealtimeRanking() {
     setCountdown(val)
     if (val > 0) {
       localStorage.setItem(LEADERBOARD_REFRESH_KEY, val.toString())
+      const label = val >= 60 ? `${val / 60}分钟` : `${val}秒`
+      showToast('success', `排行榜自动刷新已设置为 ${label}`)
     } else {
       localStorage.removeItem(LEADERBOARD_REFRESH_KEY)
+      showToast('info', '排行榜自动刷新已关闭')
     }
-  }, [])
-  
+  }, [showToast])
+
   const handleIpRefreshIntervalChange = useCallback((val: number) => {
     setIpRefreshInterval(val)
     setIpCountdown(val)
     if (val > 0) {
       localStorage.setItem(IP_REFRESH_KEY, val.toString())
+      const label = val >= 60 ? `${val / 60}分钟` : `${val}秒`
+      showToast('success', `IP监控自动刷新已设置为 ${label}`)
     } else {
       localStorage.removeItem(IP_REFRESH_KEY)
+      showToast('info', 'IP监控自动刷新已关闭')
     }
-  }, [])
+  }, [showToast])
 
   // 使用 ref 存储 refreshInterval，让 fetchLeaderboards 能访问最新值
   const refreshIntervalRef = useRef(refreshInterval)
@@ -607,21 +623,32 @@ export function RealtimeRanking() {
     ipRefreshIntervalRef.current = ipRefreshInterval
   }, [ipRefreshInterval])
 
-  const fetchLeaderboards = useCallback(async (showSuccessToast = false) => {
+  const fetchLeaderboards = useCallback(async (showSuccessToast = false, forceRefresh = false, singleWindow?: WindowKey) => {
     try {
-      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${allWindows.join(',')}&limit=10&sort_by=${sortBy}`, { headers: getAuthHeaders() })
+      const windowsParam = singleWindow ? singleWindow : allWindows.join(',')
+      const noCache = forceRefresh ? '&no_cache=true' : ''
+      const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${windowsParam}&limit=10&sort_by=${sortBy}${noCache}`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         const windowsData = res.data?.windows || {}
-        setData({
-          '1h': windowsData['1h'] || [],
-          '3h': windowsData['3h'] || [],
-          '6h': windowsData['6h'] || [],
-          '12h': windowsData['12h'] || [],
-          '24h': windowsData['24h'] || [],
-          '3d': windowsData['3d'] || [],
-          '7d': windowsData['7d'] || [],
-        })
+        if (singleWindow) {
+          // 单窗口刷新：只更新该窗口的数据
+          setData(prev => ({
+            ...prev,
+            [singleWindow]: windowsData[singleWindow] || [],
+          }))
+        } else {
+          // 全量刷新
+          setData({
+            '1h': windowsData['1h'] || [],
+            '3h': windowsData['3h'] || [],
+            '6h': windowsData['6h'] || [],
+            '12h': windowsData['12h'] || [],
+            '24h': windowsData['24h'] || [],
+            '3d': windowsData['3d'] || [],
+            '7d': windowsData['7d'] || [],
+          })
+        }
         setGeneratedAt(res.data?.generated_at || 0)
         setCountdown(refreshIntervalRef.current)  // 使用 ref 获取最新的刷新间隔
         if (showSuccessToast) showToast('success', '已刷新')
@@ -691,18 +718,19 @@ export function RealtimeRanking() {
     }
   }, [apiUrl, getAuthHeaders])
 
-  const fetchIPData = useCallback(async (showSuccessToast = false, resetPage = false) => {
+  const fetchIPData = useCallback(async (showSuccessToast = false, resetPage = false, forceRefresh = false) => {
     setIpLoading(true)
     // Only reset page when explicitly requested (e.g., window change), not on refresh
     if (resetPage) {
       setIpPage({ shared: 1, tokens: 1, users: 1 })
     }
+    const noCache = forceRefresh ? '&no_cache=true' : ''
     try {
       const [statsRes, sharedRes, tokensRes, usersRes] = await Promise.all([
         fetch(`${apiUrl}/api/ip/stats`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200`, { headers: getAuthHeaders() }),
-        fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200${noCache}`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200${noCache}`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200${noCache}`, { headers: getAuthHeaders() }),
       ])
 
       const [stats, shared, tokens, users] = await Promise.all([
@@ -1237,20 +1265,20 @@ export function RealtimeRanking() {
   }
 
   useEffect(() => {
-    const subPath = HASH_VIEW_MAP[view] || ''
-    const newHash = subPath ? `#risk/${subPath}` : '#risk'
-    if (window.location.hash !== newHash) {
-      window.history.replaceState(null, '', newHash)
+    const subPath = PATH_VIEW_MAP[view] || ''
+    const newPath = subPath ? `/risk/${subPath}` : '/risk'
+    if (window.location.pathname !== newPath) {
+      window.history.pushState(null, '', newPath)
     }
   }, [view])
 
   useEffect(() => {
-    const handleHashChange = () => {
+    const handlePopState = () => {
       const newView = getInitialView()
       setView(newView)
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
   useEffect(() => {
@@ -1384,10 +1412,10 @@ export function RealtimeRanking() {
     load()
   }, [dialogOpen, selected, apiUrl, getAuthHeaders, showToast])
 
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await fetchLeaderboards(true)
-    setRefreshing(false)
+  const handleRefresh = async (window?: WindowKey) => {
+    setRefreshing(window || 'all')
+    await fetchLeaderboards(true, true, window)  // showToast=true, forceRefresh=true, singleWindow
+    setRefreshing(null)
   }
 
   const handleRefreshRecords = async () => {
@@ -1399,7 +1427,7 @@ export function RealtimeRanking() {
   // 刷新所有 IP 数据
   const handleRefreshIP = async () => {
     setIpRefreshing(prev => ({ ...prev, all: true }))
-    await fetchIPData(true)
+    await fetchIPData(true, false, true)  // showToast=true, resetPage=false, forceRefresh=true
     setIpRefreshing(prev => ({ ...prev, all: false }))
   }
 
@@ -1407,7 +1435,7 @@ export function RealtimeRanking() {
   const handleRefreshSharedIps = async () => {
     setIpRefreshing(prev => ({ ...prev, shared: true }))
     try {
-      const response = await fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/ip/shared-ips?window=${ipWindow}&min_tokens=2&limit=200&no_cache=true`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         setSharedIps(res.data?.items || [])
@@ -1424,7 +1452,7 @@ export function RealtimeRanking() {
   const handleRefreshMultiIpTokens = async () => {
     setIpRefreshing(prev => ({ ...prev, tokens: true }))
     try {
-      const response = await fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/ip/multi-ip-tokens?window=${ipWindow}&min_ips=2&limit=200&no_cache=true`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         setMultiIpTokens(res.data?.items || [])
@@ -1441,7 +1469,7 @@ export function RealtimeRanking() {
   const handleRefreshMultiIpUsers = async () => {
     setIpRefreshing(prev => ({ ...prev, users: true }))
     try {
-      const response = await fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200`, { headers: getAuthHeaders() })
+      const response = await fetch(`${apiUrl}/api/ip/multi-ip-users?window=${ipWindow}&min_ips=3&limit=200&no_cache=true`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         setMultiIpUsers(res.data?.items || [])
@@ -1531,9 +1559,9 @@ export function RealtimeRanking() {
             </>
           )}
           {view === 'leaderboards' && (
-            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
-              <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
-              刷新
+            <Button variant="outline" size="sm" onClick={() => handleRefresh()} disabled={refreshing !== null} className="h-9">
+              <RefreshCw className={cn("h-4 w-4 mr-2", refreshing === 'all' && "animate-spin")} />
+              刷新全部
             </Button>
           )}
           {view === 'audit_logs' && (
@@ -1593,11 +1621,11 @@ export function RealtimeRanking() {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"
-                      onClick={handleRefresh}
-                      disabled={refreshing}
-                      title="刷新"
+                      onClick={() => handleRefresh(w)}
+                      disabled={refreshing !== null}
+                      title="刷新此窗口"
                     >
-                      <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                      <RefreshCw className={cn("h-3.5 w-3.5", (refreshing === w || refreshing === 'all') && "animate-spin")} />
                     </Button>
                   </div>
                 </CardHeader>
@@ -1706,11 +1734,11 @@ export function RealtimeRanking() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
-                    onClick={handleRefresh}
-                    disabled={refreshing}
-                    title="刷新"
+                    onClick={() => handleRefresh(selectedWindow)}
+                    disabled={refreshing !== null}
+                    title="刷新此窗口"
                   >
-                    <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                    <RefreshCw className={cn("h-3.5 w-3.5", (refreshing === selectedWindow || refreshing === 'all') && "animate-spin")} />
                   </Button>
                 </div>
               </div>
