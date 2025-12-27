@@ -64,6 +64,52 @@ API_RETRY_DELAY = 2                 # 重试间隔（秒）
 API_FAILURE_COOLDOWN = 300          # API 失败后冷却时间（秒），5分钟
 API_MAX_CONSECUTIVE_FAILURES = 5    # 连续失败次数阈值，超过后暂停服务
 
+# 默认 AI 评估提示词模板
+# 使用 {变量名} 作为占位符，系统会自动替换为实际数据
+DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请分析以下用户的 IP 行为数据，判断是否存在异常的 IP 切换行为。
+
+## 用户信息
+- 用户ID: {user_id}
+- 用户名: {username}
+- 用户组: {user_group}
+
+## 请求概况（最近1小时）
+- 请求总数: {total_requests}
+- 使用模型数: {unique_models}
+- 使用令牌数: {unique_tokens}
+
+## IP 行为分析（核心判断依据）
+- 使用 IP 数量: {unique_ips}
+- IP 切换次数: {switch_count}
+- 快速切换次数（60秒内）: {rapid_switch_count}
+- 平均 IP 停留时间: {avg_ip_duration} 秒
+- 最短切换间隔: {min_switch_interval} 秒
+- 已触发风险标签: {risk_flags}
+
+## 判断标准
+1. 正常机场用户 IP 切换间隔通常 > 5 分钟
+2. 几秒内频繁切换 IP 是明显异常行为（可能是多人共用账号或恶意爬取）
+3. 使用 IP 数量 >= 10 且切换频繁是高风险
+4. 多项 IP 风险标签叠加时风险更高
+5. 该用户已通过请求量门槛（>= 50次），属于活跃用户
+
+注意：空回复率和失败率不作为判断依据，因为嵌入模型（如 text-embedding）本身不返回文本内容。
+
+## 请返回 JSON 格式（严格遵循）:
+```json
+{{
+  "should_ban": true或false,
+  "risk_score": 1到10的整数,
+  "confidence": 0.0到1.0的小数,
+  "reason": "封禁或放行理由（中文，100字以内）"
+}}
+```
+
+注意：
+- risk_score >= 8 且 confidence >= 0.8 时才会自动封禁
+- 请谨慎判断，避免误封正常用户
+- 只返回 JSON，不要有其他内容"""
+
 
 class AIAutoBanService:
     """AI 自动封禁服务"""
@@ -95,6 +141,13 @@ class AIAutoBanService:
 
         # 定时扫描配置（0 表示关闭，单位：分钟）
         self._scan_interval_minutes = int(stored_config.get("scan_interval_minutes", 0))
+
+        # 自定义提示词配置（空字符串表示使用默认提示词）
+        self._custom_prompt = stored_config.get("custom_prompt", "")
+
+        # IP 白名单和黑名单（用于提示词变量，帮助 AI 做出更准确的判断）
+        self._whitelist_ips = stored_config.get("whitelist_ips", [])
+        self._blacklist_ips = stored_config.get("blacklist_ips", [])
 
         # 白名单用户ID（从本地存储读取）
         whitelist_ids = stored_config.get("whitelist_ids", [])
@@ -377,55 +430,51 @@ class AIAutoBanService:
         return suspicious
 
     def _build_assessment_prompt(self, analysis: Dict[str, Any]) -> str:
-        """构建 AI 评估 Prompt"""
+        """构建 AI 评估 Prompt（支持自定义提示词）"""
         summary = analysis.get("summary", {})
         risk = analysis.get("risk", {})
         ip_switch = risk.get("ip_switch_analysis", {})
         user = analysis.get("user", {})
-        
-        return f"""你是一个 API 风控系统的 AI 助手。请分析以下用户的 IP 行为数据，判断是否存在异常的 IP 切换行为。
 
-## 用户信息
-- 用户ID: {user.get('id')}
-- 用户名: {user.get('username')}
-- 用户组: {user.get('group') or '默认'}
+        # 获取用户使用的 IP 列表
+        user_ips = [ip.get('ip') for ip in analysis.get('top_ips', []) if ip.get('ip')]
 
-## 请求概况（最近1小时）
-- 请求总数: {summary.get('total_requests', 0)}
-- 使用模型数: {summary.get('unique_models', 0)}
-- 使用令牌数: {summary.get('unique_tokens', 0)}
+        # 计算用户 IP 中有多少在白名单/黑名单中
+        whitelisted_ips = [ip for ip in user_ips if ip in self._whitelist_ips]
+        blacklisted_ips = [ip for ip in user_ips if ip in self._blacklist_ips]
 
-## IP 行为分析（核心判断依据）
-- 使用 IP 数量: {summary.get('unique_ips', 0)}
-- IP 切换次数: {ip_switch.get('switch_count', 0)}
-- 快速切换次数（60秒内）: {ip_switch.get('rapid_switch_count', 0)}
-- 平均 IP 停留时间: {ip_switch.get('avg_ip_duration', 0)} 秒
-- 最短切换间隔: {ip_switch.get('min_switch_interval', 0)} 秒
-- 已触发风险标签: {risk.get('risk_flags', [])}
+        # 准备变量替换数据
+        prompt_vars = {
+            "user_id": user.get('id', ''),
+            "username": user.get('username', ''),
+            "user_group": user.get('group') or '默认',
+            "total_requests": summary.get('total_requests', 0),
+            "unique_models": summary.get('unique_models', 0),
+            "unique_tokens": summary.get('unique_tokens', 0),
+            "unique_ips": summary.get('unique_ips', 0),
+            "switch_count": ip_switch.get('switch_count', 0),
+            "rapid_switch_count": ip_switch.get('rapid_switch_count', 0),
+            "avg_ip_duration": ip_switch.get('avg_ip_duration', 0),
+            "min_switch_interval": ip_switch.get('min_switch_interval', 0),
+            "risk_flags": risk.get('risk_flags', []),
+            # IP 白名单/黑名单相关变量
+            "whitelist_ips": self._whitelist_ips,  # 系统配置的白名单 IP 列表
+            "blacklist_ips": self._blacklist_ips,  # 系统配置的黑名单 IP 列表
+            "user_whitelisted_ips": whitelisted_ips,  # 用户使用的 IP 中在白名单的
+            "user_blacklisted_ips": blacklisted_ips,  # 用户使用的 IP 中在黑名单的
+            "user_ips": user_ips,  # 用户使用的所有 IP
+        }
 
-## 判断标准
-1. 正常机场用户 IP 切换间隔通常 > 5 分钟
-2. 几秒内频繁切换 IP 是明显异常行为（可能是多人共用账号或恶意爬取）
-3. 使用 IP 数量 >= 10 且切换频繁是高风险
-4. 多项 IP 风险标签叠加时风险更高
-5. 该用户已通过请求量门槛（>= 50次），属于活跃用户
+        # 使用自定义提示词或默认提示词
+        prompt_template = self._custom_prompt.strip() if self._custom_prompt else DEFAULT_ASSESSMENT_PROMPT
 
-注意：空回复率和失败率不作为判断依据，因为嵌入模型（如 text-embedding）本身不返回文本内容。
-
-## 请返回 JSON 格式（严格遵循）:
-```json
-{{
-  "should_ban": true或false,
-  "risk_score": 1到10的整数,
-  "confidence": 0.0到1.0的小数,
-  "reason": "封禁或放行理由（中文，100字以内）"
-}}
-```
-
-注意：
-- risk_score >= 8 且 confidence >= 0.8 时才会自动封禁
-- 请谨慎判断，避免误封正常用户
-- 只返回 JSON，不要有其他内容"""
+        try:
+            # 使用 format 进行变量替换
+            return prompt_template.format(**prompt_vars)
+        except KeyError as e:
+            # 如果自定义提示词中有未知变量，回退到默认提示词
+            logger.warning(f"自定义提示词变量替换失败: {e}，使用默认提示词")
+            return DEFAULT_ASSESSMENT_PROMPT.format(**prompt_vars)
 
     def _get_endpoint_url(self, base_url: str, endpoint: str) -> str:
         """
@@ -992,6 +1041,12 @@ class AIAutoBanService:
             "confidence_threshold": CONFIDENCE_THRESHOLD,
             "cooldown_hours": AI_ASSESSMENT_COOLDOWN // 3600,
             "scan_interval_minutes": self._scan_interval_minutes,
+            # 自定义提示词
+            "custom_prompt": self._custom_prompt,
+            "default_prompt": DEFAULT_ASSESSMENT_PROMPT,
+            # IP 白名单/黑名单
+            "whitelist_ips": self._whitelist_ips,
+            "blacklist_ips": self._blacklist_ips,
             # API 健康状态
             "api_health": {
                 "suspended": self._api_suspended,
@@ -1013,6 +1068,12 @@ class AIAutoBanService:
     def get_audit_logs(self, limit: int = 50, offset: int = 0, status: Optional[str] = None) -> Dict[str, Any]:
         """获取审查记录"""
         return self._storage.get_ai_audit_logs(limit=limit, offset=offset, status=status)
+
+    def clear_audit_logs(self) -> int:
+        """清空审查记录"""
+        count = self._storage.delete_ai_audit_logs()
+        logger.business("AI审查记录已手动清空", count=count)
+        return count
 
     def get_scan_interval(self) -> int:
         """获取定时扫描间隔（分钟），0 表示关闭"""

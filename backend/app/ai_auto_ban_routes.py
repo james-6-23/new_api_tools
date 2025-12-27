@@ -28,6 +28,9 @@ class SaveConfigRequest(BaseModel):
     enabled: Optional[bool] = None
     dry_run: Optional[bool] = None
     scan_interval_minutes: Optional[int] = None  # 定时扫描间隔（分钟），0表示关闭
+    custom_prompt: Optional[str] = None  # 自定义 AI 评估提示词
+    whitelist_ips: Optional[list] = None  # IP 白名单（可信IP，如办公室、机房IP）
+    blacklist_ips: Optional[list] = None  # IP 黑名单（已知恶意IP）
 
 
 class FetchModelsRequest(BaseModel):
@@ -129,6 +132,20 @@ async def get_audit_logs(
     return {
         "success": True,
         "data": result,
+    }
+
+
+@router.delete("/audit-logs")
+async def clear_audit_logs(
+    _: str = Depends(verify_auth),
+):
+    """清空 AI 审查记录"""
+    service = get_ai_auto_ban_service()
+    count = service.clear_audit_logs()
+    return {
+        "success": True,
+        "message": f"已清空 {count} 条记录",
+        "count": count,
     }
 
 

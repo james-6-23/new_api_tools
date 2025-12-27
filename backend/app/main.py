@@ -4,6 +4,7 @@ Main application entry point with CORS, logging, and exception handling.
 """
 import asyncio
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import Any

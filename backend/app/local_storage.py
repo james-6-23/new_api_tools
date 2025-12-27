@@ -636,6 +636,14 @@ class LocalStorage:
                 logger.info(f"Cleaned up {deleted} old AI audit logs")
             return deleted
 
+    def delete_ai_audit_logs(self) -> int:
+        """删除所有 AI 审查记录"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM ai_audit_logs")
+            conn.commit()
+            return cursor.rowcount
+
     # ==================== Utility Methods ====================
 
     def get_storage_info(self) -> Dict[str, Any]:

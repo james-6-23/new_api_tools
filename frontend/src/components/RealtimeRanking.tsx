@@ -406,6 +406,10 @@ export function RealtimeRanking() {
     masked_api_key?: string
     scan_interval_minutes?: number
     whitelist_count?: number
+    custom_prompt?: string
+    default_prompt?: string
+    whitelist_ips?: string[]
+    blacklist_ips?: string[]
     api_health?: {
       suspended: boolean
       consecutive_failures: number
@@ -434,6 +438,8 @@ export function RealtimeRanking() {
   }>>([])
   const [aiAuditLogsTotal, setAiAuditLogsTotal] = useState(0)
   const [aiAuditLogsLoading, setAiAuditLogsLoading] = useState(false)
+  const [aiAuditLogsPage, setAiAuditLogsPage] = useState(1)
+  const [aiAuditLogsLimit] = useState(10)
 
   const [aiSuspiciousUsers, setAiSuspiciousUsers] = useState<Array<{
     user_id: number
@@ -520,6 +526,13 @@ export function RealtimeRanking() {
     in_whitelist: boolean
   }>>([])
   const [whitelistSearching, setWhitelistSearching] = useState(false)
+
+  // 自定义提示词弹窗状态
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false)
+  const [promptContent, setPromptContent] = useState('')
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [whitelistIpsInput, setWhitelistIpsInput] = useState('')
+  const [blacklistIpsInput, setBlacklistIpsInput] = useState('')
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -829,10 +842,13 @@ export function RealtimeRanking() {
     }
   }
 
-  const fetchAiAuditLogs = useCallback(async (showSuccessToast = false) => {
+  // ... (其他状态)
+
+  const fetchAiAuditLogs = useCallback(async (showSuccessToast = false, page = aiAuditLogsPage) => {
     setAiAuditLogsLoading(true)
     try {
-      const response = await fetch(`${apiUrl}/api/ai-ban/audit-logs?limit=20`, { headers: getAuthHeaders() })
+      const offset = (page - 1) * aiAuditLogsLimit
+      const response = await fetch(`${apiUrl}/api/ai-ban/audit-logs?limit=${aiAuditLogsLimit}&offset=${offset}`, { headers: getAuthHeaders() })
       const res = await response.json()
       if (res.success) {
         setAiAuditLogs(res.data?.items || [])
@@ -844,7 +860,44 @@ export function RealtimeRanking() {
     } finally {
       setAiAuditLogsLoading(false)
     }
-  }, [apiUrl, getAuthHeaders, showToast])
+  }, [apiUrl, getAuthHeaders, showToast, aiAuditLogsLimit, aiAuditLogsPage])
+
+  // 当页码改变时重新获取数据
+  useEffect(() => {
+    if (view === 'audit_logs') {
+      fetchAiAuditLogs(false, aiAuditLogsPage)
+    }
+  }, [aiAuditLogsPage, view])
+
+  const handleClearAuditLogs = async () => {
+    setConfirmDialog({
+      open: true,
+      title: '清空审查记录',
+      description: '确定要清空所有 AI 审查记录吗？此操作不可恢复。',
+      confirmText: '清空',
+      variant: 'destructive',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+        try {
+          const response = await fetch(`${apiUrl}/api/ai-ban/audit-logs`, {
+            method: 'DELETE',
+            headers: getAuthHeaders(),
+          })
+          const res = await response.json()
+          if (res.success) {
+            showToast('success', res.message || '已清空记录')
+            fetchAiAuditLogs(false, 1)
+            setAiAuditLogsPage(1)
+          } else {
+            showToast('error', res.message || '清空失败')
+          }
+        } catch (e) {
+          console.error('Failed to clear audit logs:', e)
+          showToast('error', '清空失败')
+        }
+      }
+    })
+  }
 
   const handleResetApiHealth = async () => {
     try {
@@ -1034,6 +1087,54 @@ export function RealtimeRanking() {
     } finally {
       setAiSaving(false)
     }
+  }
+
+  // 打开提示词编辑弹窗
+  const handleOpenPromptDialog = () => {
+    // 优先使用自定义提示词，否则使用默认提示词
+    setPromptContent(aiConfig?.custom_prompt || aiConfig?.default_prompt || '')
+    // 加载IP白名单和黑名单（每行一个IP）
+    setWhitelistIpsInput((aiConfig?.whitelist_ips || []).join('\n'))
+    setBlacklistIpsInput((aiConfig?.blacklist_ips || []).join('\n'))
+    setPromptDialogOpen(true)
+  }
+
+  // 保存自定义提示词和IP配置
+  const handleSavePrompt = async () => {
+    setPromptSaving(true)
+    try {
+      // 解析IP列表（每行一个，过滤空行）
+      const whitelistIps = whitelistIpsInput.split('\n').map(ip => ip.trim()).filter(ip => ip)
+      const blacklistIps = blacklistIpsInput.split('\n').map(ip => ip.trim()).filter(ip => ip)
+
+      const response = await fetch(`${apiUrl}/api/ai-ban/config`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          custom_prompt: promptContent,
+          whitelist_ips: whitelistIps,
+          blacklist_ips: blacklistIps,
+        }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        showToast('success', '配置已保存')
+        setAiConfig(res.data)
+        setPromptDialogOpen(false)
+      } else {
+        showToast('error', res.message || '保存失败')
+      }
+    } catch (e) {
+      console.error('Failed to save prompt:', e)
+      showToast('error', '保存配置失败')
+    } finally {
+      setPromptSaving(false)
+    }
+  }
+
+  // 重置为默认提示词
+  const handleResetPrompt = () => {
+    setPromptContent(aiConfig?.default_prompt || '')
   }
 
   // 初始化配置编辑状态
@@ -3033,6 +3134,10 @@ export function RealtimeRanking() {
                     {aiSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
                     保存
                   </Button>
+                  <Button onClick={handleOpenPromptDialog} variant="outline" className="min-w-[120px]">
+                    <Settings className="h-4 w-4 mr-2" />
+                    自定义提示词
+                  </Button>
                 </div>
               </div>
             )}
@@ -3295,7 +3400,17 @@ export function RealtimeRanking() {
             <CardHeader className="px-6 py-4 border-b border-slate-100 bg-white flex flex-row items-center justify-between">
               <h3 className="font-bold text-lg text-slate-800">审查记录</h3>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500">共 {aiAuditLogsTotal} 条</span>
+                <span className="text-sm text-slate-500 mr-2">共 {aiAuditLogsTotal} 条</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearAuditLogs}
+                  disabled={aiAuditLogsLoading || aiAuditLogsTotal === 0}
+                  className="h-8 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                >
+                  <Ban className="h-4 w-4 mr-1.5" />
+                  清空
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -3309,18 +3424,19 @@ export function RealtimeRanking() {
             </CardHeader>
             <div className="bg-white overflow-x-auto">
               {aiAuditLogs.length > 0 ? (
+                <>
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
                       <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[80px]">状态</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[80px]">模式</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[100px]">状态</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[100px]">模式</TableHead>
                       <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
                       <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
                       <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
                       <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[80px]">耗时</TableHead>
-                      <TableHead className="font-bold text-slate-600">时间</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[100px]">耗时</TableHead>
+                      <TableHead className="font-bold text-slate-600 w-[180px]">时间</TableHead>
                       <TableHead className="font-bold text-slate-600">错误信息</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -3342,7 +3458,7 @@ export function RealtimeRanking() {
                                       log.status === 'suspended' ? 'destructive' :
                                         'outline'
                             }
-                            className="text-xs"
+                            className="text-xs whitespace-nowrap"
                           >
                             {log.status === 'success' ? '成功' :
                               log.status === 'partial' ? '部分成功' :
@@ -3353,7 +3469,7 @@ export function RealtimeRanking() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={log.dry_run ? 'secondary' : 'destructive'} className="text-xs">
+                          <Badge variant={log.dry_run ? 'secondary' : 'default'} className="text-xs whitespace-nowrap">
                             {log.dry_run ? '试运行' : '正式'}
                           </Badge>
                         </TableCell>
@@ -3396,6 +3512,37 @@ export function RealtimeRanking() {
                     ))}
                   </TableBody>
                 </Table>
+                
+                {/* 分页控件 */}
+                <div className="px-4 py-3 border-t flex items-center justify-between bg-slate-50/30">
+                  <div className="text-xs text-slate-500">
+                    显示 {(aiAuditLogsPage - 1) * aiAuditLogsLimit + 1} - {Math.min(aiAuditLogsPage * aiAuditLogsLimit, aiAuditLogsTotal)} 共 {aiAuditLogsTotal} 条
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAiAuditLogsPage(p => Math.max(1, p - 1))}
+                      disabled={aiAuditLogsPage <= 1 || aiAuditLogsLoading}
+                      className="h-8 w-8 p-0"
+                    >
+                      &lt;
+                    </Button>
+                    <div className="flex items-center justify-center min-w-[32px] text-sm font-medium">
+                      {aiAuditLogsPage} / {Math.max(1, Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAiAuditLogsPage(p => p + 1)}
+                      disabled={aiAuditLogsPage >= Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit) || aiAuditLogsLoading}
+                      className="h-8 w-8 p-0"
+                    >
+                      &gt;
+                    </Button>
+                  </div>
+                </div>
+                </>
               ) : (
                 <div className="h-40 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
                   <Clock className="h-10 w-10 mb-2 text-slate-300" />
@@ -4559,6 +4706,187 @@ export function RealtimeRanking() {
             >
               关闭
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 自定义提示词弹窗 */}
+      <Dialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen}>
+        <DialogContent className="max-w-4xl w-full max-h-[90vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          <DialogHeader className="p-5 border-b bg-gradient-to-r from-purple-50 to-blue-50 shrink-0">
+            <div className="flex justify-between items-center pr-6">
+              <div>
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-purple-500" />
+                  自定义 AI 评估提示词
+                </DialogTitle>
+                <DialogDescription className="mt-1">
+                  自定义提示词用于指导 AI 如何分析用户行为和做出封禁决策。留空则使用系统默认提示词。
+                </DialogDescription>
+              </div>
+              {aiConfig?.custom_prompt && (
+                <Badge variant="secondary" className="px-3 py-1 bg-purple-100 text-purple-700">
+                  已自定义
+                </Badge>
+              )}
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto min-h-0 bg-background p-5 space-y-4">
+            {/* 提示词编写技巧 */}
+            <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+              <h4 className="font-semibold text-blue-900 flex items-center gap-2 mb-3">
+                <Activity className="h-4 w-4" />
+                AI 封禁提示词编写技巧
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800">
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-xs font-bold">1</span>
+                    <div>
+                      <div className="font-medium">使用变量占位符</div>
+                      <div className="text-xs text-blue-600 mt-0.5">
+                        系统会自动替换 {'{user_id}'}, {'{username}'}, {'{total_requests}'} 等变量
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-xs font-bold">2</span>
+                    <div>
+                      <div className="font-medium">明确判断标准</div>
+                      <div className="text-xs text-blue-600 mt-0.5">
+                        清晰定义什么行为应该封禁、告警或放行
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-blue-200 text-blue-700 flex items-center justify-center text-xs font-bold">3</span>
+                    <div>
+                      <div className="font-medium">指定输出格式</div>
+                      <div className="text-xs text-blue-600 mt-0.5">
+                        要求 AI 返回 JSON 格式，包含 should_ban, risk_score, confidence, reason
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="font-medium mb-1">可用变量列表：</div>
+                  <div className="grid grid-cols-2 gap-1 text-xs font-mono bg-white/50 rounded p-2 border border-blue-200">
+                    <span>{'{user_id}'} - 用户ID</span>
+                    <span>{'{username}'} - 用户名</span>
+                    <span>{'{user_group}'} - 用户组</span>
+                    <span>{'{total_requests}'} - 请求总数</span>
+                    <span>{'{unique_models}'} - 模型数</span>
+                    <span>{'{unique_tokens}'} - 令牌数</span>
+                    <span>{'{unique_ips}'} - IP数量</span>
+                    <span>{'{switch_count}'} - IP切换次数</span>
+                    <span>{'{rapid_switch_count}'} - 快速切换</span>
+                    <span>{'{avg_ip_duration}'} - 平均停留</span>
+                    <span>{'{min_switch_interval}'} - 最短间隔</span>
+                    <span>{'{risk_flags}'} - 风险标签</span>
+                    <span>{'{user_ips}'} - 用户使用的IP</span>
+                    <span>{'{whitelist_ips}'} - 系统白名单IP</span>
+                    <span>{'{blacklist_ips}'} - 系统黑名单IP</span>
+                    <span>{'{user_whitelisted_ips}'} - 用户IP中的白名单</span>
+                    <span>{'{user_blacklisted_ips}'} - 用户IP中的黑名单</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* IP 白名单/黑名单配置 */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 mb-3">
+                <Globe className="h-4 w-4" />
+                IP 白名单 / 黑名单配置
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-green-700 flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    白名单 IP（可信IP）
+                  </label>
+                  <textarea
+                    value={whitelistIpsInput}
+                    onChange={(e) => setWhitelistIpsInput(e.target.value)}
+                    className="w-full h-24 p-3 text-xs font-mono bg-white border border-green-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="每行一个IP地址，如：&#10;192.168.1.100&#10;10.0.0.1"
+                  />
+                  <div className="text-xs text-slate-500">
+                    共 {whitelistIpsInput.split('\n').filter(ip => ip.trim()).length} 个IP
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-red-700 flex items-center gap-1">
+                    <ShieldBan className="h-3.5 w-3.5" />
+                    黑名单 IP（恶意IP）
+                  </label>
+                  <textarea
+                    value={blacklistIpsInput}
+                    onChange={(e) => setBlacklistIpsInput(e.target.value)}
+                    className="w-full h-24 p-3 text-xs font-mono bg-white border border-red-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    placeholder="每行一个IP地址，如：&#10;1.2.3.4&#10;5.6.7.8"
+                  />
+                  <div className="text-xs text-slate-500">
+                    共 {blacklistIpsInput.split('\n').filter(ip => ip.trim()).length} 个IP
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 text-xs text-slate-500 bg-white/50 rounded p-2 border border-slate-200">
+                提示：配置的IP列表会作为变量传递给AI，帮助AI判断用户IP是否可信。使用变量 {'{user_whitelisted_ips}'} 和 {'{user_blacklisted_ips}'} 获取用户命中的IP。
+              </div>
+            </div>
+
+            {/* 提示词编辑区 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-700">
+                  提示词内容
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetPrompt}
+                  className="h-7 text-xs text-slate-500 hover:text-slate-700"
+                >
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  重置为默认
+                </Button>
+              </div>
+              <textarea
+                value={promptContent}
+                onChange={(e) => setPromptContent(e.target.value)}
+                className="w-full h-[350px] p-4 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="输入自定义提示词..."
+              />
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>字符数: {promptContent.length}</span>
+                <span>提示：留空将使用系统默认提示词</span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 border-t bg-muted/5 flex justify-between items-center">
+            <div className="text-xs text-slate-500">
+              * 修改提示词后，下次 AI 评估将使用新的提示词
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setPromptDialogOpen(false)}
+                disabled={promptSaving}
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handleSavePrompt}
+                disabled={promptSaving}
+                className="bg-purple-600 hover:bg-purple-700 text-white min-w-[100px]"
+              >
+                {promptSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+                保存提示词
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
