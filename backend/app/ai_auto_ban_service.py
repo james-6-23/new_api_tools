@@ -66,7 +66,7 @@ API_MAX_CONSECUTIVE_FAILURES = 5    # 连续失败次数阈值，超过后暂停
 
 # 默认 AI 评估提示词模板
 # 使用 {变量名} 作为占位符，系统会自动替换为实际数据
-DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请分析以下用户的 IP 行为数据，判断是否存在异常的 IP 切换行为。
+DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请分析以下用户的行为数据，判断是否存在滥用行为。
 
 ## 用户信息
 - 用户ID: {user_id}
@@ -78,22 +78,29 @@ DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请�
 - 使用模型数: {unique_models}
 - 使用令牌数: {unique_tokens}
 
-## IP 行为分析（核心判断依据）
+## IP 行为分析
 - 使用 IP 数量: {unique_ips}
-- IP 切换次数: {switch_count}
-- 快速切换次数（60秒内）: {rapid_switch_count}
+- IP 总切换次数: {switch_count}
+- 真实切换次数（排除双栈）: {real_switch_count}
+- 双栈切换次数（同位置 v4/v6）: {dual_stack_switches}
+- 快速切换次数（60秒内，排除双栈）: {rapid_switch_count}
 - 平均 IP 停留时间: {avg_ip_duration} 秒
 - 最短切换间隔: {min_switch_interval} 秒
 - 已触发风险标签: {risk_flags}
 
+## Token 使用分析
+- 使用 Token 数量: {unique_tokens}
+- 平均每 Token 请求数: {avg_requests_per_token}
+- Token 轮换风险: {token_rotation_risk}
+
 ## 判断标准
-1. 正常机场用户 IP 切换间隔通常 > 5 分钟
-2. 几秒内频繁切换 IP 是明显异常行为（可能是多人共用账号或恶意爬取）
-3. 使用 IP 数量 >= 10 且切换频繁是高风险
-4. 多项 IP 风险标签叠加时风险更高
+1. **IP 切换异常**：几秒内频繁切换 IP 是明显异常（可能是多人共用账号）
+2. **Token 轮换**：使用多个 Token 且每个 Token 请求很少，可能在规避限制
+3. **双栈用户**：同一位置的 IPv4/IPv6 切换是正常行为，不应视为风险
+4. 多项风险标签叠加时风险更高
 5. 该用户已通过请求量门槛（>= 50次），属于活跃用户
 
-注意：空回复率和失败率不作为判断依据，因为嵌入模型（如 text-embedding）本身不返回文本内容。
+注意：空回复率和失败率不作为判断依据，因为嵌入模型本身不返回文本内容。
 
 ## 请返回 JSON 格式（严格遵循）:
 ```json
@@ -108,6 +115,7 @@ DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请�
 注意：
 - risk_score >= 8 且 confidence >= 0.8 时才会自动封禁
 - 请谨慎判断，避免误封正常用户
+- 双栈切换是正常行为，应降低风险评分
 - 只返回 JSON，不要有其他内容"""
 
 
@@ -443,26 +451,43 @@ class AIAutoBanService:
         whitelisted_ips = [ip for ip in user_ips if ip in self._whitelist_ips]
         blacklisted_ips = [ip for ip in user_ips if ip in self._blacklist_ips]
 
+        # 计算 Token 轮换风险
+        unique_tokens = summary.get('unique_tokens', 0)
+        total_requests = summary.get('total_requests', 0)
+        avg_requests_per_token = round(total_requests / unique_tokens, 2) if unique_tokens > 0 else 0
+        
+        # Token 轮换风险判断
+        token_rotation_risk = "低"
+        if unique_tokens >= 5 and avg_requests_per_token <= 10:
+            token_rotation_risk = "高（多Token轮换，每Token请求少）"
+        elif unique_tokens >= 3 and avg_requests_per_token <= 20:
+            token_rotation_risk = "中"
+
         # 准备变量替换数据
         prompt_vars = {
             "user_id": user.get('id', ''),
             "username": user.get('username', ''),
             "user_group": user.get('group') or '默认',
-            "total_requests": summary.get('total_requests', 0),
+            "total_requests": total_requests,
             "unique_models": summary.get('unique_models', 0),
-            "unique_tokens": summary.get('unique_tokens', 0),
+            "unique_tokens": unique_tokens,
             "unique_ips": summary.get('unique_ips', 0),
             "switch_count": ip_switch.get('switch_count', 0),
+            "real_switch_count": ip_switch.get('real_switch_count', ip_switch.get('switch_count', 0)),
+            "dual_stack_switches": ip_switch.get('dual_stack_switches', 0),
             "rapid_switch_count": ip_switch.get('rapid_switch_count', 0),
             "avg_ip_duration": ip_switch.get('avg_ip_duration', 0),
             "min_switch_interval": ip_switch.get('min_switch_interval', 0),
             "risk_flags": risk.get('risk_flags', []),
+            # Token 轮换相关
+            "avg_requests_per_token": avg_requests_per_token,
+            "token_rotation_risk": token_rotation_risk,
             # IP 白名单/黑名单相关变量
-            "whitelist_ips": self._whitelist_ips,  # 系统配置的白名单 IP 列表
-            "blacklist_ips": self._blacklist_ips,  # 系统配置的黑名单 IP 列表
-            "user_whitelisted_ips": whitelisted_ips,  # 用户使用的 IP 中在白名单的
-            "user_blacklisted_ips": blacklisted_ips,  # 用户使用的 IP 中在黑名单的
-            "user_ips": user_ips,  # 用户使用的所有 IP
+            "whitelist_ips": self._whitelist_ips,
+            "blacklist_ips": self._blacklist_ips,
+            "user_whitelisted_ips": whitelisted_ips,
+            "user_blacklisted_ips": blacklisted_ips,
+            "user_ips": user_ips,
         }
 
         # 使用自定义提示词或默认提示词

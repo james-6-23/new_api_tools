@@ -330,3 +330,34 @@ async def disable_token(
         message=result["message"],
         data=result.get("data"),
     )
+
+
+class InvitedUsersResponse(BaseModel):
+    """邀请用户列表响应"""
+    success: bool
+    data: dict
+
+
+@router.get("/{user_id}/invited", response_model=InvitedUsersResponse)
+async def get_user_invited_list(
+    user_id: int,
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
+    _: str = Depends(verify_auth),
+):
+    """
+    获取用户邀请的账号列表
+    
+    返回该用户通过邀请码邀请的所有用户，包含：
+    - 邀请人信息（aff_code, aff_count 等）
+    - 被邀请用户列表
+    - 统计信息（活跃数、封禁数、总消耗等）
+    """
+    service = get_user_management_service()
+    result = service.get_user_invited_list(
+        user_id=user_id,
+        page=page,
+        page_size=page_size,
+    )
+    
+    return InvitedUsersResponse(success=result.get("success", True), data=result)

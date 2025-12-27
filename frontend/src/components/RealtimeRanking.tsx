@@ -33,11 +33,16 @@ interface IPSwitchDetail {
   to_ip: string
   interval: number
   time: number
+  is_dual_stack?: boolean
+  from_version?: string
+  to_version?: string
 }
 
 interface IPSwitchAnalysis {
   switch_count: number
+  real_switch_count?: number
   rapid_switch_count: number
+  dual_stack_switches?: number
   avg_ip_duration: number
   min_switch_interval: number
   switch_details: IPSwitchDetail[]
@@ -4163,16 +4168,36 @@ export function RealtimeRanking() {
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
                       IP 切换分析
-                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || analysis.risk.ip_switch_analysis.avg_ip_duration < 30) && (
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || 
+                        (analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3)) && (
                         <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                      )}
+                      {(analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && (
+                        <Badge variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
+                          双栈用户
+                        </Badge>
                       )}
                     </h4>
 
                     {/* 统计卡片 */}
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
-                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.switch_count}</div>
-                        <div className="text-xs text-muted-foreground">切换次数</div>
+                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count}</div>
+                        <div className="text-xs text-muted-foreground">真实切换</div>
+                      </div>
+                      <div className={cn(
+                        "rounded-lg border p-2.5 text-center",
+                        (analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0
+                          ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                          : "bg-muted/30"
+                      )}>
+                        <div className={cn(
+                          "text-lg font-bold",
+                          (analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && "text-blue-600 dark:text-blue-400"
+                        )}>
+                          {analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0}
+                        </div>
+                        <div className="text-xs text-muted-foreground">双栈切换</div>
                       </div>
                       <div className={cn(
                         "rounded-lg border p-2.5 text-center",
@@ -4186,17 +4211,17 @@ export function RealtimeRanking() {
                         )}>
                           {analysis.risk.ip_switch_analysis.rapid_switch_count}
                         </div>
-                        <div className="text-xs text-muted-foreground">快速切换 (60s内)</div>
+                        <div className="text-xs text-muted-foreground">快速切换</div>
                       </div>
                       <div className={cn(
                         "rounded-lg border p-2.5 text-center",
-                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3
+                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3
                           ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
                           : "bg-muted/30"
                       )}>
                         <div className={cn(
                           "text-lg font-bold",
-                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && analysis.risk.ip_switch_analysis.switch_count >= 3 && "text-red-600 dark:text-red-400"
+                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3 && "text-red-600 dark:text-red-400"
                         )}>
                           {analysis.risk.ip_switch_analysis.avg_ip_duration}s
                         </div>
@@ -4208,9 +4233,9 @@ export function RealtimeRanking() {
                     {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-muted-foreground">最近切换记录 (显示 IP 跳变逻辑):</div>
+                          <div className="text-xs font-semibold text-muted-foreground">最近切换记录:</div>
                           <div className="text-xs text-muted-foreground italic flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> 间隔越短，共享账号可能性越大
+                            <AlertTriangle className="w-3 h-3" /> 蓝色为双栈切换（正常），红色为异常切换
                           </div>
                         </div>
                         <div className="rounded-lg border overflow-hidden shadow-sm">
@@ -4219,7 +4244,7 @@ export function RealtimeRanking() {
                             <div className="flex-1 px-2 text-center">源 IP 地址</div>
                             <div className="w-8"></div>
                             <div className="flex-1 px-2 text-center">目标 IP 地址</div>
-                            <div className="w-24 text-right">切换间隔</div>
+                            <div className="w-28 text-right">切换间隔</div>
                           </div>
                           <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
                             {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
@@ -4227,36 +4252,69 @@ export function RealtimeRanking() {
                                 key={idx}
                                 className={cn(
                                   "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
-                                  detail.interval <= 60 ? "bg-red-50/40 dark:bg-red-900/10" : "bg-background"
+                                  detail.is_dual_stack 
+                                    ? "bg-blue-50/40 dark:bg-blue-900/10" 
+                                    : detail.interval <= 60 
+                                      ? "bg-red-50/40 dark:bg-red-900/10" 
+                                      : "bg-background"
                                 )}
                               >
                                 <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
                                   {formatTime(detail.time)}
                                 </div>
-                                <div className="flex-1 px-2 flex justify-center">
+                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
                                   <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
                                     {detail.from_ip}
                                   </code>
+                                  {detail.from_version && (
+                                    <span className={cn(
+                                      "text-[10px] px-1 py-0.5 rounded",
+                                      detail.from_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                                    )}>
+                                      {detail.from_version}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="w-8 flex justify-center">
-                                  <span className="text-muted-foreground/50 group-hover:text-primary transition-colors">→</span>
+                                  <span className={cn(
+                                    "transition-colors",
+                                    detail.is_dual_stack ? "text-blue-400" : "text-muted-foreground/50 group-hover:text-primary"
+                                  )}>→</span>
                                 </div>
-                                <div className="flex-1 px-2 flex justify-center">
+                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
                                   <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
                                     {detail.to_ip}
                                   </code>
+                                  {detail.to_version && (
+                                    <span className={cn(
+                                      "text-[10px] px-1 py-0.5 rounded",
+                                      detail.to_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                                    )}>
+                                      {detail.to_version}
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="w-24 text-right">
-                                  <Badge
-                                    variant={detail.interval <= 60 ? "destructive" : "outline"}
-                                    className={cn(
-                                      "px-2 py-0.5 h-6 text-xs font-mono",
-                                      detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
-                                    )}
-                                  >
-                                    {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
-                                    {detail.interval}s
-                                  </Badge>
+                                <div className="w-28 text-right">
+                                  {detail.is_dual_stack ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="px-2 py-0.5 h-6 text-xs font-mono bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400"
+                                    >
+                                      <span className="mr-1">⇄</span>
+                                      双栈
+                                    </Badge>
+                                  ) : (
+                                    <Badge
+                                      variant={detail.interval <= 60 ? "destructive" : "outline"}
+                                      className={cn(
+                                        "px-2 py-0.5 h-6 text-xs font-mono",
+                                        detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
+                                      )}
+                                    >
+                                      {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
+                                      {detail.interval}s
+                                    </Badge>
+                                  )}
                                 </div>
                               </div>
                             ))}

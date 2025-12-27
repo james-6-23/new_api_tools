@@ -931,6 +931,128 @@ class UserManagementService:
             logger.db_error(f"禁用令牌失败: {e}")
             return {"success": False, "message": f"禁用令牌失败: {str(e)}"}
 
+    def get_user_invited_list(
+        self,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        获取用户邀请的账号列表。
+        
+        Args:
+            user_id: 邀请人用户ID
+            page: 页码
+            page_size: 每页数量
+            
+        Returns:
+            包含被邀请用户列表的字典
+        """
+        try:
+            self._db.connect()
+            from .database import DatabaseEngine
+            is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
+            group_col = '"group"' if is_pg else '`group`'
+            
+            offset = (page - 1) * page_size
+            
+            # 先获取邀请人信息（包括 aff_code）
+            inviter_sql = f"""
+                SELECT id, username, display_name, aff_code, aff_count, aff_quota, aff_history
+                FROM users
+                WHERE id = :user_id AND deleted_at IS NULL
+            """
+            inviter_rows = self._db.execute(inviter_sql, {"user_id": user_id})
+            
+            if not inviter_rows:
+                return {
+                    "success": False,
+                    "message": "用户不存在",
+                    "inviter": None,
+                    "items": [],
+                    "total": 0,
+                }
+            
+            inviter = inviter_rows[0]
+            inviter_info = {
+                "user_id": int(inviter.get("id") or 0),
+                "username": inviter.get("username") or "",
+                "display_name": inviter.get("display_name") or "",
+                "aff_code": inviter.get("aff_code") or "",
+                "aff_count": int(inviter.get("aff_count") or 0),
+                "aff_quota": int(inviter.get("aff_quota") or 0),
+                "aff_history": int(inviter.get("aff_history") or 0),
+            }
+            
+            # 查询被邀请的用户总数
+            count_sql = """
+                SELECT COUNT(*) as total
+                FROM users
+                WHERE inviter_id = :user_id AND deleted_at IS NULL
+            """
+            count_result = self._db.execute(count_sql, {"user_id": user_id})
+            total = int(count_result[0].get("total") or 0) if count_result else 0
+            
+            # 查询被邀请的用户列表
+            list_sql = f"""
+                SELECT id, username, display_name, email, status, 
+                       quota, used_quota, request_count, {group_col},
+                       role
+                FROM users
+                WHERE inviter_id = :user_id AND deleted_at IS NULL
+                ORDER BY id DESC
+                LIMIT :limit OFFSET :offset
+            """
+            result = self._db.execute(list_sql, {
+                "user_id": user_id,
+                "limit": page_size,
+                "offset": offset,
+            })
+            
+            items = []
+            for row in (result or []):
+                items.append({
+                    "user_id": int(row.get("id") or 0),
+                    "username": row.get("username") or "",
+                    "display_name": row.get("display_name") or "",
+                    "email": row.get("email") or "",
+                    "status": int(row.get("status") or 0),
+                    "quota": int(row.get("quota") or 0),
+                    "used_quota": int(row.get("used_quota") or 0),
+                    "request_count": int(row.get("request_count") or 0),
+                    "group": row.get("group") or "default",
+                    "role": int(row.get("role") or 0),
+                })
+            
+            # 统计信息
+            stats = {
+                "total_invited": total,
+                "active_count": sum(1 for u in items if u.get("request_count", 0) > 0),
+                "banned_count": sum(1 for u in items if u.get("status") == 2),
+                "total_used_quota": sum(u.get("used_quota", 0) for u in items),
+                "total_requests": sum(u.get("request_count", 0) for u in items),
+            }
+            
+            return {
+                "success": True,
+                "inviter": inviter_info,
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "stats": stats,
+            }
+            
+        except Exception as e:
+            logger.db_error(f"获取用户邀请列表失败: {e}")
+            return {
+                "success": False,
+                "message": f"获取失败: {str(e)}",
+                "inviter": None,
+                "items": [],
+                "total": 0,
+            }
+
 
 # 全局实例
 _user_management_service: Optional[UserManagementService] = None

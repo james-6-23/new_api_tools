@@ -472,8 +472,40 @@ class RiskMonitoringService:
         """
         ip_sequence = self.db.execute(ip_sequence_sql, params) or []
         
-        # 分析IP切换模式
-        ip_switch_analysis = self._analyze_ip_switches(ip_sequence)
+        # 收集所有唯一 IP 用于地理位置查询
+        unique_ips = list(set(row.get("ip") for row in ip_sequence if row.get("ip")))
+        
+        # 尝试获取 IP 地理信息（用于双栈检测）
+        ip_geo_map = None
+        if unique_ips:
+            try:
+                from .ip_geo_service import get_ip_geo_service
+                import asyncio
+                
+                geo_service = get_ip_geo_service()
+                # 同步调用异步方法
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # 如果已在异步上下文中，创建任务
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(
+                                asyncio.run,
+                                geo_service.query_batch(unique_ips)
+                            )
+                            ip_geo_map = future.result(timeout=10)
+                    else:
+                        ip_geo_map = loop.run_until_complete(geo_service.query_batch(unique_ips))
+                except RuntimeError:
+                    # 没有事件循环，创建新的
+                    ip_geo_map = asyncio.run(geo_service.query_batch(unique_ips))
+            except Exception as e:
+                logger.warning(f"获取 IP 地理信息失败: {e}")
+                ip_geo_map = None
+        
+        # 分析IP切换模式（传入地理信息用于双栈检测）
+        ip_switch_analysis = self._analyze_ip_switches(ip_sequence, ip_geo_map)
 
         # Calculate derived metrics
         total_requests = int(summary.get("total_requests") or 0)
@@ -489,14 +521,17 @@ class RiskMonitoringService:
 
         # Risk flags - 只关注 IP 相关风险
         # 注意：空回复率和失败率不作为风险标签，因为嵌入模型本身不返回文本内容
+        # 双栈优化：使用 real_switch_count（排除双栈切换）进行判断
         risk_flags: List[str] = []
         if int(summary.get("unique_ips") or 0) >= 10:
             risk_flags.append("MANY_IPS")
 
-        # IP切换频率风险检测
+        # IP切换频率风险检测（使用排除双栈后的真实切换次数）
         if ip_switch_analysis.get("rapid_switch_count", 0) >= 3:
             risk_flags.append("IP_RAPID_SWITCH")
-        if ip_switch_analysis.get("avg_ip_duration", float('inf')) < 30 and ip_switch_analysis.get("switch_count", 0) >= 3:
+        
+        real_switch_count = ip_switch_analysis.get("real_switch_count", ip_switch_analysis.get("switch_count", 0))
+        if ip_switch_analysis.get("avg_ip_duration", float('inf')) < 30 and real_switch_count >= 3:
             risk_flags.append("IP_HOPPING")
 
         return {
@@ -576,24 +611,38 @@ class RiskMonitoringService:
             ],
         }
 
-    def _analyze_ip_switches(self, ip_sequence: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _analyze_ip_switches(self, ip_sequence: List[Dict[str, Any]], ip_geo_map: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         分析IP切换模式，检测异常的IP跳动行为。
         
         正常行为：几分钟或十几分钟换一次IP（机场自动选择）
         异常行为：十几秒甚至几秒内频繁切换IP
         
+        双栈优化：
+        - 检测 IPv4/IPv6 双栈切换
+        - 同一位置（ASN+城市）的 v4/v6 切换不计入异常
+        
+        Args:
+            ip_sequence: IP 序列列表，每项包含 created_at 和 ip
+            ip_geo_map: IP 地理信息映射（可选，用于双栈检测）
+        
         返回:
         - switch_count: 总切换次数
+        - real_switch_count: 真实切换次数（排除双栈切换）
         - rapid_switch_count: 快速切换次数（60秒内切换）
+        - dual_stack_switches: 双栈切换次数（同位置 v4/v6 切换）
         - avg_ip_duration: 平均每个IP的使用时长（秒）
         - min_switch_interval: 最短切换间隔（秒）
         - switch_details: 切换详情列表
         """
+        from .ip_geo_service import get_ip_version, IPVersion
+        
         if len(ip_sequence) < 2:
             return {
                 "switch_count": 0,
+                "real_switch_count": 0,
                 "rapid_switch_count": 0,
+                "dual_stack_switches": 0,
                 "avg_ip_duration": 0,
                 "min_switch_interval": 0,
                 "switch_details": [],
@@ -602,6 +651,7 @@ class RiskMonitoringService:
         switches = []  # 记录每次切换的时间间隔
         ip_durations = {}  # 记录每个IP的使用时长
         rapid_switches = 0  # 60秒内的快速切换次数
+        dual_stack_switches = 0  # 双栈切换次数
         
         prev_ip = None
         prev_time = None
@@ -624,15 +674,46 @@ class RiskMonitoringService:
             if current_ip != prev_ip:
                 # IP发生切换
                 switch_interval = current_time - prev_time
+                
+                # 检测是否为双栈切换
+                is_dual_stack = False
+                prev_version = get_ip_version(prev_ip)
+                curr_version = get_ip_version(current_ip)
+                
+                # 判断是否为 v4/v6 切换
+                is_v4_v6_switch = (
+                    (prev_version == IPVersion.V4 and curr_version == IPVersion.V6) or
+                    (prev_version == IPVersion.V6 and curr_version == IPVersion.V4)
+                )
+                
+                if is_v4_v6_switch and ip_geo_map:
+                    # 有地理信息时，检查是否同一位置
+                    prev_geo = ip_geo_map.get(prev_ip)
+                    curr_geo = ip_geo_map.get(current_ip)
+                    
+                    if prev_geo and curr_geo:
+                        # 比较位置标识（ASN + 城市）
+                        if hasattr(prev_geo, 'get_location_key'):
+                            is_dual_stack = prev_geo.get_location_key() == curr_geo.get_location_key()
+                        elif isinstance(prev_geo, dict) and isinstance(curr_geo, dict):
+                            prev_key = f"{prev_geo.get('asn', '')}:{prev_geo.get('city', '')}:{prev_geo.get('country_code', '')}"
+                            curr_key = f"{curr_geo.get('asn', '')}:{curr_geo.get('city', '')}:{curr_geo.get('country_code', '')}"
+                            is_dual_stack = prev_key == curr_key and prev_key != "::"
+                
                 switches.append({
                     "from_ip": prev_ip,
                     "to_ip": current_ip,
                     "interval": switch_interval,
                     "time": current_time,
+                    "is_dual_stack": is_dual_stack,
+                    "from_version": prev_version.value,
+                    "to_version": curr_version.value,
                 })
                 
-                # 统计快速切换（60秒内）
-                if switch_interval <= 60:
+                if is_dual_stack:
+                    dual_stack_switches += 1
+                elif switch_interval <= 60:
+                    # 只有非双栈切换才计入快速切换
                     rapid_switches += 1
                 
                 # 记录上一个IP的使用时长
@@ -649,7 +730,8 @@ class RiskMonitoringService:
         
         # 计算统计数据
         switch_count = len(switches)
-        min_switch_interval = min((s["interval"] for s in switches), default=0)
+        real_switch_count = switch_count - dual_stack_switches  # 真实切换次数
+        min_switch_interval = min((s["interval"] for s in switches if not s.get("is_dual_stack")), default=0)
         
         # 计算平均IP使用时长
         all_durations = []
@@ -662,11 +744,483 @@ class RiskMonitoringService:
         
         return {
             "switch_count": switch_count,
+            "real_switch_count": real_switch_count,
             "rapid_switch_count": rapid_switches,
+            "dual_stack_switches": dual_stack_switches,
             "avg_ip_duration": round(avg_ip_duration, 1),
             "min_switch_interval": min_switch_interval,
             "switch_details": recent_switches,
         }
+
+    def get_token_rotation_users(
+        self,
+        window_seconds: int,
+        min_tokens: int = 5,
+        max_requests_per_token: int = 10,
+        limit: int = 50,
+        now: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        检测 Token 轮换行为 - 同一用户短时间内使用多个 Token，每个 Token 请求很少。
+        
+        这种行为可能表示：
+        - 用户在规避单 Token 限制
+        - 多人共享账号，各自使用不同 Token
+        - 自动化脚本轮换 Token
+        
+        Args:
+            window_seconds: 时间窗口（秒）
+            min_tokens: 最小 Token 数量阈值
+            max_requests_per_token: 每个 Token 最大平均请求数（低于此值视为轮换）
+            limit: 返回数量限制
+            now: 当前时间戳（用于测试）
+            use_cache: 是否使用缓存
+            
+        Returns:
+            包含可疑用户列表的字典
+        """
+        if now is None:
+            now = int(time.time())
+        start_time = now - window_seconds
+
+        # 检查缓存
+        cache_key = f"token_rotation:{window_seconds}:{min_tokens}:{max_requests_per_token}:{limit}"
+        if use_cache:
+            cached = _cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        self.db.connect()
+
+        # 查询使用多个 Token 且每个 Token 请求较少的用户
+        sql = """
+            SELECT 
+                user_id,
+                MAX(username) as username,
+                COUNT(DISTINCT token_id) as token_count,
+                COUNT(*) as total_requests,
+                ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT token_id), 0), 2) as avg_requests_per_token
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND type IN (2, 5)
+                AND user_id IS NOT NULL
+                AND token_id IS NOT NULL AND token_id > 0
+            GROUP BY user_id
+            HAVING COUNT(DISTINCT token_id) >= :min_tokens
+                AND COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT token_id), 0) <= :max_requests_per_token
+            ORDER BY token_count DESC, total_requests DESC
+            LIMIT :limit
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "min_tokens": min_tokens,
+                "max_requests_per_token": max_requests_per_token,
+                "limit": limit,
+            })
+
+            items = []
+            for row in rows:
+                user_id = int(row.get("user_id") or 0)
+                
+                # 获取该用户使用的 Token 详情
+                token_detail_sql = """
+                    SELECT 
+                        token_id,
+                        MAX(token_name) as token_name,
+                        COUNT(*) as requests,
+                        MIN(created_at) as first_used,
+                        MAX(created_at) as last_used
+                    FROM logs
+                    WHERE created_at >= :start_time AND created_at <= :end_time
+                        AND user_id = :user_id
+                        AND token_id IS NOT NULL AND token_id > 0
+                        AND type IN (2, 5)
+                    GROUP BY token_id
+                    ORDER BY requests DESC
+                    LIMIT 10
+                """
+                token_rows = self.db.execute(token_detail_sql, {
+                    "start_time": start_time,
+                    "end_time": now,
+                    "user_id": user_id,
+                })
+
+                tokens = [
+                    {
+                        "token_id": int(t.get("token_id") or 0),
+                        "token_name": t.get("token_name") or "",
+                        "requests": int(t.get("requests") or 0),
+                        "first_used": int(t.get("first_used") or 0),
+                        "last_used": int(t.get("last_used") or 0),
+                    }
+                    for t in (token_rows or [])
+                ]
+
+                items.append({
+                    "user_id": user_id,
+                    "username": row.get("username") or "",
+                    "token_count": int(row.get("token_count") or 0),
+                    "total_requests": int(row.get("total_requests") or 0),
+                    "avg_requests_per_token": float(row.get("avg_requests_per_token") or 0),
+                    "tokens": tokens,
+                    "risk_level": "high" if int(row.get("token_count") or 0) >= 10 else "medium",
+                })
+
+            result = {
+                "items": items,
+                "total": len(items),
+                "window_seconds": window_seconds,
+                "thresholds": {
+                    "min_tokens": min_tokens,
+                    "max_requests_per_token": max_requests_per_token,
+                },
+            }
+            _cache.set(cache_key, result, _get_cache_ttl())
+            return result
+
+        except Exception as e:
+            logger.db_error(f"获取 Token 轮换用户失败: {e}")
+            return {"items": [], "total": 0}
+
+    def get_affiliated_accounts(
+        self,
+        min_invited: int = 3,
+        include_activity: bool = True,
+        limit: int = 50,
+        use_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        检测关联账号 - 同一邀请人下的多个账号。
+        
+        这种情况可能表示：
+        - 同一人注册多个账号薅羊毛
+        - 有组织的账号批量注册
+        - 正常的推广行为（需要结合活跃度判断）
+        
+        Args:
+            min_invited: 最小被邀请账号数量
+            include_activity: 是否包含账号活跃度信息
+            limit: 返回数量限制
+            use_cache: 是否使用缓存
+            
+        Returns:
+            包含关联账号组的字典
+        """
+        # 检查缓存
+        cache_key = f"affiliated_accounts:{min_invited}:{include_activity}:{limit}"
+        if use_cache:
+            cached = _cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        self.db.connect()
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+
+        # 查询有多个被邀请账号的邀请人
+        if is_pg:
+            sql = """
+                SELECT 
+                    inviter_id,
+                    COUNT(*) as invited_count,
+                    ARRAY_AGG(id ORDER BY id) as user_ids
+                FROM users
+                WHERE inviter_id IS NOT NULL 
+                    AND deleted_at IS NULL
+                    AND status != 2
+                GROUP BY inviter_id
+                HAVING COUNT(*) >= :min_invited
+                ORDER BY COUNT(*) DESC
+                LIMIT :limit
+            """
+        else:
+            sql = """
+                SELECT 
+                    inviter_id,
+                    COUNT(*) as invited_count,
+                    GROUP_CONCAT(id ORDER BY id) as user_ids
+                FROM users
+                WHERE inviter_id IS NOT NULL 
+                    AND deleted_at IS NULL
+                    AND status != 2
+                GROUP BY inviter_id
+                HAVING COUNT(*) >= :min_invited
+                ORDER BY COUNT(*) DESC
+                LIMIT :limit
+            """
+
+        try:
+            rows = self.db.execute(sql, {
+                "min_invited": min_invited,
+                "limit": limit,
+            })
+
+            items = []
+            for row in rows:
+                inviter_id = int(row.get("inviter_id") or 0)
+                invited_count = int(row.get("invited_count") or 0)
+                
+                # 解析 user_ids
+                user_ids_raw = row.get("user_ids")
+                if isinstance(user_ids_raw, str):
+                    user_ids = [int(x) for x in user_ids_raw.split(",") if x.strip().isdigit()]
+                elif isinstance(user_ids_raw, list):
+                    user_ids = [int(x) for x in user_ids_raw]
+                else:
+                    user_ids = []
+
+                # 获取邀请人信息
+                inviter_sql = """
+                    SELECT id, username, display_name, email, status, used_quota, request_count
+                    FROM users WHERE id = :user_id AND deleted_at IS NULL
+                """
+                inviter_rows = self.db.execute(inviter_sql, {"user_id": inviter_id})
+                inviter_info = inviter_rows[0] if inviter_rows else {}
+
+                # 获取被邀请账号的详细信息
+                invited_users = []
+                if user_ids:
+                    placeholders = ",".join([":uid" + str(i) for i in range(len(user_ids))])
+                    invited_sql = f"""
+                        SELECT id, username, display_name, email, status, used_quota, request_count,
+                               quota, `group`
+                        FROM users 
+                        WHERE id IN ({placeholders}) AND deleted_at IS NULL
+                        ORDER BY id
+                    """
+                    params = {f"uid{i}": uid for i, uid in enumerate(user_ids)}
+                    invited_rows = self.db.execute(invited_sql, params)
+
+                    for u in (invited_rows or []):
+                        user_data = {
+                            "user_id": int(u.get("id") or 0),
+                            "username": u.get("username") or "",
+                            "display_name": u.get("display_name") or "",
+                            "status": int(u.get("status") or 0),
+                            "used_quota": int(u.get("used_quota") or 0),
+                            "request_count": int(u.get("request_count") or 0),
+                            "group": u.get("group") or "default",
+                        }
+                        invited_users.append(user_data)
+
+                # 计算风险指标
+                total_used_quota = sum(u.get("used_quota", 0) for u in invited_users)
+                total_requests = sum(u.get("request_count", 0) for u in invited_users)
+                active_count = sum(1 for u in invited_users if u.get("request_count", 0) > 0)
+                banned_count = sum(1 for u in invited_users if u.get("status") == 2)
+
+                # 风险等级判断
+                risk_level = "low"
+                risk_reasons = []
+                
+                if invited_count >= 10:
+                    risk_level = "high"
+                    risk_reasons.append(f"邀请账号数量过多({invited_count})")
+                elif invited_count >= 5:
+                    risk_level = "medium"
+                    risk_reasons.append(f"邀请账号数量较多({invited_count})")
+                
+                if active_count > 0 and total_requests / active_count < 10:
+                    risk_level = "high" if risk_level != "low" else "medium"
+                    risk_reasons.append("被邀请账号活跃度低")
+                
+                if banned_count > 0:
+                    risk_level = "high"
+                    risk_reasons.append(f"有{banned_count}个账号已被封禁")
+
+                items.append({
+                    "inviter_id": inviter_id,
+                    "inviter_username": inviter_info.get("username") or "",
+                    "inviter_status": int(inviter_info.get("status") or 0),
+                    "invited_count": invited_count,
+                    "invited_users": invited_users,
+                    "stats": {
+                        "total_used_quota": total_used_quota,
+                        "total_requests": total_requests,
+                        "active_count": active_count,
+                        "banned_count": banned_count,
+                    },
+                    "risk_level": risk_level,
+                    "risk_reasons": risk_reasons,
+                })
+
+            result = {
+                "items": items,
+                "total": len(items),
+                "thresholds": {
+                    "min_invited": min_invited,
+                },
+            }
+            _cache.set(cache_key, result, _get_cache_ttl())
+            return result
+
+        except Exception as e:
+            logger.db_error(f"获取关联账号失败: {e}")
+            return {"items": [], "total": 0}
+
+    def get_same_ip_registrations(
+        self,
+        window_seconds: int = 7 * 24 * 3600,
+        min_users: int = 3,
+        limit: int = 50,
+        now: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        检测同 IP 注册的多个账号（通过首次请求 IP 判断）。
+        
+        Args:
+            window_seconds: 时间窗口（秒）
+            min_users: 最小用户数量
+            limit: 返回数量限制
+            now: 当前时间戳
+            use_cache: 是否使用缓存
+            
+        Returns:
+            包含同 IP 用户组的字典
+        """
+        if now is None:
+            now = int(time.time())
+        start_time = now - window_seconds
+
+        # 检查缓存
+        cache_key = f"same_ip_reg:{window_seconds}:{min_users}:{limit}"
+        if use_cache:
+            cached = _cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        self.db.connect()
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+
+        # 查询每个用户的首次请求 IP，然后找出共享 IP 的用户
+        if is_pg:
+            sql = """
+                WITH first_ips AS (
+                    SELECT DISTINCT ON (user_id)
+                        user_id,
+                        ip as first_ip,
+                        created_at as first_request_time
+                    FROM logs
+                    WHERE created_at >= :start_time AND created_at <= :end_time
+                        AND user_id IS NOT NULL
+                        AND ip IS NOT NULL AND ip <> ''
+                    ORDER BY user_id, created_at ASC
+                )
+                SELECT 
+                    first_ip,
+                    COUNT(*) as user_count,
+                    ARRAY_AGG(user_id ORDER BY first_request_time) as user_ids
+                FROM first_ips
+                GROUP BY first_ip
+                HAVING COUNT(*) >= :min_users
+                ORDER BY COUNT(*) DESC
+                LIMIT :limit
+            """
+        else:
+            # MySQL: 使用子查询获取每个用户的首次 IP
+            sql = """
+                WITH first_ips AS (
+                    SELECT 
+                        user_id,
+                        ip as first_ip,
+                        created_at as first_request_time
+                    FROM logs l1
+                    WHERE created_at >= :start_time AND created_at <= :end_time
+                        AND user_id IS NOT NULL
+                        AND ip IS NOT NULL AND ip <> ''
+                        AND created_at = (
+                            SELECT MIN(created_at) 
+                            FROM logs l2 
+                            WHERE l2.user_id = l1.user_id 
+                                AND l2.created_at >= :start_time 
+                                AND l2.created_at <= :end_time
+                                AND l2.ip IS NOT NULL AND l2.ip <> ''
+                        )
+                )
+                SELECT 
+                    first_ip,
+                    COUNT(*) as user_count,
+                    GROUP_CONCAT(user_id ORDER BY first_request_time) as user_ids
+                FROM first_ips
+                GROUP BY first_ip
+                HAVING COUNT(*) >= :min_users
+                ORDER BY COUNT(*) DESC
+                LIMIT :limit
+            """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "min_users": min_users,
+                "limit": limit,
+            })
+
+            items = []
+            for row in rows:
+                ip = row.get("first_ip") or ""
+                user_count = int(row.get("user_count") or 0)
+                
+                # 解析 user_ids
+                user_ids_raw = row.get("user_ids")
+                if isinstance(user_ids_raw, str):
+                    user_ids = [int(x) for x in user_ids_raw.split(",") if x.strip().isdigit()]
+                elif isinstance(user_ids_raw, list):
+                    user_ids = [int(x) for x in user_ids_raw]
+                else:
+                    user_ids = []
+
+                # 获取用户详情
+                users = []
+                if user_ids:
+                    placeholders = ",".join([":uid" + str(i) for i in range(len(user_ids))])
+                    user_sql = f"""
+                        SELECT id, username, status, used_quota, request_count
+                        FROM users 
+                        WHERE id IN ({placeholders}) AND deleted_at IS NULL
+                    """
+                    params = {f"uid{i}": uid for i, uid in enumerate(user_ids)}
+                    user_rows = self.db.execute(user_sql, params)
+
+                    for u in (user_rows or []):
+                        users.append({
+                            "user_id": int(u.get("id") or 0),
+                            "username": u.get("username") or "",
+                            "status": int(u.get("status") or 0),
+                            "used_quota": int(u.get("used_quota") or 0),
+                            "request_count": int(u.get("request_count") or 0),
+                        })
+
+                # 风险等级
+                banned_count = sum(1 for u in users if u.get("status") == 2)
+                risk_level = "high" if user_count >= 5 or banned_count > 0 else "medium"
+
+                items.append({
+                    "ip": ip,
+                    "user_count": user_count,
+                    "users": users,
+                    "banned_count": banned_count,
+                    "risk_level": risk_level,
+                })
+
+            result = {
+                "items": items,
+                "total": len(items),
+                "window_seconds": window_seconds,
+                "thresholds": {
+                    "min_users": min_users,
+                },
+            }
+            _cache.set(cache_key, result, _get_cache_ttl())
+            return result
+
+        except Exception as e:
+            logger.db_error(f"获取同 IP 注册账号失败: {e}")
+            return {"items": [], "total": 0}
 
 
 _risk_monitoring_service: Optional[RiskMonitoringService] = None

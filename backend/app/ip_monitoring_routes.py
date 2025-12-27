@@ -203,3 +203,53 @@ async def ensure_indexes(
         )
     except Exception as e:
         raise InvalidParamsError(message=f"创建索引失败: {str(e)}")
+
+
+class IPGeoResponse(BaseModel):
+    success: bool
+    data: dict
+
+
+class IPGeoBatchRequest(BaseModel):
+    ips: list[str]
+
+
+@router.get("/geo/{ip}", response_model=IPGeoResponse)
+async def get_ip_geo(
+    ip: str,
+    _: str = Depends(verify_auth),
+):
+    """Get geographic information for a single IP address."""
+    from .ip_geo_service import get_ip_geo_service
+    
+    service = get_ip_geo_service()
+    try:
+        info = await service.query_single(ip)
+        return IPGeoResponse(success=True, data=info.to_dict())
+    except Exception as e:
+        raise InvalidParamsError(message=f"查询 IP 地理位置失败: {str(e)}")
+
+
+@router.post("/geo/batch", response_model=IPGeoResponse)
+async def get_ip_geo_batch(
+    request: IPGeoBatchRequest,
+    _: str = Depends(verify_auth),
+):
+    """Get geographic information for multiple IP addresses (max 100)."""
+    from .ip_geo_service import get_ip_geo_service
+    
+    if len(request.ips) > 100:
+        raise InvalidParamsError(message="最多支持 100 个 IP 批量查询")
+    
+    service = get_ip_geo_service()
+    try:
+        results = await service.query_batch(request.ips)
+        return IPGeoResponse(
+            success=True,
+            data={
+                "items": {ip: info.to_dict() for ip, info in results.items()},
+                "total": len(results),
+            }
+        )
+    except Exception as e:
+        raise InvalidParamsError(message=f"批量查询 IP 地理位置失败: {str(e)}")
