@@ -231,22 +231,30 @@ detect_environment() {
   [[ -n "$db_container" ]] || die "在网络 '$NEWAPI_NETWORK' 上找不到数据库容器"
   DB_CONTAINER="$db_container"
 
-  # 设置 DB_DNS - 优先使用 IPv4 地址以避免 IPv6 连接问题
-  local db_ipv4=""
-  db_ipv4="$(get_container_ipv4 "$db_container" "$NEWAPI_NETWORK" | trim)"
-  
-  if [[ -n "$db_ipv4" ]]; then
-    # 使用 IPv4 地址，避免 IPv6 DNS 解析问题
-    DB_DNS="${DB_DNS:-$db_ipv4}"
-    log_info "使用数据库 IPv4 地址: $db_ipv4"
-  elif [[ -n "$db_service" ]]; then
-    DB_DNS="${DB_DNS:-$db_service}"
+  # 设置 DB_DNS
+  # 优先级：1. 用户指定的 DB_DNS  2. IPv4 地址（避免 IPv6 问题）  3. 服务名
+  if [[ -n "$DB_DNS" ]]; then
+    # 用户已指定，保持不变
+    log_info "使用指定的数据库主机: $DB_DNS"
   else
-    db_service="$(docker_inspect_label "$db_container" 'com.docker.compose.service' | trim)"
-    if [[ -n "$db_service" ]]; then
-      DB_DNS="${DB_DNS:-$db_service}"
+    # 尝试获取 IPv4 地址（某些 MySQL 客户端在 IPv6 下有问题）
+    local db_ipv4=""
+    db_ipv4="$(get_container_ipv4 "$db_container" "$NEWAPI_NETWORK" | trim)"
+    
+    if [[ -n "$db_ipv4" ]]; then
+      DB_DNS="$db_ipv4"
+      log_info "使用数据库 IPv4 地址: $db_ipv4"
+    elif [[ -n "$db_service" ]]; then
+      DB_DNS="$db_service"
+      log_info "使用数据库服务名: $db_service"
     else
-      DB_DNS="${DB_DNS:-$db_container}"
+      db_service="$(docker_inspect_label "$db_container" 'com.docker.compose.service' | trim)"
+      if [[ -n "$db_service" ]]; then
+        DB_DNS="$db_service"
+      else
+        DB_DNS="$db_container"
+      fi
+      log_info "使用数据库主机: $DB_DNS"
     fi
   fi
 
@@ -384,9 +392,10 @@ start_services() {
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
   # 将容器连接到 NewAPI 网络（用于访问数据库）
+  # 注意：docker-compose.yml 中也配置了网络，这里是双重保障
   if [[ -n "$NEWAPI_NETWORK" ]]; then
     log_info "连接到 NewAPI 网络: $NEWAPI_NETWORK"
-    docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络连接失败，可能已连接"
+    docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络已连接"
   fi
 
   log_success "服务已启动!"

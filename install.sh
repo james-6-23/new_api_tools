@@ -287,6 +287,14 @@ quick_update() {
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" down
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" up -d
   
+  # 确保容器连接到 NewAPI 网络
+  local newapi_network
+  newapi_network=$(grep -E '^NEWAPI_NETWORK=' "$env_file" | cut -d'=' -f2 || true)
+  if [[ -n "$newapi_network" ]]; then
+    log_info "连接到 NewAPI 网络: $newapi_network"
+    docker network connect "$newapi_network" newapi-tools 2>/dev/null || log_warn "网络已连接"
+  fi
+  
   # 获取前端端口
   local frontend_port
   frontend_port=$(grep -E '^FRONTEND_PORT=' "$env_file" | cut -d'=' -f2 || echo "1145")

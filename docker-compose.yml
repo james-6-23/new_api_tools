@@ -1,8 +1,13 @@
 # NewAPI Middleware Tool - Docker Compose Configuration
 #
 # 使用方式:
-#   1. 通过 deploy.sh 自动部署 (推荐): ./deploy.sh
-#   2. 手动部署: 复制 .env.example 为 .env 并配置后运行 docker-compose up -d
+#   1. 通过 install.sh 一键安装 (推荐)
+#   2. 通过 deploy.sh 自动部署: ./deploy.sh
+#   3. 手动部署: 复制 .env.example 为 .env 并配置后运行 docker-compose up -d
+#
+# 更新方式:
+#   docker compose pull && docker compose down && docker compose up -d
+#   注意: 更新后需要手动连接网络: docker network connect <NEWAPI_NETWORK> newapi-tools
 
 services:
   newapi-tools:
@@ -24,8 +29,14 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
