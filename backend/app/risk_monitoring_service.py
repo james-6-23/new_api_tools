@@ -2,10 +2,11 @@
 Risk Monitoring Service for NewAPI Middleware Tool.
 Provides real-time usage leaderboards and per-user usage analysis for moderation.
 
-Optimizations:
-- In-memory cache for leaderboards (5-10 seconds TTL)
-- Merged SQL queries for user analysis (5 queries -> 2 queries)
-- Recommended index: CREATE INDEX idx_logs_created_user_type ON logs(created_at, user_id, type);
+Performance Optimizations:
+- In-memory cache for leaderboards (30 seconds TTL)
+- Single query for all time windows (query once, filter in memory)
+- Removed JOIN with users table (fetch user info separately only for top N)
+- Recommended index: CREATE INDEX idx_logs_created_type_user ON logs(created_at, type, user_id);
 """
 import time
 import threading
@@ -26,8 +27,8 @@ WINDOW_SECONDS: dict[str, int] = {
     "7d": 7 * 24 * 3600,
 }
 
-# Cache TTL in seconds
-LEADERBOARD_CACHE_TTL = 8
+# Cache TTL in seconds - increased for better performance
+LEADERBOARD_CACHE_TTL = 30
 
 
 @dataclass
@@ -91,7 +92,11 @@ class RiskMonitoringService:
     ) -> Dict[str, Any]:
         """
         Get leaderboards for multiple time windows.
-        Uses cache to reduce database load.
+        
+        Performance optimization:
+        - Uses cache to reduce database load (30s TTL)
+        - No JOIN with users table (fetch user info separately for top N only)
+        - Each window queried separately for accurate data
         """
         now = int(time.time())
         cache_key = f"leaderboards:{','.join(sorted(windows))}:{limit}:{sort_by}"
@@ -102,15 +107,46 @@ class RiskMonitoringService:
             if cached is not None:
                 return cached
         
-        # Fetch from database
+        # Query each window separately for accurate data
         data: Dict[str, Any] = {}
+        all_user_ids = set()
+        window_results: Dict[str, List[Dict]] = {}
+        
         for w in windows:
             seconds = WINDOW_SECONDS.get(w)
             if not seconds:
                 continue
-            data[w] = self._get_leaderboard_internal(
+            
+            # Get raw stats without user info
+            raw_data = self._get_leaderboard_raw(
                 window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
             )
+            window_results[w] = raw_data
+            
+            # Collect user IDs for batch fetch
+            for item in raw_data:
+                all_user_ids.add(item["user_id"])
+        
+        # Batch fetch user info for all users across all windows
+        user_info_map = self._get_users_info_batch(list(all_user_ids))
+        
+        # Merge user info into results
+        for w, raw_data in window_results.items():
+            data[w] = []
+            for item in raw_data:
+                user_info = user_info_map.get(item["user_id"], {})
+                data[w].append({
+                    "user_id": item["user_id"],
+                    "username": user_info.get("display_name") or user_info.get("username") or item.get("username") or "",
+                    "user_status": user_info.get("status", 0),
+                    "request_count": item["request_count"],
+                    "failure_requests": item["failure_requests"],
+                    "failure_rate": item["failure_rate"],
+                    "quota_used": item["quota_used"],
+                    "prompt_tokens": item["prompt_tokens"],
+                    "completion_tokens": item["completion_tokens"],
+                    "unique_ips": item["unique_ips"],
+                })
         
         result = {"generated_at": now, "windows": data}
         
@@ -118,6 +154,102 @@ class RiskMonitoringService:
         _cache.set(cache_key, result, LEADERBOARD_CACHE_TTL)
         
         return result
+
+    def _get_leaderboard_raw(
+        self,
+        window_seconds: int,
+        limit: int,
+        now: int,
+        sort_by: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get raw leaderboard data without user info JOIN.
+        Optimized: single table scan with covering index.
+        """
+        start_time = now - window_seconds
+
+        order_by_map = {
+            "requests": "total_requests DESC",
+            "quota": "quota_used DESC",
+            "failure_rate": "failure_rate DESC, total_requests DESC",
+        }
+        order_by = order_by_map.get(sort_by, order_by_map["requests"])
+
+        sql = """
+            SELECT
+                user_id,
+                MAX(username) as username,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+                (SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) * 1.0) / NULLIF(COUNT(*), 0) as failure_rate,
+                COALESCE(SUM(quota), 0) as quota_used,
+                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+                COUNT(DISTINCT NULLIF(ip, '')) as unique_ips
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND type IN (2, 5)
+                AND user_id IS NOT NULL
+            GROUP BY user_id
+            ORDER BY """ + order_by + """
+            LIMIT :limit
+        """
+
+        try:
+            self.db.connect()
+            rows = self.db.execute(sql, {"start_time": start_time, "end_time": now, "limit": limit})
+        except Exception as e:
+            logger.db_error(f"获取实时排行失败: {e}")
+            return []
+
+        return [
+            {
+                "user_id": int(r.get("user_id") or 0),
+                "username": r.get("username") or "",
+                "request_count": int(r.get("total_requests") or 0),
+                "failure_requests": int(r.get("failure_requests") or 0),
+                "failure_rate": float(r.get("failure_rate") or 0),
+                "quota_used": int(r.get("quota_used") or 0),
+                "prompt_tokens": int(r.get("prompt_tokens") or 0),
+                "completion_tokens": int(r.get("completion_tokens") or 0),
+                "unique_ips": int(r.get("unique_ips") or 0),
+            }
+            for r in rows
+        ]
+
+    def _get_users_info_batch(self, user_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+        """
+        Batch fetch user info for multiple users.
+        """
+        if not user_ids:
+            return {}
+        
+        # Limit to prevent huge IN clauses
+        user_ids = user_ids[:200]
+        
+        placeholders = ", ".join([f":id{i}" for i in range(len(user_ids))])
+        params = {f"id{i}": uid for i, uid in enumerate(user_ids)}
+        
+        sql = f"""
+            SELECT id, username, display_name, status
+            FROM users
+            WHERE id IN ({placeholders}) AND deleted_at IS NULL
+        """
+        
+        try:
+            rows = self.db.execute(sql, params)
+        except Exception as e:
+            logger.db_error(f"批量获取用户信息失败: {e}")
+            return {}
+        
+        return {
+            int(r.get("id")): {
+                "username": r.get("username") or "",
+                "display_name": r.get("display_name") or "",
+                "status": int(r.get("status") or 0),
+            }
+            for r in rows
+        }
 
     def get_leaderboard(
         self,

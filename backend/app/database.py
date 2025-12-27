@@ -70,8 +70,9 @@ RECOMMENDED_INDEXES = [
     ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
     # Composite index for IP switch analysis (ORDER BY created_at with ip filter)
     ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
-    # Risk monitoring indexes
+    # Risk monitoring & leaderboard indexes
     ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
+    ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),  # Optimized for leaderboard GROUP BY
     # Analytics optimization - for incremental log processing
     ("idx_logs_id_type", "logs", ["id", "type"]),
 ]
@@ -396,8 +397,9 @@ class DatabaseManager:
             # High priority: analytics sync (most frequently used)
             ("idx_logs_id_type", "logs", ["id", "type"]),  # Incremental log processing
             
-            # Medium priority: risk monitoring
+            # Medium priority: risk monitoring & leaderboards
             ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
+            ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),  # Optimized for leaderboard GROUP BY
             ("idx_logs_type_created", "logs", ["type", "created_at"]),
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),
 
@@ -512,6 +514,7 @@ class DatabaseManager:
         indexes = [
             ("idx_logs_id_type", "logs"),
             ("idx_logs_created_user_type", "logs"),
+            ("idx_logs_created_type_user", "logs"),  # Optimized for leaderboard GROUP BY
             ("idx_logs_type_created", "logs"),
             ("idx_logs_user_created", "logs"),
             ("idx_logs_ip_created", "logs"),

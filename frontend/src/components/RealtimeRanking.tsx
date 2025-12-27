@@ -303,7 +303,8 @@ export function RealtimeRanking() {
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [countdown, setCountdown] = useState(10)
+  const [refreshInterval, setRefreshInterval] = useState(30)  // 刷新间隔（秒）
+  const [countdown, setCountdown] = useState(30)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selected, setSelected] = useState<{ item: LeaderboardItem; window: WindowKey } | null>(null)
@@ -383,6 +384,7 @@ export function RealtimeRanking() {
     api_key?: string
     masked_api_key?: string
     scan_interval_minutes?: number
+    whitelist_count?: number
     api_health?: {
       suspended: boolean
       consecutive_failures: number
@@ -477,6 +479,27 @@ export function RealtimeRanking() {
     created_at: number
   } | null>(null)
 
+  // 白名单管理状态
+  const [whitelistModalOpen, setWhitelistModalOpen] = useState(false)
+  const [whitelist, setWhitelist] = useState<Array<{
+    user_id: number
+    username: string
+    display_name: string
+    role: number
+    is_admin: boolean
+  }>>([])
+  const [whitelistLoading, setWhitelistLoading] = useState(false)
+  const [whitelistSearchQuery, setWhitelistSearchQuery] = useState('')
+  const [whitelistSearchResults, setWhitelistSearchResults] = useState<Array<{
+    user_id: number
+    username: string
+    display_name: string
+    role: number
+    is_admin: boolean
+    in_whitelist: boolean
+  }>>([])
+  const [whitelistSearching, setWhitelistSearching] = useState(false)
+
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
@@ -498,7 +521,7 @@ export function RealtimeRanking() {
           '7d': windowsData['7d'] || [],
         })
         setGeneratedAt(res.data?.generated_at || 0)
-        setCountdown(10)
+        setCountdown(30)
         if (showSuccessToast) showToast('success', '已刷新')
       } else {
         showToast('error', res.message || '获取排行榜失败')
@@ -631,6 +654,91 @@ export function RealtimeRanking() {
       console.error('Failed to fetch AI config:', e)
     }
   }, [apiUrl, getAuthHeaders])
+
+  // 白名单相关函数
+  const fetchWhitelist = useCallback(async () => {
+    setWhitelistLoading(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/whitelist`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setWhitelist(res.data?.items || [])
+      }
+    } catch (e) {
+      console.error('Failed to fetch whitelist:', e)
+    } finally {
+      setWhitelistLoading(false)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  const searchWhitelistUser = async (query: string) => {
+    if (!query.trim()) {
+      setWhitelistSearchResults([])
+      return
+    }
+    setWhitelistSearching(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/whitelist/search?q=${encodeURIComponent(query)}`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success) {
+        setWhitelistSearchResults(res.data || [])
+      }
+    } catch (e) {
+      console.error('Failed to search user:', e)
+    } finally {
+      setWhitelistSearching(false)
+    }
+  }
+
+  const addToWhitelist = async (userId: number) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/whitelist/add`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        showToast('success', '已添加到白名单')
+        fetchWhitelist()
+        fetchAiConfig()  // 更新白名单计数
+        // 更新搜索结果中的状态
+        setWhitelistSearchResults(prev => prev.map(u => 
+          u.user_id === userId ? { ...u, in_whitelist: true } : u
+        ))
+      } else {
+        showToast('error', res.message || '添加失败')
+      }
+    } catch (e) {
+      console.error('Failed to add to whitelist:', e)
+      showToast('error', '添加失败')
+    }
+  }
+
+  const removeFromWhitelist = async (userId: number) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/whitelist/remove`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const res = await response.json()
+      if (res.success) {
+        showToast('success', '已从白名单移除')
+        fetchWhitelist()
+        fetchAiConfig()  // 更新白名单计数
+        // 更新搜索结果中的状态
+        setWhitelistSearchResults(prev => prev.map(u => 
+          u.user_id === userId ? { ...u, in_whitelist: false } : u
+        ))
+      } else {
+        showToast('error', res.message || '移除失败')
+      }
+    } catch (e) {
+      console.error('Failed to remove from whitelist:', e)
+      showToast('error', '移除失败')
+    }
+  }
 
   const fetchAiAuditLogs = useCallback(async (showSuccessToast = false) => {
     setAiAuditLogsLoading(true)
@@ -1001,17 +1109,18 @@ export function RealtimeRanking() {
 
   useEffect(() => {
     if (view !== 'leaderboards') return
+    if (refreshInterval === 0) return  // 0 表示关闭自动刷新
     const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
           fetchLeaderboards()
-          return 10
+          return refreshInterval
         }
         return prev - 1
       })
     }, 1000)
     return () => clearInterval(interval)
-  }, [fetchLeaderboards, view])
+  }, [fetchLeaderboards, view, refreshInterval])
 
   useEffect(() => {
     const load = async () => {
@@ -1146,8 +1255,28 @@ export function RealtimeRanking() {
         <div className="flex flex-wrap items-center gap-3">
           {view === 'leaderboards' && (
             <>
-              <div className="text-xs text-muted-foreground flex items-center tabular-nums">
-                <Clock className="w-3 h-3 mr-1" /> {countdown}s 后刷新
+              <div className="flex items-center gap-2">
+                <Select 
+                  value={refreshInterval.toString()} 
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value)
+                    setRefreshInterval(val)
+                    setCountdown(val)
+                  }}
+                  className="w-24 h-8 text-xs"
+                >
+                  <option value="0">关闭</option>
+                  <option value="10">10秒</option>
+                  <option value="30">30秒</option>
+                  <option value="60">1分钟</option>
+                  <option value="120">2分钟</option>
+                  <option value="300">5分钟</option>
+                </Select>
+                {refreshInterval > 0 && (
+                  <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                    {countdown}s
+                  </span>
+                )}
               </div>
               <div className="w-40">
                 <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)}>
@@ -2777,6 +2906,17 @@ export function RealtimeRanking() {
             <div className="flex items-center gap-3 shrink-0 w-full md:w-auto">
               <Button
                 variant="outline"
+                onClick={() => {
+                  setWhitelistModalOpen(true)
+                  fetchWhitelist()
+                }}
+                className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <ShieldCheck className="h-4 w-4 mr-2" />
+                白名单 ({aiConfig?.whitelist_count || 0})
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => fetchAiSuspiciousUsers(true)}
                 disabled={aiLoading}
                 className="bg-white border-blue-200 text-blue-700 hover:bg-blue-50 flex-1 md:flex-none"
@@ -4057,6 +4197,205 @@ export function RealtimeRanking() {
                 确认解封
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 白名单管理弹窗 */}
+      <Dialog open={whitelistModalOpen} onOpenChange={setWhitelistModalOpen}>
+        <DialogContent className="max-w-2xl w-full max-h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
+          <DialogHeader className="p-5 border-b bg-muted/10 shrink-0">
+            <div className="flex justify-between items-center pr-6">
+              <div>
+                <DialogTitle className="text-xl flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-green-500" />
+                  AI 审查白名单管理
+                </DialogTitle>
+                <DialogDescription className="mt-1">
+                  白名单用户将不会被 AI 自动封禁系统扫描和处理。管理员 (role ≥ 10) 自动受保护。
+                </DialogDescription>
+              </div>
+              <Badge variant="secondary" className="px-3 py-1 font-mono">{whitelist.length} 人</Badge>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto min-h-0 bg-background">
+            {/* 搜索添加区域 */}
+            <div className="p-4 border-b bg-slate-50/50">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    placeholder="输入用户名或用户 ID 搜索..."
+                    value={whitelistSearchQuery}
+                    onChange={(e) => setWhitelistSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && whitelistSearchQuery.trim()) {
+                        searchWhitelistUser(whitelistSearchQuery)
+                      }
+                    }}
+                    className="pr-10"
+                  />
+                  {whitelistSearching && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                <Button
+                  onClick={() => searchWhitelistUser(whitelistSearchQuery)}
+                  disabled={!whitelistSearchQuery.trim() || whitelistSearching}
+                >
+                  搜索
+                </Button>
+              </div>
+
+              {/* 搜索结果 */}
+              {whitelistSearchResults.length > 0 && (
+                <div className="mt-3 rounded-lg border bg-white overflow-hidden">
+                  <div className="px-3 py-2 bg-slate-100 text-xs font-medium text-slate-600 border-b">
+                    搜索结果 ({whitelistSearchResults.length})
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {whitelistSearchResults.map((user) => (
+                      <div
+                        key={user.user_id}
+                        className="flex items-center justify-between px-3 py-2.5 border-b last:border-b-0 hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600">
+                            {user.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm">{user.username}</span>
+                              {user.display_name && user.display_name !== user.username && (
+                                <span className="text-xs text-muted-foreground">({user.display_name})</span>
+                              )}
+                              {user.is_admin && (
+                                <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-amber-100 text-amber-700">
+                                  管理员
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground">ID: {user.user_id}</div>
+                          </div>
+                        </div>
+                        <div>
+                          {user.in_whitelist ? (
+                            <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+                              <Check className="h-3 w-3 mr-1" />
+                              已在白名单
+                            </Badge>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => addToWhitelist(user.user_id)}
+                              className="h-7 text-xs"
+                            >
+                              添加
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 当前白名单列表 */}
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-slate-700">当前白名单</h4>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fetchWhitelist()}
+                  disabled={whitelistLoading}
+                  className="h-7 text-xs"
+                >
+                  <RefreshCw className={cn("h-3 w-3 mr-1", whitelistLoading && "animate-spin")} />
+                  刷新
+                </Button>
+              </div>
+
+              {whitelistLoading ? (
+                <div className="h-48 flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : whitelist.length > 0 ? (
+                <div className="rounded-lg border overflow-hidden">
+                  <Table>
+                    <TableHeader className="bg-slate-50">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="py-2 text-xs">用户</TableHead>
+                        <TableHead className="py-2 text-xs text-center">类型</TableHead>
+                        <TableHead className="py-2 text-xs text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {whitelist.map((user) => (
+                        <TableRow key={user.user_id} className="hover:bg-muted/20">
+                          <TableCell className="py-2.5">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-medium text-slate-600">
+                                {user.username.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="font-medium text-sm">{user.username}</div>
+                                <div className="text-xs text-muted-foreground">ID: {user.user_id}</div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 text-center">
+                            {user.is_admin ? (
+                              <Badge variant="secondary" className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 border-amber-200">
+                                管理员 (自动)
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs px-2 py-0.5">
+                                手动添加
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-right">
+                            {!user.is_admin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeFromWhitelist(user.user_id)}
+                                className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <X className="h-3 w-3 mr-1" />
+                                移除
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <div className="h-48 flex flex-col items-center justify-center text-muted-foreground border rounded-lg bg-slate-50/50">
+                  <ShieldCheck className="h-10 w-10 mb-2 opacity-20" />
+                  <p className="text-sm">暂无白名单用户</p>
+                  <p className="text-xs mt-1">使用上方搜索框添加用户</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 border-t bg-muted/5 sm:justify-center">
+            <Button
+              onClick={() => {
+                setWhitelistModalOpen(false)
+                setWhitelistSearchQuery('')
+                setWhitelistSearchResults([])
+              }}
+              className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white"
+            >
+              关闭
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

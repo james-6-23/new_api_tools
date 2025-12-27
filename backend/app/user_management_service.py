@@ -164,6 +164,78 @@ class UserManagementService:
             never_requested=0,
         )
 
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """根据 ID 获取用户信息"""
+        try:
+            from .database import DatabaseEngine
+            is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
+            group_col = '"group"' if is_pg else '`group`'
+            
+            sql = f"""
+                SELECT id, username, display_name, email, role, status, 
+                       quota, used_quota, request_count, {group_col}
+                FROM users
+                WHERE id = :user_id AND deleted_at IS NULL
+            """
+            result = self._db.execute(sql, {"user_id": user_id})
+            if result and result[0]:
+                row = result[0]
+                return {
+                    "id": row.get("id"),
+                    "username": row.get("username"),
+                    "display_name": row.get("display_name"),
+                    "email": row.get("email"),
+                    "role": row.get("role", 0),
+                    "status": row.get("status", 1),
+                    "quota": row.get("quota", 0),
+                    "used_quota": row.get("used_quota", 0),
+                    "request_count": row.get("request_count", 0),
+                    "group": row.get("group", ""),
+                }
+        except Exception as e:
+            logger.db_error(f"获取用户信息失败: {e}")
+        return None
+
+    def search_users(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """搜索用户（按用户名、显示名或邮箱）"""
+        try:
+            from .database import DatabaseEngine
+            is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
+            group_col = '"group"' if is_pg else '`group`'
+            
+            sql = f"""
+                SELECT id, username, display_name, email, role, status, 
+                       quota, used_quota, request_count, {group_col}
+                FROM users
+                WHERE deleted_at IS NULL
+                  AND (
+                    username LIKE :query 
+                    OR COALESCE(display_name, '') LIKE :query
+                    OR COALESCE(email, '') LIKE :query
+                  )
+                ORDER BY request_count DESC
+                LIMIT :limit
+            """
+            result = self._db.execute(sql, {"query": f"%{query}%", "limit": limit})
+            users = []
+            for row in result:
+                users.append({
+                    "id": row.get("id"),
+                    "username": row.get("username"),
+                    "display_name": row.get("display_name"),
+                    "email": row.get("email"),
+                    "role": row.get("role", 0),
+                    "status": row.get("status", 1),
+                    "quota": row.get("quota", 0),
+                    "used_quota": row.get("used_quota", 0),
+                    "request_count": row.get("request_count", 0),
+                    "group": row.get("group", ""),
+                })
+            return users
+        except Exception as e:
+            logger.db_error(f"搜索用户失败: {e}")
+        return []
+
     def get_users(
         self,
         page: int = 1,
@@ -239,9 +311,9 @@ class UserManagementService:
 
         where_clauses = []
 
-        # 搜索条件
+        # 搜索条件（支持用户名、显示名、邮箱）
         if search:
-            where_clauses.append("(username LIKE :search OR email LIKE :search)")
+            where_clauses.append("(username LIKE :search OR COALESCE(display_name, '') LIKE :search OR COALESCE(email, '') LIKE :search)")
             params["search"] = f"%{search}%"
 
         # 从未请求筛选
@@ -355,7 +427,7 @@ class UserManagementService:
 
         where_clauses = []
         if search:
-            where_clauses.append("(u.username LIKE :search OR u.email LIKE :search)")
+            where_clauses.append("(u.username LIKE :search OR COALESCE(u.display_name, '') LIKE :search OR COALESCE(u.email, '') LIKE :search)")
             params["search"] = f"%{search}%"
 
         where_sql = ""

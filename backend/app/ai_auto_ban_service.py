@@ -149,6 +149,111 @@ class AIAutoBanService:
             return True
         return user_id in self._whitelist_ids
 
+    def get_whitelist(self) -> List[Dict[str, Any]]:
+        """获取白名单列表（包含用户详情）"""
+        whitelist_users = []
+        
+        for user_id in self._whitelist_ids:
+            user_info = self._user_service.get_user_by_id(user_id)
+            if user_info:
+                whitelist_users.append({
+                    "user_id": user_id,
+                    "username": user_info.get("username", ""),
+                    "display_name": user_info.get("display_name", ""),
+                    "role": user_info.get("role", 0),
+                    "is_admin": user_info.get("role", 0) >= 10,
+                })
+            else:
+                whitelist_users.append({
+                    "user_id": user_id,
+                    "username": f"用户#{user_id}",
+                    "display_name": "",
+                    "role": 0,
+                    "is_admin": False,
+                })
+        
+        return whitelist_users
+
+    def add_to_whitelist(self, user_id: int) -> Dict[str, Any]:
+        """添加用户到白名单"""
+        if user_id in self._whitelist_ids:
+            return {"success": False, "message": "用户已在白名单中"}
+        
+        # 获取用户信息
+        user_info = self._user_service.get_user_by_id(user_id)
+        if not user_info:
+            return {"success": False, "message": "用户不存在"}
+        
+        # 添加到白名单
+        self._whitelist_ids.add(user_id)
+        
+        # 保存到配置
+        self.save_config({"whitelist_ids": list(self._whitelist_ids)})
+        
+        logger.business(
+            "AI封禁白名单添加",
+            user_id=user_id,
+            username=user_info.get("username", ""),
+        )
+        
+        return {
+            "success": True,
+            "message": "已添加到白名单",
+            "user": {
+                "user_id": user_id,
+                "username": user_info.get("username", ""),
+                "display_name": user_info.get("display_name", ""),
+            }
+        }
+
+    def remove_from_whitelist(self, user_id: int) -> Dict[str, Any]:
+        """从白名单移除用户"""
+        if user_id not in self._whitelist_ids:
+            return {"success": False, "message": "用户不在白名单中"}
+        
+        # 从白名单移除
+        self._whitelist_ids.discard(user_id)
+        
+        # 保存到配置
+        self.save_config({"whitelist_ids": list(self._whitelist_ids)})
+        
+        logger.business("AI封禁白名单移除", user_id=user_id)
+        
+        return {"success": True, "message": "已从白名单移除"}
+
+    def search_user_for_whitelist(self, query: str) -> List[Dict[str, Any]]:
+        """搜索用户（用于添加白名单）"""
+        results = []
+        
+        # 尝试按 ID 搜索
+        if query.isdigit():
+            user_info = self._user_service.get_user_by_id(int(query))
+            if user_info:
+                results.append({
+                    "user_id": user_info.get("id"),
+                    "username": user_info.get("username", ""),
+                    "display_name": user_info.get("display_name", ""),
+                    "role": user_info.get("role", 0),
+                    "is_admin": user_info.get("role", 0) >= 10,
+                    "in_whitelist": user_info.get("id") in self._whitelist_ids,
+                })
+        
+        # 按用户名搜索
+        users = self._user_service.search_users(query, limit=10)
+        for user in users:
+            user_id = user.get("id")
+            if not any(r["user_id"] == user_id for r in results):
+                results.append({
+                    "user_id": user_id,
+                    "username": user.get("username", ""),
+                    "display_name": user.get("display_name", ""),
+                    "role": user.get("role", 0),
+                    "is_admin": user.get("role", 0) >= 10,
+                    "in_whitelist": user_id in self._whitelist_ids,
+                })
+        
+        return results[:10]
+
     def get_suspicious_users(self, window: str = "1h", limit: int = 20) -> List[Dict[str, Any]]:
         """
         获取可疑用户列表（触发风险阈值的用户）

@@ -42,10 +42,14 @@ class RedemptionCode:
         """Create RedemptionCode from database row."""
         current_time = int(time.time())
         
+        # Handle NULL values from database
+        redeemed_time = row.get("redeemed_time") or 0
+        expired_time = row.get("expired_time") or 0
+        
         # Determine status
-        if row.get("redeemed_time", 0) > 0:
+        if redeemed_time > 0:
             status = RedemptionStatus.USED
-        elif row.get("expired_time", 0) > 0 and row["expired_time"] < current_time:
+        elif expired_time > 0 and expired_time < current_time:
             status = RedemptionStatus.EXPIRED
         else:
             status = RedemptionStatus.UNUSED
@@ -53,12 +57,12 @@ class RedemptionCode:
         return cls(
             id=row["id"],
             key=row["key"],
-            name=row["name"],
-            quota=row["quota"],
-            created_time=row["created_time"],
-            redeemed_time=row.get("redeemed_time", 0),
-            used_user_id=row.get("used_user_id", 0),
-            expired_time=row.get("expired_time", 0),
+            name=row.get("name") or "",
+            quota=row.get("quota") or 0,
+            created_time=row.get("created_time") or 0,
+            redeemed_time=redeemed_time,
+            used_user_id=row.get("used_user_id") or 0,
+            expired_time=expired_time,
             status=status,
         )
 
@@ -351,15 +355,16 @@ class RedemptionService:
         
         if params.status:
             if params.status == RedemptionStatus.USED:
-                where_clauses.append("redeemed_time > 0")
+                where_clauses.append("(redeemed_time IS NOT NULL AND redeemed_time > 0)")
             elif params.status == RedemptionStatus.EXPIRED:
-                where_clauses.append("redeemed_time = 0")
+                where_clauses.append("(redeemed_time IS NULL OR redeemed_time = 0)")
+                where_clauses.append("expired_time IS NOT NULL")
                 where_clauses.append("expired_time > 0")
                 where_clauses.append("expired_time < :current_time")
                 query_params["current_time"] = current_time
             elif params.status == RedemptionStatus.UNUSED:
-                where_clauses.append("redeemed_time = 0")
-                where_clauses.append("(expired_time = 0 OR expired_time >= :current_time)")
+                where_clauses.append("(redeemed_time IS NULL OR redeemed_time = 0)")
+                where_clauses.append("(expired_time IS NULL OR expired_time = 0 OR expired_time >= :current_time)")
                 query_params["current_time"] = current_time
         
         if params.start_date:
@@ -517,13 +522,13 @@ class RedemptionService:
         sql = f"""
             SELECT 
                 COUNT(*) as total_count,
-                SUM(CASE WHEN redeemed_time = 0 AND (expired_time = 0 OR expired_time >= :current_time) THEN 1 ELSE 0 END) as unused_count,
-                SUM(CASE WHEN redeemed_time > 0 THEN 1 ELSE 0 END) as used_count,
-                SUM(CASE WHEN redeemed_time = 0 AND expired_time > 0 AND expired_time < :current_time THEN 1 ELSE 0 END) as expired_count,
+                SUM(CASE WHEN (redeemed_time IS NULL OR redeemed_time = 0) AND (expired_time IS NULL OR expired_time = 0 OR expired_time >= :current_time) THEN 1 ELSE 0 END) as unused_count,
+                SUM(CASE WHEN redeemed_time IS NOT NULL AND redeemed_time > 0 THEN 1 ELSE 0 END) as used_count,
+                SUM(CASE WHEN (redeemed_time IS NULL OR redeemed_time = 0) AND expired_time IS NOT NULL AND expired_time > 0 AND expired_time < :current_time THEN 1 ELSE 0 END) as expired_count,
                 COALESCE(SUM(quota), 0) as total_quota,
-                COALESCE(SUM(CASE WHEN redeemed_time = 0 AND (expired_time = 0 OR expired_time >= :current_time) THEN quota ELSE 0 END), 0) as unused_quota,
-                COALESCE(SUM(CASE WHEN redeemed_time > 0 THEN quota ELSE 0 END), 0) as used_quota,
-                COALESCE(SUM(CASE WHEN redeemed_time = 0 AND expired_time > 0 AND expired_time < :current_time THEN quota ELSE 0 END), 0) as expired_quota
+                COALESCE(SUM(CASE WHEN (redeemed_time IS NULL OR redeemed_time = 0) AND (expired_time IS NULL OR expired_time = 0 OR expired_time >= :current_time) THEN quota ELSE 0 END), 0) as unused_quota,
+                COALESCE(SUM(CASE WHEN redeemed_time IS NOT NULL AND redeemed_time > 0 THEN quota ELSE 0 END), 0) as used_quota,
+                COALESCE(SUM(CASE WHEN (redeemed_time IS NULL OR redeemed_time = 0) AND expired_time IS NOT NULL AND expired_time > 0 AND expired_time < :current_time THEN quota ELSE 0 END), 0) as expired_quota
             FROM redemptions
             WHERE {where_sql}
         """

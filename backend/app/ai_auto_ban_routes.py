@@ -43,6 +43,16 @@ class TestModelRequest(BaseModel):
     model: str
 
 
+class WhitelistAddRequest(BaseModel):
+    """添加白名单请求"""
+    user_id: int
+
+
+class WhitelistRemoveRequest(BaseModel):
+    """移除白名单请求"""
+    user_id: int
+
+
 @router.get("/config")
 async def get_config(_: str = Depends(verify_auth)):
     """获取 AI 自动封禁配置"""
@@ -287,3 +297,55 @@ async def test_connection(_: str = Depends(verify_auth)):
         api_key=service._openai_api_key,
     )
     return result
+
+
+# ==================== 白名单管理 ====================
+
+@router.get("/whitelist")
+async def get_whitelist(_: str = Depends(verify_auth)):
+    """获取白名单列表"""
+    service = get_ai_auto_ban_service()
+    whitelist = service.get_whitelist()
+    return {
+        "success": True,
+        "data": {
+            "items": whitelist,
+            "total": len(whitelist),
+        }
+    }
+
+
+@router.post("/whitelist/add")
+async def add_to_whitelist(
+    request: WhitelistAddRequest,
+    _: str = Depends(verify_auth),
+):
+    """添加用户到白名单"""
+    service = get_ai_auto_ban_service()
+    result = service.add_to_whitelist(request.user_id)
+    return result
+
+
+@router.post("/whitelist/remove")
+async def remove_from_whitelist(
+    request: WhitelistRemoveRequest,
+    _: str = Depends(verify_auth),
+):
+    """从白名单移除用户"""
+    service = get_ai_auto_ban_service()
+    result = service.remove_from_whitelist(request.user_id)
+    return result
+
+
+@router.get("/whitelist/search")
+async def search_user_for_whitelist(
+    q: str = Query(..., min_length=1, description="搜索关键词（用户名或ID）"),
+    _: str = Depends(verify_auth),
+):
+    """搜索用户（用于添加白名单）"""
+    service = get_ai_auto_ban_service()
+    results = service.search_user_for_whitelist(q)
+    return {
+        "success": True,
+        "data": results,
+    }
