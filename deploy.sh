@@ -373,10 +373,66 @@ check_compose_file() {
 }
 
 #######################################
+# 下载 GeoIP 数据库
+#######################################
+download_geoip_database() {
+  local geoip_dir="${SCRIPT_DIR}/data/geoip"
+  local city_db="${geoip_dir}/GeoLite2-City.mmdb"
+  local asn_db="${geoip_dir}/GeoLite2-ASN.mmdb"
+
+  # 如果数据库已存在，跳过下载
+  if [[ -f "$city_db" && -f "$asn_db" ]]; then
+    log_success "GeoIP 数据库已存在，跳过下载"
+    return 0
+  fi
+
+  log_info "正在下载 GeoIP 数据库..."
+  mkdir -p "$geoip_dir"
+
+  # 下载源（优先 GitHub 直链，备用国内镜像）
+  local base_url="https://raw.githubusercontent.com/adysec/IP_database/main/geolite"
+  local fallback_url="https://raw.gitmirror.com/adysec/IP_database/main/geolite"
+
+  # 下载 City 数据库
+  if [[ ! -f "$city_db" ]]; then
+    log_info "下载 GeoLite2-City.mmdb..."
+    if ! curl -sL --connect-timeout 15 -o "$city_db" "${base_url}/GeoLite2-City.mmdb" 2>/dev/null; then
+      log_warn "GitHub 下载失败，尝试国内镜像..."
+      curl -sL --connect-timeout 30 -o "$city_db" "${fallback_url}/GeoLite2-City.mmdb" 2>/dev/null || {
+        log_warn "GeoLite2-City.mmdb 下载失败，IP 地理位置功能可能不可用"
+        rm -f "$city_db"
+      }
+    fi
+  fi
+
+  # 下载 ASN 数据库
+  if [[ ! -f "$asn_db" ]]; then
+    log_info "下载 GeoLite2-ASN.mmdb..."
+    if ! curl -sL --connect-timeout 15 -o "$asn_db" "${base_url}/GeoLite2-ASN.mmdb" 2>/dev/null; then
+      log_warn "GitHub 下载失败，尝试国内镜像..."
+      curl -sL --connect-timeout 30 -o "$asn_db" "${fallback_url}/GeoLite2-ASN.mmdb" 2>/dev/null || {
+        log_warn "GeoLite2-ASN.mmdb 下载失败，ASN 查询功能可能不可用"
+        rm -f "$asn_db"
+      }
+    fi
+  fi
+
+  # 检查下载结果
+  if [[ -f "$city_db" && -f "$asn_db" ]]; then
+    log_success "GeoIP 数据库下载完成"
+  else
+    log_warn "部分 GeoIP 数据库下载失败，可稍后手动下载"
+  fi
+}
+
+#######################################
 # 启动服务
 #######################################
 start_services() {
   log_info "启动服务..."
+
+  # 下载 GeoIP 数据库
+  download_geoip_database
 
   # 检查是否有旧容器
   if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools$'; then

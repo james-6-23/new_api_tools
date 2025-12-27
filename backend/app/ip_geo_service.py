@@ -1,24 +1,30 @@
 """
 IP 地理位置查询服务 - NewAPI Middleware Tool
 
-使用 ip-api.com 免费 API 查询 IP 地理位置信息。
-支持批量查询、缓存和双栈用户检测。
+使用 MaxMind GeoLite2 本地数据库查询 IP 地理位置信息。
+无需 API Key，无速率限制，完全离线运行。
 
-限制：
-- ip-api.com 免费版限制 45 次/分钟
-- 批量查询最多 100 个 IP
+数据库来源：https://github.com/adysec/IP_database
+部署时自动下载，无需手动配置。
 """
-import time
-import asyncio
+import os
 import ipaddress
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-import httpx
-
 from .logger import logger
 from .local_storage import get_local_storage
+
+# GeoIP2 库（可选依赖）
+try:
+    import geoip2.database
+    import geoip2.errors
+    GEOIP2_AVAILABLE = True
+except ImportError:
+    GEOIP2_AVAILABLE = False
+    logger.warning("geoip2 库未安装，IP 地理位置查询功能将不可用")
 
 
 class IPVersion(Enum):
@@ -68,11 +74,10 @@ class IPGeoInfo:
 IP_GEO_CACHE_TTL = 24 * 3600  # 24小时缓存
 IP_GEO_CACHE_PREFIX = "ip_geo:"
 
-# API 配置
-IP_API_URL = "http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,region,regionName,city,isp,org,as,query"
-IP_API_BATCH_URL = "http://ip-api.com/batch?fields=status,message,country,countryCode,region,regionName,city,isp,org,as,query"
-IP_API_RATE_LIMIT = 45  # 每分钟请求数
-IP_API_BATCH_SIZE = 100  # 批量查询最大数量
+# GeoIP 数据库路径配置
+GEOIP_DATA_DIR = os.environ.get("GEOIP_DATA_DIR", "/app/data/geoip")
+GEOIP_CITY_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-City.mmdb")
+GEOIP_ASN_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-ASN.mmdb")
 
 
 def get_ip_version(ip: str) -> IPVersion:
@@ -98,13 +103,52 @@ def is_private_ip(ip: str) -> bool:
 
 
 class IPGeoService:
-    """IP 地理位置查询服务"""
+    """IP 地理位置查询服务 - 使用 MaxMind GeoLite2 本地数据库"""
     
     def __init__(self):
         self._storage = get_local_storage()
-        self._last_request_time = 0
-        self._request_count = 0
-        self._rate_limit_reset = 0
+        self._city_reader: Optional["geoip2.database.Reader"] = None
+        self._asn_reader: Optional["geoip2.database.Reader"] = None
+        self._db_available = False
+        self._init_databases()
+    
+    def _init_databases(self):
+        """初始化 GeoIP 数据库"""
+        if not GEOIP2_AVAILABLE:
+            logger.warning("geoip2 库未安装，无法使用本地 GeoIP 数据库")
+            return
+        
+        # 尝试加载 City 数据库
+        if os.path.exists(GEOIP_CITY_DB):
+            try:
+                self._city_reader = geoip2.database.Reader(GEOIP_CITY_DB)
+                logger.info(f"已加载 GeoLite2-City 数据库: {GEOIP_CITY_DB}")
+            except Exception as e:
+                logger.error(f"加载 GeoLite2-City 数据库失败: {e}")
+        else:
+            logger.warning(f"GeoLite2-City 数据库不存在: {GEOIP_CITY_DB}")
+        
+        # 尝试加载 ASN 数据库
+        if os.path.exists(GEOIP_ASN_DB):
+            try:
+                self._asn_reader = geoip2.database.Reader(GEOIP_ASN_DB)
+                logger.info(f"已加载 GeoLite2-ASN 数据库: {GEOIP_ASN_DB}")
+            except Exception as e:
+                logger.error(f"加载 GeoLite2-ASN 数据库失败: {e}")
+        else:
+            logger.warning(f"GeoLite2-ASN 数据库不存在: {GEOIP_ASN_DB}")
+        
+        self._db_available = self._city_reader is not None
+        
+        if not self._db_available:
+            logger.warning(
+                "GeoIP 数据库未找到，IP 地理位置查询功能不可用。\n"
+                "请运行更新脚本自动下载，或手动下载到 data/geoip/ 目录"
+            )
+    
+    def is_available(self) -> bool:
+        """检查 GeoIP 服务是否可用"""
+        return self._db_available
     
     def _get_cached(self, ip: str) -> Optional[IPGeoInfo]:
         """从缓存获取 IP 信息"""
@@ -142,21 +186,6 @@ class IPGeoService:
             "success": info.success,
         }, ttl=IP_GEO_CACHE_TTL)
     
-    def _check_rate_limit(self) -> bool:
-        """检查是否超过速率限制"""
-        now = time.time()
-        
-        # 重置计数器（每分钟）
-        if now - self._rate_limit_reset >= 60:
-            self._request_count = 0
-            self._rate_limit_reset = now
-        
-        return self._request_count < IP_API_RATE_LIMIT
-    
-    def _increment_request_count(self, count: int = 1):
-        """增加请求计数"""
-        self._request_count += count
-    
     def _create_private_ip_info(self, ip: str) -> IPGeoInfo:
         """为私有 IP 创建信息"""
         return IPGeoInfo(
@@ -189,6 +218,59 @@ class IPGeoService:
             cached=False,
         )
     
+    def _query_local(self, ip: str) -> IPGeoInfo:
+        """使用本地数据库查询 IP 信息"""
+        country = ""
+        country_code = ""
+        region = ""
+        city = ""
+        isp = ""
+        org = ""
+        asn = ""
+        
+        # 查询 City 数据库
+        if self._city_reader:
+            try:
+                response = self._city_reader.city(ip)
+                country = response.country.name or ""
+                country_code = response.country.iso_code or ""
+                if response.subdivisions:
+                    region = response.subdivisions.most_specific.name or ""
+                city = response.city.name or ""
+            except geoip2.errors.AddressNotFoundError:
+                pass
+            except Exception as e:
+                logger.debug(f"City 数据库查询失败 {ip}: {e}")
+        
+        # 查询 ASN 数据库
+        if self._asn_reader:
+            try:
+                response = self._asn_reader.asn(ip)
+                asn = f"AS{response.autonomous_system_number}" if response.autonomous_system_number else ""
+                org = response.autonomous_system_organization or ""
+                isp = org  # ASN 数据库中 org 通常就是 ISP
+            except geoip2.errors.AddressNotFoundError:
+                pass
+            except Exception as e:
+                logger.debug(f"ASN 数据库查询失败 {ip}: {e}")
+        
+        # 只要有 country 信息就算成功
+        success = bool(country_code)
+        
+        return IPGeoInfo(
+            ip=ip,
+            version=get_ip_version(ip),
+            country=country,
+            country_code=country_code,
+            region=region,
+            city=city,
+            isp=isp,
+            org=org,
+            asn=asn,
+            success=success,
+            cached=False,
+        )
+    
     async def query_single(self, ip: str) -> IPGeoInfo:
         """查询单个 IP 的地理位置"""
         # 检查缓存
@@ -202,52 +284,25 @@ class IPGeoService:
             self._set_cached(info)
             return info
         
-        # 检查速率限制
-        if not self._check_rate_limit():
-            logger.warning(f"IP 地理位置查询速率限制，跳过: {ip}")
-            return self._create_failed_info(ip, "Rate Limited")
+        # 检查数据库是否可用
+        if not self._db_available:
+            return self._create_failed_info(ip, "GeoIP DB Not Available")
         
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                url = IP_API_URL.format(ip=ip)
-                response = await client.get(url)
-                response.raise_for_status()
-                data = response.json()
-                
-                self._increment_request_count()
-                
-                if data.get("status") == "success":
-                    info = IPGeoInfo(
-                        ip=ip,
-                        version=get_ip_version(ip),
-                        country=data.get("country", ""),
-                        country_code=data.get("countryCode", ""),
-                        region=data.get("regionName", ""),
-                        city=data.get("city", ""),
-                        isp=data.get("isp", ""),
-                        org=data.get("org", ""),
-                        asn=data.get("as", "").split()[0] if data.get("as") else "",
-                        success=True,
-                    )
-                    self._set_cached(info)
-                    return info
-                else:
-                    return self._create_failed_info(ip, data.get("message", "Unknown"))
-                    
-        except Exception as e:
-            logger.warning(f"IP 地理位置查询失败 {ip}: {e}")
-            return self._create_failed_info(ip, str(e))
+        # 本地查询（无速率限制）
+        info = self._query_local(ip)
+        if info.success:
+            self._set_cached(info)
+        
+        return info
     
     async def query_batch(self, ips: List[str]) -> Dict[str, IPGeoInfo]:
-        """批量查询 IP 地理位置"""
+        """批量查询 IP 地理位置（本地数据库，无速率限制）"""
         results: Dict[str, IPGeoInfo] = {}
-        to_query: List[str] = []
         
-        # 先检查缓存和私有 IP
         for ip in ips:
             if not ip:
                 continue
-                
+            
             # 检查缓存
             cached = self._get_cached(ip)
             if cached:
@@ -261,65 +316,16 @@ class IPGeoService:
                 results[ip] = info
                 continue
             
-            to_query.append(ip)
-        
-        # 没有需要查询的
-        if not to_query:
-            return results
-        
-        # 检查速率限制
-        if not self._check_rate_limit():
-            logger.warning(f"IP 地理位置查询速率限制，跳过 {len(to_query)} 个 IP")
-            for ip in to_query:
-                results[ip] = self._create_failed_info(ip, "Rate Limited")
-            return results
-        
-        # 分批查询
-        for i in range(0, len(to_query), IP_API_BATCH_SIZE):
-            batch = to_query[i:i + IP_API_BATCH_SIZE]
+            # 数据库不可用
+            if not self._db_available:
+                results[ip] = self._create_failed_info(ip, "GeoIP DB Not Available")
+                continue
             
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    payload = [{"query": ip} for ip in batch]
-                    response = await client.post(IP_API_BATCH_URL, json=payload)
-                    response.raise_for_status()
-                    data_list = response.json()
-                    
-                    self._increment_request_count()
-                    
-                    for data in data_list:
-                        ip = data.get("query", "")
-                        if not ip:
-                            continue
-                        
-                        if data.get("status") == "success":
-                            info = IPGeoInfo(
-                                ip=ip,
-                                version=get_ip_version(ip),
-                                country=data.get("country", ""),
-                                country_code=data.get("countryCode", ""),
-                                region=data.get("regionName", ""),
-                                city=data.get("city", ""),
-                                isp=data.get("isp", ""),
-                                org=data.get("org", ""),
-                                asn=data.get("as", "").split()[0] if data.get("as") else "",
-                                success=True,
-                            )
-                        else:
-                            info = self._create_failed_info(ip, data.get("message", ""))
-                        
-                        self._set_cached(info)
-                        results[ip] = info
-                        
-            except Exception as e:
-                logger.warning(f"IP 批量查询失败: {e}")
-                for ip in batch:
-                    if ip not in results:
-                        results[ip] = self._create_failed_info(ip, str(e))
-            
-            # 批次间延迟，避免触发速率限制
-            if i + IP_API_BATCH_SIZE < len(to_query):
-                await asyncio.sleep(1.5)
+            # 本地查询
+            info = self._query_local(ip)
+            if info.success:
+                self._set_cached(info)
+            results[ip] = info
         
         return results
     
@@ -334,12 +340,6 @@ class IPGeoService:
     def is_dual_stack_pair(self, ip1: str, ip2: str, info1: Optional[IPGeoInfo] = None, info2: Optional[IPGeoInfo] = None) -> bool:
         """
         判断两个 IP 是否为双栈配对（同一位置的 IPv4 和 IPv6）
-        
-        Args:
-            ip1: 第一个 IP
-            ip2: 第二个 IP
-            info1: 第一个 IP 的地理信息（可选，避免重复查询）
-            info2: 第二个 IP 的地理信息（可选）
         """
         v1 = get_ip_version(ip1)
         v2 = get_ip_version(ip2)
@@ -355,6 +355,16 @@ class IPGeoService:
         
         # 判断是否同一位置
         return self.is_same_location(info1, info2)
+    
+    def close(self):
+        """关闭数据库连接"""
+        if self._city_reader:
+            self._city_reader.close()
+            self._city_reader = None
+        if self._asn_reader:
+            self._asn_reader.close()
+            self._asn_reader = None
+        self._db_available = False
 
 
 # 全局服务实例

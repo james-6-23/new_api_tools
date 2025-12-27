@@ -261,6 +261,68 @@ clone_or_update_project() {
 }
 
 #######################################
+# 下载 GeoIP 数据库
+#######################################
+download_geoip_database() {
+  local geoip_dir="${PROJECT_DIR}/data/geoip"
+  local city_db="${geoip_dir}/GeoLite2-City.mmdb"
+  local asn_db="${geoip_dir}/GeoLite2-ASN.mmdb"
+
+  # 如果数据库已存在，跳过下载
+  if [[ -f "$city_db" && -f "$asn_db" ]]; then
+    log_success "GeoIP 数据库已存在"
+    return 0
+  fi
+
+  log_info "下载 GeoIP 数据库..."
+  mkdir -p "$geoip_dir"
+
+  local base_url="https://raw.githubusercontent.com/adysec/IP_database/main/geolite"
+  local fallback_url="https://raw.gitmirror.com/adysec/IP_database/main/geolite"
+
+  if [[ ! -f "$city_db" ]]; then
+    curl -sL --connect-timeout 15 -o "$city_db" "${base_url}/GeoLite2-City.mmdb" 2>/dev/null || \
+    curl -sL --connect-timeout 30 -o "$city_db" "${fallback_url}/GeoLite2-City.mmdb" 2>/dev/null || \
+    log_warn "GeoLite2-City.mmdb 下载失败"
+  fi
+
+  if [[ ! -f "$asn_db" ]]; then
+    curl -sL --connect-timeout 15 -o "$asn_db" "${base_url}/GeoLite2-ASN.mmdb" 2>/dev/null || \
+    curl -sL --connect-timeout 30 -o "$asn_db" "${fallback_url}/GeoLite2-ASN.mmdb" 2>/dev/null || \
+    log_warn "GeoLite2-ASN.mmdb 下载失败"
+  fi
+
+  [[ -f "$city_db" && -f "$asn_db" ]] && log_success "GeoIP 数据库就绪"
+}
+
+#######################################
+# 检查并更新配置文件
+#######################################
+check_and_update_configs() {
+  local compose_file="${PROJECT_DIR}/docker-compose.yml"
+  local env_file="${PROJECT_DIR}/.env"
+  local updated=false
+
+  # 检查 docker-compose.yml 是否包含 geoip 挂载
+  if ! grep -q "data/geoip" "$compose_file" 2>/dev/null; then
+    log_info "检测到旧版配置，更新 docker-compose.yml..."
+    # 使用 git 更新后的文件已包含 geoip 配置，无需手动修改
+    updated=true
+  fi
+
+  # 检查 geoip 目录是否存在
+  if [[ ! -d "${PROJECT_DIR}/data/geoip" ]]; then
+    log_info "创建 GeoIP 数据目录..."
+    mkdir -p "${PROJECT_DIR}/data/geoip"
+    updated=true
+  fi
+
+  if [[ "$updated" == "true" ]]; then
+    log_success "配置已更新，将下载 GeoIP 数据库"
+  fi
+}
+
+#######################################
 # 快速更新服务 (保留配置)
 #######################################
 quick_update() {
@@ -279,6 +341,12 @@ quick_update() {
   fi
   
   cd "$PROJECT_DIR"
+  
+  # 检查并更新配置（为老用户添加 GeoIP 支持）
+  check_and_update_configs
+  
+  # 下载 GeoIP 数据库
+  download_geoip_database
   
   log_info "拉取最新镜像..."
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" pull
