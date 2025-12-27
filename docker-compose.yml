@@ -7,7 +7,6 @@
 #
 # 更新方式:
 #   docker compose pull && docker compose down && docker compose up -d
-#   注意: 更新后需要手动连接网络: docker network connect <NEWAPI_NETWORK> newapi-tools
 
 services:
   newapi-tools:
@@ -40,3 +39,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - default
+      - newapi-network
+
+networks:
+  default:
+  newapi-network:
+    external: true
+    name: ${NEWAPI_NETWORK:-new-api_default}
