@@ -5,7 +5,7 @@ import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
 import { 
   Globe, MapPin, RefreshCw, Loader2, TrendingUp, 
-  AlertTriangle, Activity, ChevronRight
+  AlertTriangle, Activity, ChevronRight, ChevronDown
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
@@ -34,11 +34,50 @@ interface IPDistributionData {
 }
 
 type TimeWindow = '1h' | '6h' | '24h' | '7d'
+type MapType = 'world' | 'china'
+
+// 省份名称映射（ECharts 中国地图使用中文名）
+const provinceNameMap: Record<string, string> = {
+  '北京': '北京',
+  '天津': '天津',
+  '河北': '河北',
+  '山西': '山西',
+  '内蒙古': '内蒙古',
+  '辽宁': '辽宁',
+  '吉林': '吉林',
+  '黑龙江': '黑龙江',
+  '上海': '上海',
+  '江苏': '江苏',
+  '浙江': '浙江',
+  '安徽': '安徽',
+  '福建': '福建',
+  '江西': '江西',
+  '山东': '山东',
+  '河南': '河南',
+  '湖北': '湖北',
+  '湖南': '湖南',
+  '广东': '广东',
+  '广西': '广西',
+  '海南': '海南',
+  '重庆': '重庆',
+  '四川': '四川',
+  '贵州': '贵州',
+  '云南': '云南',
+  '西藏': '西藏',
+  '陕西': '陕西',
+  '甘肃': '甘肃',
+  '青海': '青海',
+  '宁夏': '宁夏',
+  '新疆': '新疆',
+  '台湾': '台湾',
+  '香港': '香港',
+  '澳门': '澳门',
+}
 
 // 国家代码到英文名称映射（ECharts 世界地图使用英文名）
 const countryCodeToName: Record<string, string> = {
   'CN': 'China',
-  'US': 'United States of America',
+  'US': 'United States',
   'JP': 'Japan',
   'KR': 'South Korea',
   'DE': 'Germany',
@@ -99,7 +138,11 @@ export function IPAnalysis() {
   const [refreshing, setRefreshing] = useState(false)
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
   const [mapLoaded, setMapLoaded] = useState(false)
+  const [chinaMapLoaded, setChinaMapLoaded] = useState(false)
+  const [mapType, setMapType] = useState<MapType>('world')
+  const [mapDropdownOpen, setMapDropdownOpen] = useState(false)
   const mapLoadedRef = useRef(false)
+  const chinaMapLoadedRef = useRef(false)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const [mapError, setMapError] = useState(false)
@@ -147,6 +190,47 @@ export function IPAnalysis() {
     
     tryLoadMap()
   }, [])
+
+  // 加载中国地图（按需加载）
+  useEffect(() => {
+    if (mapType !== 'china' || chinaMapLoadedRef.current) return
+    chinaMapLoadedRef.current = true
+    
+    const CHINA_MAP_SOURCES = [
+      '/china.json',
+      'https://cdn.jsdelivr.net/gh/mouday/echarts-map@master/echarts-4.2.1-rc1-map/json/china.json',
+      'https://fastly.jsdelivr.net/gh/mouday/echarts-map@master/echarts-4.2.1-rc1-map/json/china.json',
+    ]
+    
+    const fetchWithTimeout = (url: string, timeout = 8000): Promise<Response> => {
+      return Promise.race([
+        fetch(url),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout')), timeout)
+        )
+      ])
+    }
+    
+    const tryLoadChinaMap = async () => {
+      for (const url of CHINA_MAP_SOURCES) {
+        try {
+          console.log(`[ChinaMap] Trying: ${url}`)
+          const res = await fetchWithTimeout(url)
+          if (!res.ok) continue
+          const chinaJson = await res.json()
+          echarts.registerMap('china', chinaJson)
+          setChinaMapLoaded(true)
+          console.log(`[ChinaMap] Loaded from: ${url}`)
+          return
+        } catch (err) {
+          console.warn(`[ChinaMap] Failed: ${url}`, err)
+        }
+      }
+      console.error('[ChinaMap] All sources failed')
+    }
+    
+    tryLoadChinaMap()
+  }, [mapType])
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -202,7 +286,7 @@ export function IPAnalysis() {
   }
 
   // 世界地图配置
-  const mapOption = useMemo(() => {
+  const worldMapOption = useMemo(() => {
     if (!data || !mapLoaded) return {}
     
     const maxValue = data.by_country[0]?.request_count || 100
@@ -275,6 +359,84 @@ export function IPAnalysis() {
       ]
     }
   }, [data, mapLoaded])
+
+  // 中国地图配置
+  const chinaMapOption = useMemo(() => {
+    if (!data || !chinaMapLoaded) return {}
+    
+    const maxValue = data.by_province[0]?.request_count || 100
+    
+    // 转换数据为 ECharts 格式
+    const mapData = data.by_province.map(item => ({
+      name: provinceNameMap[item.region || ''] || item.region,
+      value: item.request_count,
+    }))
+
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => {
+          if (params.value) {
+            return `<strong>${params.name}</strong><br/>流量: ${formatNumber(params.value)}`
+          }
+          return params.name
+        }
+      },
+      visualMap: {
+        min: 0,
+        max: maxValue,
+        text: ['高', '低'],
+        realtime: false,
+        calculable: true,
+        inRange: {
+          color: ['#fce4ec', '#f48fb1', '#f06292', '#ec407a', '#e91e63']
+        },
+        textStyle: {
+          color: '#666'
+        },
+        left: 16,
+        bottom: 16,
+      },
+      series: [
+        {
+          name: '流量分布',
+          type: 'map',
+          map: 'china',
+          roam: true,
+          scaleLimit: {
+            min: 1,
+            max: 8
+          },
+          zoom: 1.2,
+          emphasis: {
+            label: {
+              show: true,
+              color: '#333',
+              fontSize: 12,
+            },
+            itemStyle: {
+              areaColor: '#ffc107'
+            }
+          },
+          select: {
+            disabled: true
+          },
+          itemStyle: {
+            areaColor: '#f5f5f5',
+            borderColor: '#e0e0e0',
+            borderWidth: 0.5
+          },
+          label: {
+            show: false
+          },
+          data: mapData
+        }
+      ]
+    }
+  }, [data, chinaMapLoaded])
+
+  const currentMapOption = mapType === 'world' ? worldMapOption : chinaMapOption
+  const isCurrentMapLoaded = mapType === 'world' ? mapLoaded : chinaMapLoaded
 
   if (loading) {
     return (
@@ -359,14 +521,60 @@ export function IPAnalysis() {
             <div>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Globe className="w-5 h-5 text-muted-foreground" />
-                Web 流量请求（按国家/地区）
+                Web 流量请求（按{mapType === 'world' ? '国家/地区' : '省份'}）
               </CardTitle>
               <CardDescription>过去 {getTimeWindowLabel(timeWindow)}</CardDescription>
+            </div>
+            {/* 地图切换下拉框 */}
+            <div className="relative">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-3 gap-1"
+                onClick={() => setMapDropdownOpen(!mapDropdownOpen)}
+              >
+                {mapType === 'world' ? '🌍 世界地图' : '🇨🇳 中国地图'}
+                <ChevronDown className={cn("h-4 w-4 transition-transform", mapDropdownOpen && "rotate-180")} />
+              </Button>
+              {mapDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-10" 
+                    onClick={() => setMapDropdownOpen(false)} 
+                  />
+                  <div className="absolute right-0 top-full mt-1 z-20 bg-background border rounded-md shadow-lg py-1 min-w-[140px]">
+                    <button
+                      className={cn(
+                        "w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2",
+                        mapType === 'world' && "bg-muted font-medium"
+                      )}
+                      onClick={() => {
+                        setMapType('world')
+                        setMapDropdownOpen(false)
+                      }}
+                    >
+                      🌍 世界地图
+                    </button>
+                    <button
+                      className={cn(
+                        "w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2",
+                        mapType === 'china' && "bg-muted font-medium"
+                      )}
+                      onClick={() => {
+                        setMapType('china')
+                        setMapDropdownOpen(false)
+                      }}
+                    >
+                      🇨🇳 中国地图
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          {mapError ? (
+          {mapError && mapType === 'world' ? (
             <div className="h-[400px] flex flex-col items-center justify-center text-muted-foreground bg-muted/20 rounded-lg gap-3">
               <AlertTriangle className="h-10 w-10 text-yellow-500" />
               <span>地图加载失败，请刷新页面重试</span>
@@ -374,14 +582,15 @@ export function IPAnalysis() {
                 刷新页面
               </Button>
             </div>
-          ) : !mapLoaded ? (
+          ) : !isCurrentMapLoaded ? (
             <div className="h-[400px] flex items-center justify-center text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin mr-2" />
               加载地图中...
             </div>
-          ) : data && data.by_country.length > 0 ? (
+          ) : data && (mapType === 'world' ? data.by_country.length > 0 : data.by_province.length > 0) ? (
             <ReactECharts
-              option={mapOption}
+              key={mapType}
+              option={currentMapOption}
               style={{ height: '400px', width: '100%' }}
               opts={{ renderer: 'canvas' }}
             />
