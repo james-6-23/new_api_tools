@@ -408,6 +408,8 @@ start_services() {
   echo -e "配置文件: ${ENV_FILE}"
   echo -e "Compose 文件: ${COMPOSE_FILE}"
   echo ""
+  echo -e "查看日志: ${YELLOW}cd ${SCRIPT_DIR} && docker compose logs -f${NC}"
+  echo ""
 }
 
 #######################################

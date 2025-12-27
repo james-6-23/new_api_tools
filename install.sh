@@ -302,6 +302,8 @@ quick_update() {
   echo ""
   echo -e "前端访问地址: ${BLUE}http://${server_ip}:${frontend_port}${NC}"
   echo ""
+  echo -e "查看日志: ${YELLOW}cd ${PROJECT_DIR} && docker compose logs -f${NC}"
+  echo ""
   
   return 0
 }
