@@ -91,3 +91,5 @@ plan.md
 .kiro/specs/ip-monitoring/requirements.md
 .kiro/specs/ip-monitoring/tasks.md
 nul
+docs/redis-sqlite-cache-architecture.md
+docs/cache-architecture.md
