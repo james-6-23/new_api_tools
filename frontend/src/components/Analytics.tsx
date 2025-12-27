@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, Trash2, AlertTriangle, Loader2, Clock } from 'lucide-react'
+import { RefreshCw, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Progress } from './ui/progress'
 import { Badge } from './ui/badge'
+import { Select } from './ui/select'
 import {
   Table,
   TableBody,
@@ -65,10 +66,17 @@ export function Analytics() {
   const { token } = useAuth()
   const { showToast } = useToast()
 
-  // Auto refresh interval in seconds
-  const REFRESH_INTERVAL = 30
+  // Auto refresh interval in seconds - will be updated based on system scale
+  const DEFAULT_REFRESH_INTERVAL = 60
+  const REFRESH_INTERVAL_KEY = 'analytics_refresh_interval'
   const COUNTDOWN_STORAGE_KEY = 'analytics_countdown'
   const LAST_VISIT_KEY = 'analytics_last_visit'
+
+  const [refreshInterval, setRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem(REFRESH_INTERVAL_KEY)
+    return saved ? parseInt(saved, 10) : DEFAULT_REFRESH_INTERVAL
+  })
+  const refreshIntervalRef = useRef(refreshInterval)
 
   const [state, setState] = useState<AnalyticsState | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
@@ -84,9 +92,58 @@ export function Analytics() {
   // 从 localStorage 恢复倒计时，或使用默认值
   const [countdown, setCountdown] = useState(() => {
     const saved = sessionStorage.getItem(COUNTDOWN_STORAGE_KEY)
-    return saved ? parseInt(saved, 10) : REFRESH_INTERVAL
+    return saved ? parseInt(saved, 10) : DEFAULT_REFRESH_INTERVAL
   })
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const apiUrl = import.meta.env.VITE_API_URL || ''
+
+  const getAuthHeaders = useCallback(() => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+  }), [token])
+
+  // 获取系统规模设置，自动调整刷新间隔（仅当用户没有手动设置时）
+  useEffect(() => {
+    const fetchSystemScale = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/api/system/scale`, { headers: getAuthHeaders() })
+        const res = await response.json()
+        if (res.success && res.data?.settings) {
+          const interval = res.data.settings.frontend_refresh_interval || DEFAULT_REFRESH_INTERVAL
+          
+          // 只有在用户没有手动设置过时，才使用系统推荐值
+          const saved = localStorage.getItem(REFRESH_INTERVAL_KEY)
+          if (!saved) {
+            setRefreshInterval(interval)
+            refreshIntervalRef.current = interval
+            setCountdown(interval)
+          }
+          console.log(`日志分析: 系统规模 ${res.data.settings.description}, 推荐刷新间隔 ${interval}秒`)
+        }
+      } catch (e) {
+        console.error('Failed to fetch system scale:', e)
+      }
+    }
+    fetchSystemScale()
+  }, [apiUrl, getAuthHeaders])
+
+  // 更新 refreshIntervalRef
+  useEffect(() => {
+    refreshIntervalRef.current = refreshInterval
+  }, [refreshInterval])
+  
+  // 保存刷新间隔到 localStorage
+  const handleRefreshIntervalChange = useCallback((val: number) => {
+    setRefreshInterval(val)
+    setCountdown(val)
+    refreshIntervalRef.current = val
+    if (val > 0) {
+      localStorage.setItem(REFRESH_INTERVAL_KEY, val.toString())
+    } else {
+      localStorage.removeItem(REFRESH_INTERVAL_KEY)
+    }
+  }, [])
   
   // 检测是否是浏览器刷新（而不是页面切换）
   useEffect(() => {
@@ -96,7 +153,7 @@ export function Analytics() {
     // 如果没有 lastVisit 记录，或者距离上次访问超过 2 秒，认为是浏览器刷新
     if (!lastVisit || (now - parseInt(lastVisit, 10)) > 2000) {
       setIsPageRefresh(true)
-      setCountdown(REFRESH_INTERVAL)
+      setCountdown(refreshIntervalRef.current)
       sessionStorage.removeItem(COUNTDOWN_STORAGE_KEY)
     }
     
@@ -107,7 +164,7 @@ export function Analytics() {
     return () => {
       sessionStorage.setItem(LAST_VISIT_KEY, Date.now().toString())
     }
-  }, [REFRESH_INTERVAL])
+  }, [])
   
   // 保存倒计时到 sessionStorage
   useEffect(() => {
@@ -129,13 +186,6 @@ export function Analytics() {
     type: 'warning',
     onConfirm: () => {},
   })
-
-  const apiUrl = import.meta.env.VITE_API_URL || ''
-
-  const getAuthHeaders = useCallback(() => ({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-  }), [token])
 
   // 平滑进度动画：持续缓慢增长，不停顿
   useEffect(() => {
@@ -198,8 +248,8 @@ export function Analytics() {
 
   // Reset countdown to initial value
   const resetCountdown = useCallback(() => {
-    setCountdown(REFRESH_INTERVAL)
-  }, [REFRESH_INTERVAL])
+    setCountdown(refreshIntervalRef.current)
+  }, [])
 
   // 使用 ref 存储最新的 syncStatus，避免 useEffect 依赖变化导致定时器重建
   const syncStatusRef = useRef(syncStatus)
@@ -283,7 +333,7 @@ export function Analytics() {
       setCountdown(prev => {
         if (prev <= 1) {
           doAutoRefresh()
-          return REFRESH_INTERVAL
+          return refreshIntervalRef.current
         }
         return prev - 1
       })
@@ -296,7 +346,7 @@ export function Analytics() {
     }
   // 只依赖关键状态变化，不依赖 syncStatus 的具体值
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchProcessing, loading, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, REFRESH_INTERVAL])
+  }, [batchProcessing, loading, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, refreshInterval])
 
   const processLogs = async () => {
     setProcessing(true)
@@ -515,11 +565,27 @@ export function Analytics() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {/* 只有初始化完成后才显示倒计时 */}
-              {syncStatus && !syncStatus.needs_initial_sync && !syncStatus.is_initializing && countdown > 0 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>{countdown}s</span>
+              {/* 刷新间隔选择和倒计时 - 只有初始化完成后才显示 */}
+              {syncStatus && !syncStatus.needs_initial_sync && !syncStatus.is_initializing && (
+                <div className="flex items-center gap-2">
+                  <Select 
+                    value={refreshInterval.toString()} 
+                    onChange={(e) => handleRefreshIntervalChange(parseInt(e.target.value))}
+                    className="w-24 h-8 text-xs"
+                  >
+                    <option value="0">关闭</option>
+                    <option value="10">10秒</option>
+                    <option value="30">30秒</option>
+                    <option value="60">1分钟</option>
+                    <option value="120">2分钟</option>
+                    <option value="300">5分钟</option>
+                    <option value="600">10分钟</option>
+                  </Select>
+                  {refreshInterval > 0 && countdown > 0 && (
+                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                      {countdown}s
+                    </span>
+                  )}
                 </div>
               )}
               <Button onClick={processLogs} disabled={processing || batchProcessing}>

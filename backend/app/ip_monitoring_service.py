@@ -4,7 +4,7 @@ Provides IP usage analysis and management for risk monitoring.
 
 Optimizations:
 - Batch queries to avoid N+1 problem
-- In-memory cache with TTL for frequently accessed data
+- In-memory cache with TTL based on system scale
 """
 import time
 import threading
@@ -24,8 +24,14 @@ WINDOW_SECONDS: dict[str, int] = {
     "7d": 7 * 24 * 3600,
 }
 
-# Cache TTL in seconds
-IP_CACHE_TTL = 10
+
+def _get_cache_ttl() -> int:
+    """Get cache TTL based on system scale (lazy import to avoid circular dependency)."""
+    try:
+        from .system_scale_service import get_ip_cache_ttl
+        return get_ip_cache_ttl()
+    except Exception:
+        return 300  # Default fallback: 5 minutes
 
 
 class SimpleCache:
@@ -334,7 +340,7 @@ class IPMonitoringService:
                     })
 
             result = {"items": items, "total": len(items)}
-            _ip_cache.set(cache_key, result, IP_CACHE_TTL)
+            _ip_cache.set(cache_key, result, _get_cache_ttl())
             return result
         except Exception as e:
             logger.db_error(f"获取共享 IP 失败: {e}")
@@ -443,7 +449,7 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
-            _ip_cache.set(cache_key, result, IP_CACHE_TTL)
+            _ip_cache.set(cache_key, result, _get_cache_ttl())
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 令牌失败: {e}")
@@ -548,7 +554,7 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
-            _ip_cache.set(cache_key, result, IP_CACHE_TTL)
+            _ip_cache.set(cache_key, result, _get_cache_ttl())
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 用户失败: {e}")

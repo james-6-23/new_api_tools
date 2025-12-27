@@ -80,6 +80,7 @@ class AIAutoBanService:
         self._last_error_message = ""       # 最后一次错误信息
         
         self._reload_config()
+        self._ensure_default_whitelist()
 
     def _reload_config(self):
         """从本地存储加载配置（仅从SQLite读取，不再使用环境变量）"""
@@ -105,6 +106,62 @@ class AIAutoBanService:
             self._whitelist_ids = set(int(x) for x in whitelist_ids if str(x).isdigit())
         else:
             self._whitelist_ids = set()
+
+    def _ensure_default_whitelist(self):
+        """
+        确保默认白名单包含管理员和超级管理员。
+        - ID 为 1 的用户（超级管理员）
+        - 所有 role >= 10 的管理员用户
+        
+        只在首次初始化时执行，已有白名单配置则跳过。
+        """
+        try:
+            stored_config = self._storage.get_config(AI_CONFIG_KEY) or {}
+            
+            # 检查是否已经初始化过白名单
+            if stored_config.get("whitelist_initialized"):
+                return
+            
+            # 获取需要加入白名单的用户
+            admin_ids = set()
+            
+            # 1. 添加 ID 为 1 的超级管理员
+            admin_ids.add(1)
+            
+            # 2. 查询所有管理员用户 (role >= 10)
+            try:
+                from .database import get_db_manager
+                db = get_db_manager()
+                db.connect()
+                
+                admin_sql = """
+                    SELECT id FROM users 
+                    WHERE role >= 10 AND deleted_at IS NULL
+                """
+                rows = db.execute(admin_sql, {})
+                for row in rows:
+                    admin_ids.add(int(row.get("id")))
+            except Exception as e:
+                logger.warning(f"查询管理员用户失败: {e}")
+            
+            # 合并到现有白名单
+            new_whitelist = self._whitelist_ids | admin_ids
+            
+            if new_whitelist != self._whitelist_ids:
+                self._whitelist_ids = new_whitelist
+                # 保存配置并标记已初始化
+                stored_config["whitelist_ids"] = list(self._whitelist_ids)
+                stored_config["whitelist_initialized"] = True
+                self._storage.set_config(AI_CONFIG_KEY, stored_config)
+                
+                logger.system(f"AI封禁白名单已初始化，添加 {len(admin_ids)} 个管理员用户")
+            else:
+                # 只标记已初始化
+                stored_config["whitelist_initialized"] = True
+                self._storage.set_config(AI_CONFIG_KEY, stored_config)
+                
+        except Exception as e:
+            logger.warning(f"初始化默认白名单失败: {e}")
 
     def save_config(self, config: Dict[str, Any]) -> bool:
         """保存配置到本地存储"""

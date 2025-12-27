@@ -303,8 +303,29 @@ export function RealtimeRanking() {
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [refreshInterval, setRefreshInterval] = useState(30)  // 刷新间隔（秒）
-  const [countdown, setCountdown] = useState(30)
+  
+  // 刷新间隔状态 - 从 localStorage 恢复，支持持久化
+  const LEADERBOARD_REFRESH_KEY = 'risk_leaderboard_refresh_interval'
+  const IP_REFRESH_KEY = 'risk_ip_refresh_interval'
+  const [refreshInterval, setRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem(LEADERBOARD_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 60
+  })
+  const [countdown, setCountdown] = useState(() => {
+    const saved = localStorage.getItem(LEADERBOARD_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 60
+  })
+  const [systemScale, setSystemScale] = useState<string>('')  // 系统规模
+  
+  // IP 监控刷新间隔
+  const [ipRefreshInterval, setIpRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem(IP_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 60
+  })
+  const [ipCountdown, setIpCountdown] = useState(() => {
+    const saved = localStorage.getItem(IP_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 60
+  })
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selected, setSelected] = useState<{ item: LeaderboardItem; window: WindowKey } | null>(null)
@@ -505,6 +526,74 @@ export function RealtimeRanking() {
     'Authorization': `Bearer ${token}`,
   }), [token])
 
+  // 获取系统规模设置，自动调整刷新间隔（仅当用户没有手动设置时）
+  const fetchSystemScale = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/system/scale`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success && res.data?.settings) {
+        const settings = res.data.settings
+        const interval = settings.frontend_refresh_interval || 60
+        setSystemScale(settings.description || '')
+        
+        // 只有在用户没有手动设置过时，才使用系统推荐值
+        const savedLeaderboard = localStorage.getItem(LEADERBOARD_REFRESH_KEY)
+        const savedIp = localStorage.getItem(IP_REFRESH_KEY)
+        
+        if (!savedLeaderboard) {
+          setRefreshInterval(interval)
+          setCountdown(interval)
+        }
+        if (!savedIp) {
+          setIpRefreshInterval(interval)
+          setIpCountdown(interval)
+        }
+        
+        console.log(`系统规模: ${settings.description}, 推荐刷新间隔: ${interval}秒`)
+      }
+    } catch (e) {
+      console.error('Failed to fetch system scale:', e)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // 组件挂载时获取系统规模设置
+  useEffect(() => {
+    fetchSystemScale()
+  }, [])  // 只在挂载时执行一次
+  
+  // 保存刷新间隔到 localStorage
+  const handleRefreshIntervalChange = useCallback((val: number) => {
+    setRefreshInterval(val)
+    setCountdown(val)
+    if (val > 0) {
+      localStorage.setItem(LEADERBOARD_REFRESH_KEY, val.toString())
+    } else {
+      localStorage.removeItem(LEADERBOARD_REFRESH_KEY)
+    }
+  }, [])
+  
+  const handleIpRefreshIntervalChange = useCallback((val: number) => {
+    setIpRefreshInterval(val)
+    setIpCountdown(val)
+    if (val > 0) {
+      localStorage.setItem(IP_REFRESH_KEY, val.toString())
+    } else {
+      localStorage.removeItem(IP_REFRESH_KEY)
+    }
+  }, [])
+
+  // 使用 ref 存储 refreshInterval，让 fetchLeaderboards 能访问最新值
+  const refreshIntervalRef = useRef(refreshInterval)
+  useEffect(() => {
+    refreshIntervalRef.current = refreshInterval
+  }, [refreshInterval])
+  
+  // IP 刷新间隔 ref
+  const ipRefreshIntervalRef = useRef(ipRefreshInterval)
+  useEffect(() => {
+    ipRefreshIntervalRef.current = ipRefreshInterval
+  }, [ipRefreshInterval])
+
   const fetchLeaderboards = useCallback(async (showSuccessToast = false) => {
     try {
       const response = await fetch(`${apiUrl}/api/risk/leaderboards?windows=${allWindows.join(',')}&limit=10&sort_by=${sortBy}`, { headers: getAuthHeaders() })
@@ -521,7 +610,7 @@ export function RealtimeRanking() {
           '7d': windowsData['7d'] || [],
         })
         setGeneratedAt(res.data?.generated_at || 0)
-        setCountdown(30)
+        setCountdown(refreshIntervalRef.current)  // 使用 ref 获取最新的刷新间隔
         if (showSuccessToast) showToast('success', '已刷新')
       } else {
         showToast('error', res.message || '获取排行榜失败')
@@ -1091,21 +1180,58 @@ export function RealtimeRanking() {
     return () => window.removeEventListener('resize', handleResize)
   }, [view, riskTabs])
 
+  // 使用 ref 存储 fetch 函数，避免 useEffect 依赖变化导致重复请求
+  const fetchFunctionsRef = useRef({
+    fetchLeaderboards,
+    fetchBanRecords,
+    fetchBannedUsers,
+    fetchIPData,
+    fetchAiConfig,
+    fetchAiSuspiciousUsers,
+    fetchAiAuditLogs,
+  })
+  
+  // 更新 ref 中的函数引用
   useEffect(() => {
-    if (view === 'leaderboards') fetchLeaderboards()
-    if (view === 'banned_list') fetchBannedUsers(1)
-    if (view === 'audit_logs') fetchBanRecords(1)
-    if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on view change
-    if (view === 'ai_ban') {
-      fetchAiConfig()
-      fetchAiSuspiciousUsers()
-      fetchAiAuditLogs()
+    fetchFunctionsRef.current = {
+      fetchLeaderboards,
+      fetchBanRecords,
+      fetchBannedUsers,
+      fetchIPData,
+      fetchAiConfig,
+      fetchAiSuspiciousUsers,
+      fetchAiAuditLogs,
     }
-  }, [fetchLeaderboards, fetchBanRecords, fetchBannedUsers, fetchIPData, fetchAiConfig, fetchAiSuspiciousUsers, fetchAiAuditLogs, view])
+  })
 
   useEffect(() => {
-    if (view === 'ip_monitoring') fetchIPData(false, true)  // Reset page on window change
-  }, [ipWindow, fetchIPData, view])
+    // 只在 view 变化时触发数据加载，使用 ref 避免函数引用变化导致重复请求
+    const fns = fetchFunctionsRef.current
+    if (view === 'leaderboards') fns.fetchLeaderboards()
+    if (view === 'banned_list') fns.fetchBannedUsers(1)
+    if (view === 'audit_logs') fns.fetchBanRecords(1)
+    if (view === 'ip_monitoring') fns.fetchIPData(false, true)  // Reset page on view change
+    if (view === 'ai_ban') {
+      fns.fetchAiConfig()
+      fns.fetchAiSuspiciousUsers()
+      fns.fetchAiAuditLogs()
+    }
+  }, [view])  // 只依赖 view，避免函数引用变化导致重复请求
+
+  // sortBy 变化时刷新排行榜数据
+  const sortByRef = useRef(sortBy)
+  useEffect(() => {
+    // 跳过首次渲染
+    if (sortByRef.current === sortBy) return
+    sortByRef.current = sortBy
+    if (view === 'leaderboards') {
+      fetchFunctionsRef.current.fetchLeaderboards()
+    }
+  }, [sortBy, view])
+
+  useEffect(() => {
+    if (view === 'ip_monitoring') fetchFunctionsRef.current.fetchIPData(false, true)  // Reset page on window change
+  }, [ipWindow, view])
 
   useEffect(() => {
     if (view !== 'leaderboards') return
@@ -1113,14 +1239,30 @@ export function RealtimeRanking() {
     const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          fetchLeaderboards()
-          return refreshInterval
+          fetchFunctionsRef.current.fetchLeaderboards()
+          return refreshIntervalRef.current
         }
         return prev - 1
       })
     }, 1000)
     return () => clearInterval(interval)
-  }, [fetchLeaderboards, view, refreshInterval])
+  }, [view, refreshInterval])
+
+  // IP 监控自动刷新定时器
+  useEffect(() => {
+    if (view !== 'ip_monitoring') return
+    if (ipRefreshInterval === 0) return  // 0 表示关闭自动刷新
+    const interval = setInterval(() => {
+      setIpCountdown((prev) => {
+        if (prev <= 1) {
+          fetchFunctionsRef.current.fetchIPData(false, false)
+          return ipRefreshIntervalRef.current
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [view, ipRefreshInterval])
 
   useEffect(() => {
     const load = async () => {
@@ -1250,7 +1392,10 @@ export function RealtimeRanking() {
                   view === 'banned_list' ? '策略生效中' : '系统运行中'}
             </Badge>
           </div>
-          <p className="text-muted-foreground mt-1">实时 Top 10 · 深度分析 · 快速封禁</p>
+          <p className="text-muted-foreground mt-1">
+            实时 Top 10 · 深度分析 · 快速封禁
+            {systemScale && <span className="ml-2 text-xs opacity-70">({systemScale})</span>}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {view === 'leaderboards' && (
@@ -1258,11 +1403,7 @@ export function RealtimeRanking() {
               <div className="flex items-center gap-2">
                 <Select 
                   value={refreshInterval.toString()} 
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value)
-                    setRefreshInterval(val)
-                    setCountdown(val)
-                  }}
+                  onChange={(e) => handleRefreshIntervalChange(parseInt(e.target.value))}
                   className="w-24 h-8 text-xs"
                 >
                   <option value="0">关闭</option>
@@ -1271,6 +1412,7 @@ export function RealtimeRanking() {
                   <option value="60">1分钟</option>
                   <option value="120">2分钟</option>
                   <option value="300">5分钟</option>
+                  <option value="600">10分钟</option>
                 </Select>
                 {refreshInterval > 0 && (
                   <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
@@ -2103,10 +2245,31 @@ export function RealtimeRanking() {
                   ))}
                 </Select>
               </div>
-              <Button variant="outline" size="sm" onClick={handleRefreshIP} disabled={ipRefreshing.all} className="h-9">
-                <RefreshCw className={cn("h-4 w-4 mr-2", ipRefreshing.all && "animate-spin")} />
-                全部刷新
-              </Button>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Select 
+                    value={ipRefreshInterval.toString()} 
+                    onChange={(e) => handleIpRefreshIntervalChange(parseInt(e.target.value))}
+                    className="w-24 h-9 text-xs"
+                  >
+                    <option value="0">关闭</option>
+                    <option value="30">30秒</option>
+                    <option value="60">1分钟</option>
+                    <option value="120">2分钟</option>
+                    <option value="300">5分钟</option>
+                    <option value="600">10分钟</option>
+                  </Select>
+                  {ipRefreshInterval > 0 && (
+                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                      {ipCountdown}s
+                    </span>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" onClick={handleRefreshIP} disabled={ipRefreshing.all} className="h-9">
+                  <RefreshCw className={cn("h-4 w-4 mr-2", ipRefreshing.all && "animate-spin")} />
+                  全部刷新
+                </Button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

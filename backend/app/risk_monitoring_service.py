@@ -3,7 +3,7 @@ Risk Monitoring Service for NewAPI Middleware Tool.
 Provides real-time usage leaderboards and per-user usage analysis for moderation.
 
 Performance Optimizations:
-- In-memory cache for leaderboards (30 seconds TTL)
+- In-memory cache for leaderboards (TTL based on system scale)
 - Single query for all time windows (query once, filter in memory)
 - Removed JOIN with users table (fetch user info separately only for top N)
 - Recommended index: CREATE INDEX idx_logs_created_type_user ON logs(created_at, type, user_id);
@@ -27,8 +27,14 @@ WINDOW_SECONDS: dict[str, int] = {
     "7d": 7 * 24 * 3600,
 }
 
-# Cache TTL in seconds - increased for better performance
-LEADERBOARD_CACHE_TTL = 30
+
+def _get_cache_ttl() -> int:
+    """Get cache TTL based on system scale (lazy import to avoid circular dependency)."""
+    try:
+        from .system_scale_service import get_leaderboard_cache_ttl
+        return get_leaderboard_cache_ttl()
+    except Exception:
+        return 300  # Default fallback: 5 minutes
 
 
 @dataclass
@@ -150,8 +156,8 @@ class RiskMonitoringService:
         
         result = {"generated_at": now, "windows": data}
         
-        # Store in cache
-        _cache.set(cache_key, result, LEADERBOARD_CACHE_TTL)
+        # Store in cache with dynamic TTL based on system scale
+        _cache.set(cache_key, result, _get_cache_ttl())
         
         return result
 

@@ -217,6 +217,26 @@ export function UserManagement() {
     }
   }, [apiUrl, getAuthHeaders, page, pageSize, search, activityFilter, showToast])
 
+  // 添加用户到 AI 封禁白名单
+  const addToWhitelist = useCallback(async (userId: number, username: string) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/ai-ban/whitelist/add`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ user_id: userId }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        showToast('success', `已将 ${username} 添加到 AI 封禁白名单`)
+      } else {
+        showToast('error', data.message || '添加失败')
+      }
+    } catch (error) {
+      console.error('Failed to add to whitelist:', error)
+      showToast('error', '添加到白名单失败')
+    }
+  }, [apiUrl, getAuthHeaders, showToast])
+
   const deleteUser = async (userId: number, username: string) => {
     const userToDelete = users.find(u => u.id === userId)
     setConfirmDialog({
@@ -656,6 +676,15 @@ export function UserManagement() {
                             title="用户分析"
                           >
                             <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-green-500 hover:text-green-600 hover:bg-green-500/10 h-7 w-7 p-0"
+                            onClick={() => addToWhitelist(user.id, user.username)}
+                            title="加入 AI 封禁白名单"
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" />
                           </Button>
                           <Button
                             variant="ghost"
