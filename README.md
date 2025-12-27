@@ -126,3 +126,7 @@ npm run dev
 ## 📄 License
 
 MIT License
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=james-6-23/new_api_tools&type=Date)](https://star-history.com/#james-6-23/new_api_tools&Date)
