@@ -483,25 +483,35 @@ class RiskMonitoringService:
                 import asyncio
                 
                 geo_service = get_ip_geo_service()
-                # 同步调用异步方法
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 如果已在异步上下文中，创建任务
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(
-                                asyncio.run,
-                                geo_service.query_batch(unique_ips)
-                            )
-                            ip_geo_map = future.result(timeout=10)
-                    else:
-                        ip_geo_map = loop.run_until_complete(geo_service.query_batch(unique_ips))
-                except RuntimeError:
-                    # 没有事件循环，创建新的
-                    ip_geo_map = asyncio.run(geo_service.query_batch(unique_ips))
+                
+                # 检查 GeoIP 服务是否可用
+                if not geo_service.is_available():
+                    logger.warning("[双栈检测] GeoIP 数据库未加载，双栈检测功能不可用")
+                else:
+                    logger.debug(f"[双栈检测] 查询 {len(unique_ips)} 个唯一 IP 的地理信息")
+                    
+                    # 同步调用异步方法
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # 如果已在异步上下文中，创建任务
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(
+                                    asyncio.run,
+                                    geo_service.query_batch(unique_ips)
+                                )
+                                ip_geo_map = future.result(timeout=10)
+                        else:
+                            ip_geo_map = loop.run_until_complete(geo_service.query_batch(unique_ips))
+                    except RuntimeError:
+                        # 没有事件循环，创建新的
+                        ip_geo_map = asyncio.run(geo_service.query_batch(unique_ips))
+                    
+                    if ip_geo_map:
+                        logger.debug(f"[双栈检测] 成功获取 {len(ip_geo_map)} 个 IP 的地理信息")
             except Exception as e:
-                logger.warning(f"获取 IP 地理信息失败: {e}")
+                logger.warning(f"[双栈检测] 获取 IP 地理信息失败: {e}")
                 ip_geo_map = None
         
         # 分析IP切换模式（传入地理信息用于双栈检测）
@@ -686,6 +696,12 @@ class RiskMonitoringService:
                     (prev_version == IPVersion.V6 and curr_version == IPVersion.V4)
                 )
                 
+                # 日志：记录 IP 切换检测
+                logger.debug(
+                    f"[双栈检测] IP切换: {prev_ip}({prev_version.value}) -> {current_ip}({curr_version.value}), "
+                    f"间隔: {switch_interval}s, v4/v6切换: {is_v4_v6_switch}, 有地理信息: {ip_geo_map is not None}"
+                )
+                
                 if is_v4_v6_switch and ip_geo_map:
                     # 有地理信息时，检查是否同一位置
                     prev_geo = ip_geo_map.get(prev_ip)
@@ -694,11 +710,23 @@ class RiskMonitoringService:
                     if prev_geo and curr_geo:
                         # 比较位置标识（ASN + 城市）
                         if hasattr(prev_geo, 'get_location_key'):
-                            is_dual_stack = prev_geo.get_location_key() == curr_geo.get_location_key()
+                            prev_key = prev_geo.get_location_key()
+                            curr_key = curr_geo.get_location_key()
+                            is_dual_stack = prev_key == curr_key
                         elif isinstance(prev_geo, dict) and isinstance(curr_geo, dict):
                             prev_key = f"{prev_geo.get('asn', '')}:{prev_geo.get('city', '')}:{prev_geo.get('country_code', '')}"
                             curr_key = f"{curr_geo.get('asn', '')}:{curr_geo.get('city', '')}:{curr_geo.get('country_code', '')}"
                             is_dual_stack = prev_key == curr_key and prev_key != "::"
+                        
+                        # 日志：记录双栈判断详情
+                        logger.info(
+                            f"[双栈检测] v4/v6切换判断: {prev_ip} -> {current_ip}, "
+                            f"位置: [{prev_key}] vs [{curr_key}], 是双栈: {is_dual_stack}"
+                        )
+                    else:
+                        logger.debug(
+                            f"[双栈检测] 缺少地理信息: prev_geo={prev_geo is not None}, curr_geo={curr_geo is not None}"
+                        )
                 
                 switches.append({
                     "from_ip": prev_ip,
@@ -712,6 +740,7 @@ class RiskMonitoringService:
                 
                 if is_dual_stack:
                     dual_stack_switches += 1
+                    logger.info(f"[双栈检测] 识别为双栈切换: {prev_ip} <-> {current_ip}")
                 elif switch_interval <= 60:
                     # 只有非双栈切换才计入快速切换
                     rapid_switches += 1

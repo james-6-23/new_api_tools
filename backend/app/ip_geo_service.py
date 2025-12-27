@@ -5,12 +5,14 @@ IP 地理位置查询服务 - NewAPI Middleware Tool
 无需 API Key，无速率限制，完全离线运行。
 
 数据库来源：https://github.com/adysec/IP_database
-部署时自动下载，无需手动配置。
+部署时自动下载，每天自动更新。
 """
 import os
+import time
 import ipaddress
+import httpx
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -78,6 +80,21 @@ IP_GEO_CACHE_PREFIX = "ip_geo:"
 GEOIP_DATA_DIR = os.environ.get("GEOIP_DATA_DIR", "/app/data/geoip")
 GEOIP_CITY_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-City.mmdb")
 GEOIP_ASN_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-ASN.mmdb")
+
+# GeoIP 数据库下载 URL
+GEOIP_DOWNLOAD_URLS = {
+    "city": [
+        "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
+        "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
+    ],
+    "asn": [
+        "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb",
+        "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb",
+    ],
+}
+
+# 更新间隔（秒）- 默认 24 小时
+GEOIP_UPDATE_INTERVAL = int(os.environ.get("GEOIP_UPDATE_INTERVAL", 86400))
 
 
 def get_ip_version(ip: str) -> IPVersion:
@@ -365,6 +382,141 @@ class IPGeoService:
             self._asn_reader.close()
             self._asn_reader = None
         self._db_available = False
+    
+    def reload_databases(self):
+        """重新加载数据库（更新后调用）"""
+        self.close()
+        self._init_databases()
+    
+    def get_db_info(self) -> Dict[str, Any]:
+        """获取数据库信息"""
+        info = {
+            "available": self._db_available,
+            "city_db": None,
+            "asn_db": None,
+        }
+        
+        if os.path.exists(GEOIP_CITY_DB):
+            stat = os.stat(GEOIP_CITY_DB)
+            info["city_db"] = {
+                "path": GEOIP_CITY_DB,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "modified_time": int(stat.st_mtime),
+            }
+        
+        if os.path.exists(GEOIP_ASN_DB):
+            stat = os.stat(GEOIP_ASN_DB)
+            info["asn_db"] = {
+                "path": GEOIP_ASN_DB,
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "modified_time": int(stat.st_mtime),
+            }
+        
+        return info
+
+
+async def download_geoip_database(db_type: str, force: bool = False) -> Tuple[bool, str]:
+    """
+    下载 GeoIP 数据库
+    
+    Args:
+        db_type: 数据库类型 ("city" 或 "asn")
+        force: 是否强制下载（忽略已存在的文件）
+    
+    Returns:
+        (success, message)
+    """
+    if db_type not in GEOIP_DOWNLOAD_URLS:
+        return False, f"未知的数据库类型: {db_type}"
+    
+    db_path = GEOIP_CITY_DB if db_type == "city" else GEOIP_ASN_DB
+    db_name = "GeoLite2-City.mmdb" if db_type == "city" else "GeoLite2-ASN.mmdb"
+    
+    # 检查是否需要下载
+    if not force and os.path.exists(db_path):
+        stat = os.stat(db_path)
+        age = time.time() - stat.st_mtime
+        if age < GEOIP_UPDATE_INTERVAL:
+            return True, f"{db_name} 已是最新（{int(age/3600)}小时前更新）"
+    
+    # 确保目录存在
+    os.makedirs(GEOIP_DATA_DIR, exist_ok=True)
+    
+    # 尝试从多个 URL 下载
+    urls = GEOIP_DOWNLOAD_URLS[db_type]
+    temp_path = f"{db_path}.tmp"
+    
+    for url in urls:
+        try:
+            logger.info(f"[GeoIP] 正在下载 {db_name} 从 {url[:50]}...")
+            
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                
+                # 写入临时文件
+                with open(temp_path, "wb") as f:
+                    f.write(response.content)
+                
+                # 验证文件大小（至少 1MB）
+                if os.path.getsize(temp_path) < 1024 * 1024:
+                    os.remove(temp_path)
+                    logger.warning(f"[GeoIP] {db_name} 文件太小，可能下载不完整")
+                    continue
+                
+                # 替换旧文件
+                if os.path.exists(db_path):
+                    os.remove(db_path)
+                os.rename(temp_path, db_path)
+                
+                size_mb = round(os.path.getsize(db_path) / (1024 * 1024), 2)
+                logger.info(f"[GeoIP] {db_name} 下载完成，大小: {size_mb}MB")
+                return True, f"{db_name} 下载成功 ({size_mb}MB)"
+                
+        except Exception as e:
+            logger.warning(f"[GeoIP] 从 {url[:50]}... 下载失败: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            continue
+    
+    return False, f"{db_name} 下载失败，所有源都不可用"
+
+
+async def update_all_geoip_databases(force: bool = False) -> Dict[str, Any]:
+    """
+    更新所有 GeoIP 数据库
+    
+    Args:
+        force: 是否强制更新
+    
+    Returns:
+        更新结果
+    """
+    results = {
+        "success": True,
+        "city": {"success": False, "message": ""},
+        "asn": {"success": False, "message": ""},
+    }
+    
+    # 下载 City 数据库
+    success, message = await download_geoip_database("city", force)
+    results["city"] = {"success": success, "message": message}
+    if not success:
+        results["success"] = False
+    
+    # 下载 ASN 数据库
+    success, message = await download_geoip_database("asn", force)
+    results["asn"] = {"success": success, "message": message}
+    if not success:
+        results["success"] = False
+    
+    # 如果有更新，重新加载数据库
+    if results["city"]["success"] or results["asn"]["success"]:
+        service = get_ip_geo_service()
+        service.reload_databases()
+        logger.info("[GeoIP] 数据库已重新加载")
+    
+    return results
 
 
 # 全局服务实例

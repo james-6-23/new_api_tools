@@ -165,12 +165,16 @@ async def lifespan(app: FastAPI):
     # 启动后台缓存预热任务
     cache_warmup_task = asyncio.create_task(background_cache_warmup())
 
+    # 启动 GeoIP 数据库自动更新任务
+    geoip_update_task = asyncio.create_task(background_geoip_update())
+
     yield
 
     # 停止后台任务
     sync_task.cancel()
     ai_ban_task.cancel()
     cache_warmup_task.cancel()
+    geoip_update_task.cancel()
     if index_task:
         index_task.cancel()
     try:
@@ -1034,6 +1038,54 @@ async def background_ai_auto_ban_scan():
             logger.error(f"AI 自动封禁后台任务异常: {e}", category="任务")
             # 出错后等待 5 分钟再重试
             await asyncio.sleep(300)
+
+
+async def background_geoip_update():
+    """后台定时更新 GeoIP 数据库（每天一次）"""
+    from .ip_geo_service import update_all_geoip_databases, get_ip_geo_service, GEOIP_UPDATE_INTERVAL
+
+    # 启动后等待 60 秒，让其他服务先初始化
+    await asyncio.sleep(60)
+    
+    # 检查并初始化 GeoIP 数据库
+    service = get_ip_geo_service()
+    if not service.is_available():
+        logger.system("[GeoIP] 数据库不可用，尝试下载...")
+        try:
+            result = await update_all_geoip_databases(force=True)
+            if result["success"]:
+                logger.system("[GeoIP] 数据库下载完成")
+            else:
+                logger.warning(f"[GeoIP] 数据库下载失败: {result}")
+        except Exception as e:
+            logger.error(f"[GeoIP] 数据库下载异常: {e}")
+    else:
+        logger.system("[GeoIP] 数据库已就绪，后台更新任务已启动")
+
+    while True:
+        try:
+            # 等待更新间隔（默认 24 小时）
+            logger.system(f"[GeoIP] 下次更新检查在 {GEOIP_UPDATE_INTERVAL // 3600} 小时后")
+            await asyncio.sleep(GEOIP_UPDATE_INTERVAL)
+            
+            # 执行更新
+            logger.system("[GeoIP] 开始检查数据库更新...")
+            result = await update_all_geoip_databases(force=False)
+            
+            if result["city"]["success"] or result["asn"]["success"]:
+                logger.system(
+                    f"[GeoIP] 更新完成 - City: {result['city']['message']}, ASN: {result['asn']['message']}"
+                )
+            else:
+                logger.debug(f"[GeoIP] 无需更新 - {result['city']['message']}, {result['asn']['message']}")
+
+        except asyncio.CancelledError:
+            logger.system("[GeoIP] 后台更新任务已取消")
+            break
+        except Exception as e:
+            logger.error(f"[GeoIP] 后台更新任务异常: {e}", category="任务")
+            # 出错后等待 1 小时再重试
+            await asyncio.sleep(3600)
 
 
 # Import routes after app is created to avoid circular imports
