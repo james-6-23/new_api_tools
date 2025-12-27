@@ -404,17 +404,25 @@ class DatabaseManager:
         indexes = [
             # High priority: analytics sync (most frequently used)
             ("idx_logs_id_type", "logs", ["id", "type"]),  # Incremental log processing
-            
+
             # Medium priority: risk monitoring & leaderboards
+            # Query: WHERE created_at >= x AND type IN (2,5) GROUP BY user_id
+            ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),
             ("idx_logs_created_user_type", "logs", ["created_at", "user_id", "type"]),
-            ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),  # Optimized for leaderboard GROUP BY
             ("idx_logs_type_created", "logs", ["type", "created_at"]),
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),
 
             # IP monitoring indexes - optimized for common queries
+            # Query: WHERE created_at >= x AND ip <> '' GROUP BY ip
             ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
+            # Query: WHERE created_at >= x AND ip <> '' AND token_id > 0 GROUP BY ip
             ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
+            # Query: WHERE created_at >= x AND user_id IS NOT NULL GROUP BY user_id (COUNT DISTINCT ip)
             ("idx_logs_created_user_ip", "logs", ["created_at", "user_id", "ip"]),
+            # Query: WHERE created_at >= x AND token_id > 0 GROUP BY token_id (COUNT DISTINCT ip)
+            # NEW: Optimized for get_multi_ip_tokens query
+            ("idx_logs_created_token_ip", "logs", ["created_at", "token_id", "ip"]),
+            # Query: WHERE token_id = x AND created_at >= x (detail lookup)
             ("idx_logs_token_created_ip", "logs", ["token_id", "created_at", "ip"]),
             # IP switch analysis (user + time + ip for ORDER BY queries)
             ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
@@ -518,18 +526,19 @@ class DatabaseManager:
         """
         is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
         
-        # All indexes we manage
+        # All indexes we manage (must match _do_ensure_indexes)
         indexes = [
             ("idx_logs_id_type", "logs"),
+            ("idx_logs_created_type_user", "logs"),
             ("idx_logs_created_user_type", "logs"),
-            ("idx_logs_created_type_user", "logs"),  # Optimized for leaderboard GROUP BY
             ("idx_logs_type_created", "logs"),
             ("idx_logs_user_created", "logs"),
             ("idx_logs_ip_created", "logs"),
             ("idx_logs_created_ip_token", "logs"),
             ("idx_logs_created_user_ip", "logs"),
+            ("idx_logs_created_token_ip", "logs"),  # NEW: for get_multi_ip_tokens
             ("idx_logs_token_created_ip", "logs"),
-            ("idx_logs_user_created_ip", "logs"),  # IP switch analysis
+            ("idx_logs_user_created_ip", "logs"),
             ("idx_users_deleted_status", "users"),
             ("idx_users_request_count", "users"),
             ("idx_tokens_user_deleted", "tokens"),

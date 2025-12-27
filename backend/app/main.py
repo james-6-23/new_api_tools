@@ -261,29 +261,124 @@ async def background_cache_warmup():
     """
     后台定时预热缓存，确保前端请求时数据已准备好。
     预热内容：风控排行榜、IP监控数据、用户统计等。
+
+    采用渐进式温和预热策略：
+    1. 先等待索引创建完成（确保查询性能）
+    2. 逐个窗口、逐个查询预热，每个查询之间有延迟
+    3. 确保所有数据都预热完成后才标记为就绪
     """
-    from .system_scale_service import get_detected_settings
+    from .system_scale_service import get_detected_settings, get_scale_service, SystemScale
+    from .database import get_db_manager
 
-    # 启动后等待 3 秒，让数据库连接就绪
-    await asyncio.sleep(3)
-    logger.system("后台缓存预热任务已启动")
+    warmup_start_time = time.time()
 
-    # 首次预热（标记为初始化中）
-    _set_warmup_status("initializing", 0, "正在初始化...")
-    await _do_cache_warmup(is_initial=True)
-    _set_warmup_status("ready", 100, "预热完成")
+    # 启动后等待 5 秒，让数据库连接就绪
+    await asyncio.sleep(5)
+    logger.system("=" * 50)
+    logger.system("缓存预热任务启动")
+    logger.system("=" * 50)
 
+    _set_warmup_status("initializing", 0, "正在检测系统规模...")
+
+    # 检测系统规模
+    scale_service = get_scale_service()
+    scale_result = scale_service.detect_scale()
+    scale = SystemScale(scale_result["scale"])
+    metrics = scale_result.get("metrics", {})
+
+    # 输出系统规模详情
+    logger.system(f"[规模检测] 系统规模: {scale.value}")
+    logger.system(f"[规模检测] 总用户数: {metrics.get('total_users', 0):,}")
+    logger.system(f"[规模检测] 活跃用户(24h): {metrics.get('active_users_24h', 0):,}")
+    logger.system(f"[规模检测] 日志数(24h): {metrics.get('logs_24h', 0):,}")
+    logger.system(f"[规模检测] 总日志数: {metrics.get('total_logs', 0):,}")
+    logger.system(f"[规模检测] 平均 RPM: {metrics.get('rpm_avg', 0):.1f}")
+
+    # 获取预热策略
+    strategy = WARMUP_STRATEGY.get(scale.value, WARMUP_STRATEGY["medium"])
+    logger.system(f"[预热策略] 时间窗口: {strategy['windows']}")
+    logger.system(f"[预热策略] 查询延迟: {strategy['query_delay']}s")
+    logger.system(f"[预热策略] IP监控窗口: {strategy['ip_window']}")
+
+    # === 阶段1：等待索引创建完成 ===
+    logger.system("-" * 50)
+    logger.system("[阶段1] 检查数据库索引")
+    _set_warmup_status("initializing", 5, "正在检查数据库索引...")
+
+    db = get_db_manager()
+    max_index_wait = 300  # 最多等待 5 分钟
+    index_wait_start = time.time()
+
+    while True:
+        try:
+            index_status = db.get_index_status()
+            missing = index_status.get("missing", 0)
+            total_idx = index_status.get("total", 0)
+            existing = index_status.get("existing", 0)
+
+            if index_status.get("all_ready", False):
+                logger.system(f"[索引] 全部就绪 ({existing}/{total_idx})")
+                _set_warmup_status("initializing", 10, f"索引已就绪 ({existing}/{total_idx})")
+                break
+            else:
+                elapsed = time.time() - index_wait_start
+                if elapsed > max_index_wait:
+                    logger.warning(f"[索引] 等待超时 ({elapsed:.0f}s)，继续预热")
+                    logger.warning(f"[索引] 已有 {existing}/{total_idx}，缺失 {missing}")
+                    # 列出缺失的索引
+                    for idx_name, idx_info in index_status.get("indexes", {}).items():
+                        if not idx_info.get("exists"):
+                            logger.warning(f"[索引] 缺失: {idx_name}")
+                    _set_warmup_status("initializing", 10, f"索引部分就绪 ({existing}/{total_idx})")
+                    break
+
+                progress = 5 + int((elapsed / max_index_wait) * 5)
+                _set_warmup_status(
+                    "initializing",
+                    min(progress, 9),
+                    f"等待索引创建... ({existing}/{total_idx})"
+                )
+                logger.system(f"[索引] 等待中: {existing}/{total_idx} 就绪, {missing} 缺失, 已等待 {elapsed:.0f}s")
+                await asyncio.sleep(5)  # 每 5 秒检查一次
+        except Exception as e:
+            logger.warning(f"[索引] 检查失败: {e}")
+            _set_warmup_status("initializing", 10, "索引检查跳过")
+            break
+
+    index_elapsed = time.time() - index_wait_start
+    logger.system(f"[阶段1] 索引检查完成，耗时 {index_elapsed:.1f}s")
+
+    # === 阶段2：渐进式完整预热 ===
+    logger.system("-" * 50)
+    logger.system("[阶段2] 开始缓存预热")
+    await _do_complete_warmup(scale)
+
+    # 标记为就绪
+    total_elapsed = time.time() - warmup_start_time
+    _set_warmup_status("ready", 100, f"预热完成，总耗时 {total_elapsed:.1f}s")
+
+    logger.system("-" * 50)
+    logger.system(f"[完成] 缓存预热全部完成")
+    logger.system(f"[完成] 总耗时: {total_elapsed:.1f}s")
+    logger.system("=" * 50)
+
+    # === 阶段3：定时刷新 ===
     while True:
         try:
             # 获取系统规模设置，决定预热间隔
             settings = get_detected_settings()
             warmup_interval = settings.leaderboard_cache_ttl  # 使用缓存 TTL 作为预热间隔
-            
+
+            logger.system(f"[定时刷新] 下次刷新在 {warmup_interval}s 后")
+
             # 等待预热间隔
             await asyncio.sleep(warmup_interval)
-            
+
             # 后台静默刷新（不更新状态，用户无感知）
+            refresh_start = time.time()
             await _do_cache_warmup(is_initial=False)
+            refresh_elapsed = time.time() - refresh_start
+            logger.system(f"[定时刷新] 完成，耗时 {refresh_elapsed:.1f}s")
 
         except asyncio.CancelledError:
             logger.system("缓存预热任务已取消")
@@ -329,6 +424,357 @@ def get_warmup_status() -> dict:
 import threading
 
 
+# 根据系统规模定义预热策略
+# 所有规模都预热全部窗口，只是延迟时间不同
+WARMUP_STRATEGY = {
+    # scale: {
+    #   windows: 预热的时间窗口（全部窗口）
+    #   query_delay: 每个查询之间的延迟（秒），规模越大延迟越长
+    #   ip_window: IP 监控使用的时间窗口
+    #   limit: 排行榜查询数量限制
+    # }
+    "small": {
+        "windows": ["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
+        "query_delay": 0.5,
+        "ip_window": "24h",
+        "limit": 10,
+    },
+    "medium": {
+        "windows": ["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
+        "query_delay": 1.5,
+        "ip_window": "24h",
+        "limit": 10,
+    },
+    "large": {
+        "windows": ["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
+        "query_delay": 3.0,
+        "ip_window": "24h",
+        "limit": 10,
+    },
+    "xlarge": {
+        "windows": ["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
+        "query_delay": 5.0,  # 超大规模系统，延迟更长
+        "ip_window": "24h",
+        "limit": 10,
+    },
+}
+
+
+async def _do_complete_warmup(scale):
+    """
+    执行完整的渐进式缓存预热
+
+    Args:
+        scale: SystemScale 枚举值
+
+    预热顺序（全部完成后才标记为就绪）：
+    1. 排行榜数据：逐个窗口预热（1h → 3h → 6h → 12h → 24h → 3d → 7d）
+    2. IP 监控数据：共享IP、多IP令牌、多IP用户
+    3. 用户统计数据
+    """
+    import asyncio
+
+    strategy = WARMUP_STRATEGY.get(scale.value, WARMUP_STRATEGY["medium"])
+    windows = strategy["windows"]
+    query_delay = strategy["query_delay"]
+    ip_window = strategy["ip_window"]
+    limit = strategy["limit"]
+
+    logger.system(f"开始完整预热: 窗口 {windows}, 查询延迟 {query_delay}s")
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: _warmup_complete_sync(
+                windows=windows,
+                query_delay=query_delay,
+                ip_window=ip_window,
+                limit=limit,
+            )
+        )
+    except Exception as e:
+        logger.warning(f"完整预热异常: {e}", category="缓存")
+        _set_warmup_status("ready", 100, "预热完成（部分失败）")
+
+
+def _warmup_complete_sync(
+    windows: list,
+    query_delay: float,
+    ip_window: str,
+    limit: int,
+):
+    """
+    同步执行完整的渐进式缓存预热（在线程池中运行）
+
+    采用温和策略，确保所有数据都预热完成：
+    1. 逐个窗口预热排行榜，每个查询之间有延迟
+    2. 逐个查询预热 IP 监控
+    3. 预热用户统计
+
+    容错机制：
+    - 单个查询超时控制（默认60秒）
+    - 失败自动重试（最多2次）
+    - 部分失败不阻塞其他步骤
+    - 详细的错误追踪
+    """
+    from .risk_monitoring_service import get_risk_monitoring_service
+    from .ip_monitoring_service import get_ip_monitoring_service, WINDOW_SECONDS
+    from .user_management_service import get_user_management_service
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+    start_time = time.time()
+    warmed = []
+    failed = []
+    steps = []
+    total_windows = len(windows)
+    step_times = []
+    errors_detail = []  # 详细错误记录
+
+    # 容错配置
+    QUERY_TIMEOUT = 120  # 单个查询超时（秒）- 大数据量需要更长时间
+    MAX_RETRIES = 2      # 最大重试次数
+    RETRY_DELAY = 5      # 重试间隔（秒）
+
+    # 计算总步骤数
+    total_steps = total_windows + 3 + 1
+    current_step = 0
+
+    def update_progress(message: str, step_name: str = None, step_status: str = None):
+        nonlocal current_step
+        current_step += 1
+        progress = 10 + int((current_step / total_steps) * 85)
+        if step_name and step_status:
+            steps.append({"name": step_name, "status": step_status})
+        _set_warmup_status("initializing", min(progress, 95), message, steps)
+
+    def execute_with_timeout_and_retry(func, name: str, timeout: int = QUERY_TIMEOUT) -> tuple:
+        """
+        带超时和重试的查询执行器
+
+        Returns:
+            (success: bool, elapsed: float, error: str or None)
+        """
+        last_error = None
+
+        for attempt in range(MAX_RETRIES + 1):
+            query_start = time.time()
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(func)
+                    future.result(timeout=timeout)
+
+                elapsed = time.time() - query_start
+                if attempt > 0:
+                    logger.system(f"[预热] {name}: 重试成功 (尝试 {attempt + 1})")
+                return True, elapsed, None
+
+            except FuturesTimeoutError:
+                elapsed = time.time() - query_start
+                last_error = f"超时 ({timeout}s)"
+                logger.warning(f"[预热] {name}: 超时 ({elapsed:.1f}s > {timeout}s)", category="缓存")
+
+            except Exception as e:
+                elapsed = time.time() - query_start
+                last_error = str(e)
+                logger.warning(f"[预热] {name}: 失败 - {e}", category="缓存")
+
+            # 重试前等待
+            if attempt < MAX_RETRIES:
+                retry_wait = RETRY_DELAY * (attempt + 1)  # 递增等待
+                logger.system(f"[预热] {name}: 等待 {retry_wait}s 后重试 ({attempt + 2}/{MAX_RETRIES + 1})")
+                time.sleep(retry_wait)
+
+        return False, time.time() - query_start, last_error
+
+    # === Step 1: 逐个预热风控排行榜窗口 ===
+    logger.system(f"[预热] 排行榜: 共 {total_windows} 个窗口, 超时={QUERY_TIMEOUT}s, 重试={MAX_RETRIES}次")
+    _set_warmup_status("initializing", 10, f"正在加载排行榜数据 (0/{total_windows})...", steps)
+
+    leaderboard_start = time.time()
+    leaderboard_success = 0
+    leaderboard_failed = 0
+
+    try:
+        risk_service = get_risk_monitoring_service()
+
+        for idx, window in enumerate(windows):
+            update_progress(f"正在加载排行榜: {window} ({idx + 1}/{total_windows})...")
+
+            def query_leaderboard():
+                risk_service.get_leaderboards(
+                    windows=[window],
+                    limit=limit,
+                    sort_by="requests",
+                    use_cache=False,
+                )
+
+            success, elapsed, error = execute_with_timeout_and_retry(
+                query_leaderboard,
+                f"排行榜 {window}",
+                timeout=QUERY_TIMEOUT
+            )
+
+            if success:
+                leaderboard_success += 1
+                logger.system(f"[预热] 排行榜 {window}: {elapsed:.2f}s ✓")
+            else:
+                leaderboard_failed += 1
+                errors_detail.append(f"排行榜 {window}: {error}")
+                logger.warning(f"[预热] 排行榜 {window}: 失败 ✗ ({error})", category="缓存")
+
+            # 延迟
+            if query_delay > 0:
+                time.sleep(query_delay)
+
+        leaderboard_elapsed = time.time() - leaderboard_start
+        step_times.append(f"排行榜={leaderboard_elapsed:.1f}s({leaderboard_success}/{total_windows})")
+
+        if leaderboard_failed == 0:
+            warmed.append(f"排行榜({total_windows}个窗口)")
+            steps.append({"name": "排行榜", "status": "done"})
+        elif leaderboard_success > 0:
+            warmed.append(f"排行榜({leaderboard_success}/{total_windows})")
+            failed.append(f"排行榜({leaderboard_failed}失败)")
+            steps.append({"name": "排行榜", "status": "partial"})
+        else:
+            failed.append("排行榜(全部失败)")
+            steps.append({"name": "排行榜", "status": "error"})
+
+        logger.system(f"[预热] 排行榜完成: {leaderboard_success}/{total_windows} 成功, 耗时 {leaderboard_elapsed:.1f}s")
+
+    except Exception as e:
+        logger.error(f"[预热] 排行榜服务异常: {e}", category="缓存")
+        steps.append({"name": "排行榜", "status": "error", "error": str(e)})
+        failed.append("排行榜(服务异常)")
+        errors_detail.append(f"排行榜服务: {e}")
+
+    # === Step 2: 预热 IP 监控数据 ===
+    logger.system(f"[预热] IP监控: 窗口={ip_window}")
+    ip_start = time.time()
+    ip_success = 0
+    ip_failed = 0
+
+    try:
+        ip_service = get_ip_monitoring_service()
+        window_seconds = WINDOW_SECONDS.get(ip_window, 86400)
+
+        ip_queries = [
+            ("共享IP", lambda: ip_service.get_shared_ips(
+                window_seconds=window_seconds, min_tokens=2, limit=50, use_cache=False
+            )),
+            ("多IP令牌", lambda: ip_service.get_multi_ip_tokens(
+                window_seconds=window_seconds, min_ips=2, limit=50, use_cache=False
+            )),
+            ("多IP用户", lambda: ip_service.get_multi_ip_users(
+                window_seconds=window_seconds, min_ips=3, limit=50, use_cache=False
+            )),
+        ]
+
+        for query_name, query_func in ip_queries:
+            update_progress(f"正在加载{query_name}数据...")
+
+            success, elapsed, error = execute_with_timeout_and_retry(
+                query_func,
+                query_name,
+                timeout=QUERY_TIMEOUT
+            )
+
+            if success:
+                ip_success += 1
+                logger.system(f"[预热] {query_name}: {elapsed:.2f}s ✓")
+            else:
+                ip_failed += 1
+                errors_detail.append(f"{query_name}: {error}")
+                logger.warning(f"[预热] {query_name}: 失败 ✗ ({error})", category="缓存")
+
+            if query_delay > 0:
+                time.sleep(query_delay)
+
+        ip_elapsed = time.time() - ip_start
+        step_times.append(f"IP监控={ip_elapsed:.1f}s({ip_success}/3)")
+
+        if ip_failed == 0:
+            warmed.append(f"IP监控({ip_window})")
+            steps.append({"name": "IP监控", "status": "done"})
+        elif ip_success > 0:
+            warmed.append(f"IP监控({ip_success}/3)")
+            failed.append(f"IP监控({ip_failed}失败)")
+            steps.append({"name": "IP监控", "status": "partial"})
+        else:
+            failed.append("IP监控(全部失败)")
+            steps.append({"name": "IP监控", "status": "error"})
+
+        logger.system(f"[预热] IP监控完成: {ip_success}/3 成功, 耗时 {ip_elapsed:.1f}s")
+
+    except Exception as e:
+        logger.error(f"[预热] IP监控服务异常: {e}", category="缓存")
+        steps.append({"name": "IP监控", "status": "error", "error": str(e)})
+        failed.append("IP监控(服务异常)")
+        errors_detail.append(f"IP监控服务: {e}")
+
+    # === Step 3: 预热用户统计 ===
+    logger.system("[预热] 用户统计")
+    update_progress("正在加载用户统计数据...")
+    stats_start = time.time()
+
+    try:
+        user_service = get_user_management_service()
+
+        def query_stats():
+            user_service.get_activity_stats()
+
+        success, elapsed, error = execute_with_timeout_and_retry(
+            query_stats,
+            "用户统计",
+            timeout=QUERY_TIMEOUT
+        )
+
+        if success:
+            step_times.append(f"用户统计={elapsed:.1f}s")
+            warmed.append("用户统计")
+            steps.append({"name": "用户统计", "status": "done"})
+            logger.system(f"[预热] 用户统计: {elapsed:.2f}s ✓")
+        else:
+            failed.append("用户统计")
+            errors_detail.append(f"用户统计: {error}")
+            steps.append({"name": "用户统计", "status": "error", "error": error})
+            logger.warning(f"[预热] 用户统计: 失败 ✗ ({error})", category="缓存")
+
+    except Exception as e:
+        logger.error(f"[预热] 用户统计服务异常: {e}", category="缓存")
+        steps.append({"name": "用户统计", "status": "error", "error": str(e)})
+        failed.append("用户统计(服务异常)")
+        errors_detail.append(f"用户统计服务: {e}")
+
+    elapsed = time.time() - start_time
+
+    # 确定最终状态
+    if failed:
+        status_msg = f"预热完成（部分失败），耗时 {elapsed:.1f}s"
+    else:
+        status_msg = f"预热完成，耗时 {elapsed:.1f}s"
+
+    _set_warmup_status("ready", 100, status_msg, steps)
+
+    # 输出预热摘要
+    logger.system("=" * 50)
+    logger.system("[预热摘要]")
+    logger.system(f"  成功: {', '.join(warmed) if warmed else '无'}")
+    if failed:
+        logger.system(f"  失败: {', '.join(failed)}")
+    logger.system(f"  各步耗时: {', '.join(step_times)}")
+    logger.system(f"  总耗时: {elapsed:.1f}s")
+
+    if errors_detail:
+        logger.system("-" * 30)
+        logger.system("[错误详情]")
+        for err in errors_detail:
+            logger.system(f"  - {err}")
+
+    logger.system("=" * 50)
+
+
 async def _do_cache_warmup(is_initial: bool = False):
     """执行缓存预热"""
     import asyncio
@@ -346,67 +792,190 @@ async def _do_cache_warmup(is_initial: bool = False):
 
 
 def _warmup_sync(is_initial: bool = False):
-    """同步执行缓存预热（在线程池中运行）"""
+    """
+    同步执行缓存预热（在线程池中运行）
+
+    用于定期刷新缓存，采用温和策略：
+    - 逐个窗口预热，每个查询之间有延迟
+    - 根据系统规模调整参数
+    - 带超时和重试的容错机制
+    """
     from .risk_monitoring_service import get_risk_monitoring_service
     from .ip_monitoring_service import get_ip_monitoring_service, WINDOW_SECONDS
     from .user_management_service import get_user_management_service
+    from .system_scale_service import get_detected_settings
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
     start_time = time.time()
     warmed = []
-    steps = []
-    total_steps = 3
+    failed = []
 
-    # Step 1: 预热风控排行榜
-    if is_initial:
-        _set_warmup_status("initializing", 10, "正在加载排行榜数据...", steps)
+    # 定时刷新的容错配置（比初始预热更宽松）
+    REFRESH_TIMEOUT = 60  # 单个查询超时（秒）
+    REFRESH_RETRIES = 1   # 最大重试次数
+
+    def execute_with_timeout(func, name: str) -> bool:
+        """带超时和重试的查询执行器（定时刷新版本）"""
+        for attempt in range(REFRESH_RETRIES + 1):
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(func)
+                    future.result(timeout=REFRESH_TIMEOUT)
+                return True
+            except FuturesTimeoutError:
+                logger.warning(f"[刷新] {name}: 超时 ({REFRESH_TIMEOUT}s)", category="缓存")
+            except Exception as e:
+                logger.warning(f"[刷新] {name}: 失败 - {e}", category="缓存")
+
+            if attempt < REFRESH_RETRIES:
+                time.sleep(2)  # 短暂等待后重试
+
+        return False
+
+    # 获取当前系统规模设置
+    settings = get_detected_settings()
+    scale = settings.scale.value
+
+    # 根据系统规模确定策略
+    strategy = WARMUP_STRATEGY.get(scale, WARMUP_STRATEGY["medium"])
+    query_delay = strategy["query_delay"]
+    all_windows = strategy["windows"]
+    ip_window = strategy["ip_window"]
+
+    # Step 1: 逐个预热风控排行榜窗口（温和方式）
+    leaderboard_success = 0
+    leaderboard_failed = 0
+
     try:
         risk_service = get_risk_monitoring_service()
-        risk_service.get_leaderboards(
-            windows=["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
-            limit=10,
-            sort_by="requests",
-            use_cache=False,
-        )
-        warmed.append("排行榜")
-        steps.append({"name": "排行榜", "status": "done"})
-    except Exception as e:
-        logger.warning(f"排行榜预热失败: {e}", category="缓存")
-        steps.append({"name": "排行榜", "status": "error", "error": str(e)})
 
-    # Step 2: 预热 IP 监控数据
-    if is_initial:
-        _set_warmup_status("initializing", 40, "正在加载 IP 监控数据...", steps)
+        for idx, window in enumerate(all_windows):
+            def query_leaderboard():
+                risk_service.get_leaderboards(
+                    windows=[window],
+                    limit=10,
+                    sort_by="requests",
+                    use_cache=False,
+                )
+
+            if execute_with_timeout(query_leaderboard, f"排行榜 {window}"):
+                leaderboard_success += 1
+            else:
+                leaderboard_failed += 1
+
+            # 延迟，给数据库喘息的机会
+            if query_delay > 0 and idx < len(all_windows) - 1:
+                time.sleep(query_delay)
+
+        if leaderboard_failed == 0:
+            warmed.append("排行榜")
+        elif leaderboard_success > 0:
+            warmed.append(f"排行榜({leaderboard_success}/{len(all_windows)})")
+            failed.append(f"排行榜({leaderboard_failed}失败)")
+        else:
+            failed.append("排行榜")
+    except Exception as e:
+        logger.warning(f"排行榜服务异常: {e}", category="缓存")
+        failed.append("排行榜(服务异常)")
+
+    # 延迟后继续
+    if query_delay > 0:
+        time.sleep(query_delay)
+
+    # Step 2: 预热 IP 监控数据（温和方式）
+    ip_success = 0
+    ip_failed = 0
+
     try:
         ip_service = get_ip_monitoring_service()
-        window_24h = WINDOW_SECONDS.get("24h", 86400)
-        ip_service.get_shared_ips(window_seconds=window_24h, min_tokens=2, limit=50, use_cache=False)
-        ip_service.get_multi_ip_tokens(window_seconds=window_24h, min_ips=2, limit=50, use_cache=False)
-        ip_service.get_multi_ip_users(window_seconds=window_24h, min_ips=3, limit=50, use_cache=False)
-        warmed.append("IP监控")
-        steps.append({"name": "IP监控", "status": "done"})
+        window_seconds = WINDOW_SECONDS.get(ip_window, 86400)
+
+        # 共享 IP
+        if execute_with_timeout(
+            lambda: ip_service.get_shared_ips(
+                window_seconds=window_seconds,
+                min_tokens=2,
+                limit=30,
+                use_cache=False
+            ),
+            "共享IP"
+        ):
+            ip_success += 1
+        else:
+            ip_failed += 1
+
+        if query_delay > 0:
+            time.sleep(query_delay)
+
+        # 多 IP 令牌
+        if execute_with_timeout(
+            lambda: ip_service.get_multi_ip_tokens(
+                window_seconds=window_seconds,
+                min_ips=2,
+                limit=30,
+                use_cache=False
+            ),
+            "多IP令牌"
+        ):
+            ip_success += 1
+        else:
+            ip_failed += 1
+
+        if query_delay > 0:
+            time.sleep(query_delay)
+
+        # 多 IP 用户
+        if execute_with_timeout(
+            lambda: ip_service.get_multi_ip_users(
+                window_seconds=window_seconds,
+                min_ips=3,
+                limit=30,
+                use_cache=False
+            ),
+            "多IP用户"
+        ):
+            ip_success += 1
+        else:
+            ip_failed += 1
+
+        if ip_failed == 0:
+            warmed.append("IP监控")
+        elif ip_success > 0:
+            warmed.append(f"IP监控({ip_success}/3)")
+            failed.append(f"IP监控({ip_failed}失败)")
+        else:
+            failed.append("IP监控")
     except Exception as e:
-        logger.warning(f"IP监控预热失败: {e}", category="缓存")
-        steps.append({"name": "IP监控", "status": "error", "error": str(e)})
+        logger.warning(f"IP监控服务异常: {e}", category="缓存")
+        failed.append("IP监控(服务异常)")
+
+    # 延迟后继续
+    if query_delay > 0:
+        time.sleep(query_delay)
 
     # Step 3: 预热用户统计
-    if is_initial:
-        _set_warmup_status("initializing", 70, "正在加载用户统计...", steps)
     try:
         user_service = get_user_management_service()
-        user_service.get_activity_stats()
-        warmed.append("用户统计")
-        steps.append({"name": "用户统计", "status": "done"})
+        if execute_with_timeout(
+            lambda: user_service.get_activity_stats(),
+            "用户统计"
+        ):
+            warmed.append("用户统计")
+        else:
+            failed.append("用户统计")
     except Exception as e:
-        logger.warning(f"用户统计预热失败: {e}", category="缓存")
-        steps.append({"name": "用户统计", "status": "error", "error": str(e)})
+        logger.warning(f"用户统计服务异常: {e}", category="缓存")
+        failed.append("用户统计(服务异常)")
 
     elapsed = time.time() - start_time
-    
-    if is_initial:
-        _set_warmup_status("ready", 100, f"预热完成，耗时 {elapsed:.1f}s", steps)
-    
-    if warmed:
-        logger.system(f"缓存预热完成: {', '.join(warmed)} | 耗时 {elapsed:.2f}s")
+
+    # 输出刷新结果
+    if warmed and not failed:
+        logger.system(f"定时缓存刷新完成: {', '.join(warmed)} | 耗时 {elapsed:.2f}s")
+    elif warmed:
+        logger.system(f"定时缓存刷新部分完成: 成功=[{', '.join(warmed)}] 失败=[{', '.join(failed)}] | 耗时 {elapsed:.2f}s")
+    elif failed:
+        logger.warning(f"定时缓存刷新失败: {', '.join(failed)} | 耗时 {elapsed:.2f}s", category="缓存")
 
 
 async def background_ai_auto_ban_scan():
