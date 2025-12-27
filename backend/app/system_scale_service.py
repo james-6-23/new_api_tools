@@ -163,13 +163,27 @@ class SystemScaleService:
 
         # 4. Total logs count (approximate)
         try:
-            # Try to get from information_schema for faster result
-            result = self.db.execute(
-                """SELECT TABLE_ROWS as cnt 
-                   FROM information_schema.tables 
-                   WHERE table_schema = DATABASE() AND table_name = 'logs'""",
-                {}
-            )
+            # Try to get approximate count from database statistics (fast)
+            # Different approach for MySQL vs PostgreSQL
+            engine = self.db.config.engine.value if hasattr(self.db, 'config') else 'mysql'
+            
+            if engine == 'postgresql':
+                # PostgreSQL: use pg_class for approximate count
+                result = self.db.execute(
+                    """SELECT reltuples::bigint as cnt 
+                       FROM pg_class 
+                       WHERE relname = 'logs'""",
+                    {}
+                )
+            else:
+                # MySQL: use information_schema
+                result = self.db.execute(
+                    """SELECT TABLE_ROWS as cnt 
+                       FROM information_schema.tables 
+                       WHERE table_schema = DATABASE() AND table_name = 'logs'""",
+                    {}
+                )
+            
             if result and result[0].get("cnt"):
                 metrics["total_logs"] = int(result[0].get("cnt") or 0)
             else:

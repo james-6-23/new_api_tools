@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics, UserManagement, RealtimeRanking } from './components'
 import { useAuth } from './contexts/AuthContext'
+import { WarmupScreen } from './components/WarmupScreen'
 
 // Valid tabs
 const validTabs: TabType[] = ['dashboard', 'topups', 'risk', 'analytics', 'users', 'generator', 'redemptions', 'history']
@@ -15,8 +16,41 @@ const getInitialTab = (): TabType => {
 }
 
 function App() {
-  const { isAuthenticated, login, logout } = useAuth()
+  const { isAuthenticated, token, login, logout } = useAuth()
   const [activeTab, setActiveTab] = useState<TabType>(getInitialTab)
+  const [warmupState, setWarmupState] = useState<'checking' | 'warming' | 'ready'>('checking')
+
+  const apiUrl = import.meta.env.VITE_API_URL || ''
+
+  // 检查后端预热状态
+  useEffect(() => {
+    if (!isAuthenticated || !token) return
+
+    const checkWarmupStatus = async () => {
+      try {
+        const response = await fetch(`${apiUrl}/api/system/warmup-status`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        })
+        const data = await response.json()
+        
+        if (data.success && data.data.status === 'ready') {
+          // 后端已预热完成，直接进入
+          setWarmupState('ready')
+        } else {
+          // 后端还在预热中，显示预热界面
+          setWarmupState('warming')
+        }
+      } catch {
+        // 网络错误，显示预热界面让它处理
+        setWarmupState('warming')
+      }
+    }
+
+    checkWarmupStatus()
+  }, [isAuthenticated, token, apiUrl])
 
   // Sync tab with URL hash
   useEffect(() => {
@@ -35,8 +69,26 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
+  const handleWarmupReady = () => {
+    setWarmupState('ready')
+  }
+
   if (!isAuthenticated) {
     return <Login onLogin={login} />
+  }
+
+  // 正在检查预热状态
+  if (warmupState === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-pulse text-muted-foreground">正在连接服务器...</div>
+      </div>
+    )
+  }
+
+  // 显示预热界面（后端还在预热中）
+  if (warmupState === 'warming') {
+    return <WarmupScreen onReady={handleWarmupReady} />
   }
 
   const renderContent = () => {

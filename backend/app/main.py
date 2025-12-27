@@ -128,6 +128,24 @@ async def lifespan(app: FastAPI):
             logger.system(f"索引检查完成: {index_status['existing']}/{index_status['total']} 个索引已就绪")
         else:
             logger.system(f"索引状态: {index_status['existing']}/{index_status['total']} 已存在，{index_status['missing']} 个待创建")
+        
+        # 检测系统规模
+        try:
+            from .system_scale_service import get_scale_service
+            service = get_scale_service()
+            result = service.detect_scale()
+            metrics = result.get("metrics", {})
+            settings = result.get("settings", {})
+            logger.system(
+                f"系统规模检测完成: {settings.get('description', '未知')} | "
+                f"用户={metrics.get('total_users', 0)} | "
+                f"24h活跃={metrics.get('active_users_24h', 0)} | "
+                f"24h日志={metrics.get('logs_24h', 0):,} | "
+                f"RPM={metrics.get('rpm_avg', 0):.1f} | "
+                f"推荐刷新间隔={settings.get('frontend_refresh_interval', 60)}s"
+            )
+        except Exception as e:
+            logger.warning(f"系统规模检测失败: {e}", category="系统")
     except Exception as e:
         logger.warning(f"数据库初始化失败: {e}", category="数据库")
 
@@ -142,11 +160,15 @@ async def lifespan(app: FastAPI):
     # 启动 AI 自动封禁后台任务
     ai_ban_task = asyncio.create_task(background_ai_auto_ban_scan())
 
+    # 启动后台缓存预热任务
+    cache_warmup_task = asyncio.create_task(background_cache_warmup())
+
     yield
 
     # 停止后台任务
     sync_task.cancel()
     ai_ban_task.cancel()
+    cache_warmup_task.cancel()
     if index_task:
         index_task.cancel()
     try:
@@ -155,6 +177,10 @@ async def lifespan(app: FastAPI):
         pass
     try:
         await ai_ban_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await cache_warmup_task
     except asyncio.CancelledError:
         pass
     if index_task:
@@ -228,6 +254,158 @@ async def background_log_sync():
 
         # 每 5 分钟同步一次
         await asyncio.sleep(300)
+
+
+async def background_cache_warmup():
+    """
+    后台定时预热缓存，确保前端请求时数据已准备好。
+    预热内容：风控排行榜、IP监控数据、用户统计等。
+    """
+    from .system_scale_service import get_detected_settings
+
+    # 启动后等待 3 秒，让数据库连接就绪
+    await asyncio.sleep(3)
+    logger.system("后台缓存预热任务已启动")
+
+    # 首次预热（标记为初始化中）
+    _set_warmup_status("initializing", 0, "正在初始化...")
+    await _do_cache_warmup(is_initial=True)
+    _set_warmup_status("ready", 100, "预热完成")
+
+    while True:
+        try:
+            # 获取系统规模设置，决定预热间隔
+            settings = get_detected_settings()
+            warmup_interval = settings.leaderboard_cache_ttl  # 使用缓存 TTL 作为预热间隔
+            
+            # 等待预热间隔
+            await asyncio.sleep(warmup_interval)
+            
+            # 后台静默刷新（不更新状态，用户无感知）
+            await _do_cache_warmup(is_initial=False)
+
+        except asyncio.CancelledError:
+            logger.system("缓存预热任务已取消")
+            break
+        except Exception as e:
+            logger.error(f"缓存预热失败: {e}", category="任务")
+            await asyncio.sleep(60)
+
+
+# 预热状态存储
+_warmup_state = {
+    "status": "pending",  # pending, initializing, ready
+    "progress": 0,
+    "message": "等待启动...",
+    "steps": [],
+    "started_at": None,
+    "completed_at": None,
+}
+_warmup_lock = threading.Lock()
+
+
+def _set_warmup_status(status: str, progress: int, message: str, steps: list = None):
+    """更新预热状态"""
+    global _warmup_state
+    with _warmup_lock:
+        _warmup_state["status"] = status
+        _warmup_state["progress"] = progress
+        _warmup_state["message"] = message
+        if steps is not None:
+            _warmup_state["steps"] = steps
+        if status == "initializing" and _warmup_state["started_at"] is None:
+            _warmup_state["started_at"] = time.time()
+        if status == "ready":
+            _warmup_state["completed_at"] = time.time()
+
+
+def get_warmup_status() -> dict:
+    """获取预热状态（供 API 调用）"""
+    with _warmup_lock:
+        return _warmup_state.copy()
+
+
+import threading
+
+
+async def _do_cache_warmup(is_initial: bool = False):
+    """执行缓存预热"""
+    import asyncio
+    
+    try:
+        loop = asyncio.get_event_loop()
+        
+        # 在线程池中执行同步操作，避免阻塞事件循环
+        await loop.run_in_executor(None, lambda: _warmup_sync(is_initial))
+        
+    except Exception as e:
+        logger.warning(f"缓存预热异常: {e}", category="缓存")
+        if is_initial:
+            _set_warmup_status("ready", 100, "预热完成（部分失败）")
+
+
+def _warmup_sync(is_initial: bool = False):
+    """同步执行缓存预热（在线程池中运行）"""
+    from .risk_monitoring_service import get_risk_monitoring_service
+    from .ip_monitoring_service import get_ip_monitoring_service, WINDOW_SECONDS
+    from .user_management_service import get_user_management_service
+
+    start_time = time.time()
+    warmed = []
+    steps = []
+    total_steps = 3
+
+    # Step 1: 预热风控排行榜
+    if is_initial:
+        _set_warmup_status("initializing", 10, "正在加载排行榜数据...", steps)
+    try:
+        risk_service = get_risk_monitoring_service()
+        risk_service.get_leaderboards(
+            windows=["1h", "3h", "6h", "12h", "24h", "3d", "7d"],
+            limit=10,
+            sort_by="requests",
+            use_cache=False,
+        )
+        warmed.append("排行榜")
+        steps.append({"name": "排行榜", "status": "done"})
+    except Exception as e:
+        logger.warning(f"排行榜预热失败: {e}", category="缓存")
+        steps.append({"name": "排行榜", "status": "error", "error": str(e)})
+
+    # Step 2: 预热 IP 监控数据
+    if is_initial:
+        _set_warmup_status("initializing", 40, "正在加载 IP 监控数据...", steps)
+    try:
+        ip_service = get_ip_monitoring_service()
+        window_24h = WINDOW_SECONDS.get("24h", 86400)
+        ip_service.get_shared_ips(window_seconds=window_24h, min_tokens=2, limit=50, use_cache=False)
+        ip_service.get_multi_ip_tokens(window_seconds=window_24h, min_ips=2, limit=50, use_cache=False)
+        ip_service.get_multi_ip_users(window_seconds=window_24h, min_ips=3, limit=50, use_cache=False)
+        warmed.append("IP监控")
+        steps.append({"name": "IP监控", "status": "done"})
+    except Exception as e:
+        logger.warning(f"IP监控预热失败: {e}", category="缓存")
+        steps.append({"name": "IP监控", "status": "error", "error": str(e)})
+
+    # Step 3: 预热用户统计
+    if is_initial:
+        _set_warmup_status("initializing", 70, "正在加载用户统计...", steps)
+    try:
+        user_service = get_user_management_service()
+        user_service.get_activity_stats()
+        warmed.append("用户统计")
+        steps.append({"name": "用户统计", "status": "done"})
+    except Exception as e:
+        logger.warning(f"用户统计预热失败: {e}", category="缓存")
+        steps.append({"name": "用户统计", "status": "error", "error": str(e)})
+
+    elapsed = time.time() - start_time
+    
+    if is_initial:
+        _set_warmup_status("ready", 100, f"预热完成，耗时 {elapsed:.1f}s", steps)
+    
+    if warmed:
+        logger.system(f"缓存预热完成: {', '.join(warmed)} | 耗时 {elapsed:.2f}s")
 
 
 async def background_ai_auto_ban_scan():

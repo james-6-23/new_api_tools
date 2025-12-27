@@ -20,6 +20,12 @@ class ScaleResponse(BaseModel):
     data: Dict[str, Any]
 
 
+class WarmupStatusResponse(BaseModel):
+    """Response model for warmup status."""
+    success: bool
+    data: Dict[str, Any]
+
+
 @router.get("/scale", response_model=ScaleResponse)
 async def get_system_scale(
     _: str = Depends(verify_auth),
@@ -48,3 +54,21 @@ async def refresh_system_scale(
     """
     result = refresh_scale_detection()
     return ScaleResponse(success=True, data=result)
+
+
+@router.get("/warmup-status", response_model=WarmupStatusResponse)
+async def get_warmup_status(
+    _: str = Depends(verify_auth),
+):
+    """
+    获取系统预热状态。
+    
+    返回:
+    - status: 状态 (pending/initializing/ready)
+    - progress: 进度百分比 (0-100)
+    - message: 当前状态描述
+    - steps: 预热步骤详情
+    """
+    from .main import get_warmup_status as _get_warmup_status
+    status = _get_warmup_status()
+    return WarmupStatusResponse(success=True, data=status)
