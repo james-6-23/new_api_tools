@@ -117,6 +117,7 @@ async def lifespan(app: FastAPI):
 
     # 初始化数据库连接
     db = None
+    index_status = {"all_ready": True}  # 默认值，防止数据库连接失败时未定义
     try:
         from .database import get_db_manager
         db = get_db_manager()
