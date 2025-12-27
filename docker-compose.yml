@@ -25,9 +25,17 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET}
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
+      # Redis 缓存配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -43,8 +51,31 @@ services:
       - default
       - newapi-network
 
+  # Redis 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: newapi-tools-redis
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 256mb 
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 networks:
   default:
   newapi-network:
     external: true
     name: ${NEWAPI_NETWORK:-new-api_default}
+
+volumes:
+  redis_data:

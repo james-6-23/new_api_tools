@@ -264,27 +264,60 @@ async def background_log_sync():
 
 async def background_cache_warmup():
     """
-    后台定时预热缓存，确保前端请求时数据已准备好。
-    预热内容：风控排行榜、IP监控数据、用户统计等。
-
-    采用渐进式温和预热策略：
-    1. 先等待索引创建完成（确保查询性能）
-    2. 逐个窗口、逐个查询预热，每个查询之间有延迟
-    3. 确保所有数据都预热完成后才标记为就绪
+    后台缓存预热任务 - 智能恢复模式
+    
+    新策略：
+    1. 优先从 SQLite 恢复缓存（秒级恢复）
+    2. 仅缺失的窗口才查询 PostgreSQL
+    3. 恢复后进入定时刷新循环
     """
     from .system_scale_service import get_detected_settings, get_scale_service, SystemScale
     from .database import get_db_manager
+    from .cache_manager import get_cache_manager
 
     warmup_start_time = time.time()
 
-    # 启动后等待 5 秒，让数据库连接就绪
-    await asyncio.sleep(5)
+    # 启动后等待 3 秒，让数据库连接就绪
+    await asyncio.sleep(3)
     logger.system("=" * 50)
-    logger.system("缓存预热任务启动")
+    logger.system("缓存恢复任务启动")
     logger.system("=" * 50)
 
-    _set_warmup_status("initializing", 0, "正在检测系统规模...")
+    _set_warmup_status("initializing", 0, "正在初始化缓存...")
 
+    # 获取缓存管理器
+    cache = get_cache_manager()
+    
+    # 阶段1：从 SQLite 恢复到 Redis（如果 Redis 可用）
+    if cache.redis_available:
+        logger.system("[阶段1] 从 SQLite 恢复缓存到 Redis")
+        restored = cache.restore_to_redis()
+        if restored > 0:
+            logger.system(f"[阶段1] 恢复完成: {restored} 条数据")
+    else:
+        logger.system("[阶段1] Redis 未配置，使用纯 SQLite 模式")
+    
+    # 阶段2：检查缓存有效性
+    _set_warmup_status("initializing", 20, "正在检查缓存有效性...")
+    
+    windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
+    cached_windows = cache.get_cached_windows()
+    missing_windows = [w for w in windows if w not in cached_windows]
+    
+    if not missing_windows:
+        # 所有缓存都有效，直接完成
+        elapsed = time.time() - warmup_start_time
+        _set_warmup_status("ready", 100, f"缓存恢复完成，耗时 {elapsed:.2f}s")
+        logger.system(f"[完成] 所有缓存有效，无需预热，耗时 {elapsed:.2f}s")
+        logger.system("=" * 50)
+        
+        # 进入定时刷新循环
+        await _background_refresh_loop(cache)
+        return
+    
+    logger.system(f"[阶段2] 已缓存: {cached_windows or '无'}")
+    logger.system(f"[阶段2] 需预热: {missing_windows}")
+    
     # 检测系统规模
     scale_service = get_scale_service()
     scale_result = scale_service.detect_scale()
@@ -301,95 +334,102 @@ async def background_cache_warmup():
 
     # 获取预热策略
     strategy = WARMUP_STRATEGY.get(scale.value, WARMUP_STRATEGY["medium"])
-    logger.system(f"[预热策略] 时间窗口: {strategy['windows']}")
-    logger.system(f"[预热策略] 查询延迟: {strategy['query_delay']}s")
-    logger.system(f"[预热策略] IP监控窗口: {strategy['ip_window']}")
+    query_delay = strategy['query_delay']
 
-    # === 阶段1：等待索引创建完成 ===
+    # === 阶段3：仅预热缺失的窗口 ===
     logger.system("-" * 50)
-    logger.system("[阶段1] 检查数据库索引")
-    _set_warmup_status("initializing", 5, "正在检查数据库索引...")
+    logger.system("[阶段3] 预热缺失的窗口")
+    _set_warmup_status("initializing", 30, f"正在预热 {len(missing_windows)} 个窗口...")
 
-    db = get_db_manager()
-    max_index_wait = 300  # 最多等待 5 分钟
-    index_wait_start = time.time()
-
-    while True:
+    from .risk_monitoring_service import get_risk_monitoring_service
+    service = get_risk_monitoring_service()
+    
+    warmed = []
+    failed = []
+    total_to_warm = len(missing_windows)
+    
+    for idx, window in enumerate(missing_windows):
+        progress = 30 + int((idx / max(total_to_warm, 1)) * 60)
+        _set_warmup_status("initializing", progress, f"正在预热: {window}")
+        
         try:
-            index_status = db.get_index_status()
-            missing = index_status.get("missing", 0)
-            total_idx = index_status.get("total", 0)
-            existing = index_status.get("existing", 0)
-
-            if index_status.get("all_ready", False):
-                logger.system(f"[索引] 全部就绪 ({existing}/{total_idx})")
-                _set_warmup_status("initializing", 10, f"索引已就绪 ({existing}/{total_idx})")
-                break
+            # 查询 PostgreSQL（只读）
+            data = service.get_leaderboards(
+                windows=[window],
+                limit=50,
+                sort_by="requests",
+                use_cache=False
+            )
+            
+            if data and window in data.get("windows", {}):
+                warmed.append(window)
+                logger.system(f"[预热] {window} 完成")
             else:
-                elapsed = time.time() - index_wait_start
-                if elapsed > max_index_wait:
-                    logger.warning(f"[索引] 等待超时 ({elapsed:.0f}s)，继续预热")
-                    logger.warning(f"[索引] 已有 {existing}/{total_idx}，缺失 {missing}")
-                    # 列出缺失的索引
-                    for idx_name, idx_info in index_status.get("indexes", {}).items():
-                        if not idx_info.get("exists"):
-                            logger.warning(f"[索引] 缺失: {idx_name}")
-                    _set_warmup_status("initializing", 10, f"索引部分就绪 ({existing}/{total_idx})")
-                    break
-
-                progress = 5 + int((elapsed / max_index_wait) * 5)
-                _set_warmup_status(
-                    "initializing",
-                    min(progress, 9),
-                    f"等待索引创建... ({existing}/{total_idx})"
-                )
-                logger.system(f"[索引] 等待中: {existing}/{total_idx} 就绪, {missing} 缺失, 已等待 {elapsed:.0f}s")
-                await asyncio.sleep(5)  # 每 5 秒检查一次
+                failed.append(window)
+                logger.warning(f"[预热] {window} 无数据")
+                
         except Exception as e:
-            logger.warning(f"[索引] 检查失败: {e}")
-            _set_warmup_status("initializing", 10, "索引检查跳过")
-            break
+            failed.append(window)
+            logger.warning(f"[预热] {window} 失败: {e}")
+        
+        # 延迟，避免数据库压力
+        if query_delay > 0 and idx < total_to_warm - 1:
+            await asyncio.sleep(query_delay)
 
-    index_elapsed = time.time() - index_wait_start
-    logger.system(f"[阶段1] 索引检查完成，耗时 {index_elapsed:.1f}s")
-
-    # === 阶段2：渐进式完整预热 ===
-    logger.system("-" * 50)
-    logger.system("[阶段2] 开始缓存预热")
-    await _do_complete_warmup(scale)
-
-    # 标记为就绪
+    # 完成
     total_elapsed = time.time() - warmup_start_time
-    _set_warmup_status("ready", 100, f"预热完成，总耗时 {total_elapsed:.1f}s")
-
-    logger.system("-" * 50)
-    logger.system(f"[完成] 缓存预热全部完成")
+    
+    if failed:
+        _set_warmup_status("ready", 100, f"预热完成（部分失败），耗时 {total_elapsed:.1f}s")
+        logger.system(f"[完成] 成功: {warmed}, 失败: {failed}")
+    else:
+        _set_warmup_status("ready", 100, f"预热完成，耗时 {total_elapsed:.1f}s")
+        logger.system(f"[完成] 全部成功: {warmed}")
+    
     logger.system(f"[完成] 总耗时: {total_elapsed:.1f}s")
     logger.system("=" * 50)
 
-    # === 阶段3：定时刷新 ===
+    # 进入定时刷新循环
+    await _background_refresh_loop(cache)
+
+
+async def _background_refresh_loop(cache):
+    """后台定时刷新缓存"""
+    from .system_scale_service import get_detected_settings
+    from .risk_monitoring_service import get_risk_monitoring_service
+    
+    windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
+    
     while True:
         try:
-            # 获取系统规模设置，决定预热间隔
             settings = get_detected_settings()
-            warmup_interval = settings.leaderboard_cache_ttl  # 使用缓存 TTL 作为预热间隔
-
-            logger.system(f"[定时刷新] 下次刷新在 {warmup_interval}s 后")
-
-            # 等待预热间隔
-            await asyncio.sleep(warmup_interval)
-
-            # 后台静默刷新（不更新状态，用户无感知）
+            interval = settings.leaderboard_cache_ttl
+            
+            logger.debug(f"[定时刷新] 下次刷新在 {interval}s 后")
+            await asyncio.sleep(interval)
+            
+            # 刷新所有窗口
+            service = get_risk_monitoring_service()
             refresh_start = time.time()
-            await _do_cache_warmup(is_initial=False)
+            
+            for window in windows:
+                try:
+                    service.get_leaderboards(
+                        windows=[window],
+                        limit=50,
+                        use_cache=False
+                    )
+                except Exception:
+                    pass
+            
             refresh_elapsed = time.time() - refresh_start
-            logger.system(f"[定时刷新] 完成，耗时 {refresh_elapsed:.1f}s")
+            logger.debug(f"[定时刷新] 完成，耗时 {refresh_elapsed:.1f}s")
 
         except asyncio.CancelledError:
-            logger.system("缓存预热任务已取消")
+            logger.system("缓存刷新任务已取消")
             break
         except Exception as e:
-            logger.error(f"缓存预热失败: {e}", category="任务")
+            logger.warning(f"[定时刷新] 失败: {e}")
             await asyncio.sleep(60)
 
 

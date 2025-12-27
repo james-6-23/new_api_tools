@@ -70,12 +70,28 @@ class IPMonitoringService:
 
     def __init__(self, db: Optional[DatabaseManager] = None):
         self._db = db
+        self._cache_manager = None
 
     @property
     def db(self) -> DatabaseManager:
         if self._db is None:
             self._db = get_db_manager()
         return self._db
+    
+    @property
+    def cache(self):
+        """获取缓存管理器（延迟加载）"""
+        if self._cache_manager is None:
+            from .cache_manager import get_cache_manager
+            self._cache_manager = get_cache_manager()
+        return self._cache_manager
+    
+    def _get_window_name(self, window_seconds: int) -> str:
+        """将秒数转换为窗口名称"""
+        for name, seconds in WINDOW_SECONDS.items():
+            if seconds == window_seconds:
+                return name
+        return f"{window_seconds}s"
 
     def get_ip_recording_stats(self) -> Dict[str, Any]:
         """
@@ -170,9 +186,16 @@ class IPMonitoringService:
             now = int(time.time())
         start_time = now - window_seconds
 
-        # 检查缓存
+        # 检查缓存 - 优先使用新缓存管理器
+        window_name = self._get_window_name(window_seconds)
         cache_key = f"shared_ips:{window_seconds}:{min_tokens}:{limit}"
         if use_cache:
+            # 尝试新缓存管理器（SQLite + Redis）
+            cached = self.cache.get_ip_monitoring("shared_ips", window_name, limit)
+            if cached is not None:
+                return {"items": cached, "total": len(cached)}
+            
+            # 降级到内存缓存
             cached = _ip_cache.get(cache_key)
             if cached is not None:
                 return cached
@@ -340,6 +363,11 @@ class IPMonitoringService:
                     })
 
             result = {"items": items, "total": len(items)}
+            
+            # 保存到新缓存管理器（SQLite + Redis）
+            self.cache.set_ip_monitoring("shared_ips", window_name, items, _get_cache_ttl())
+            
+            # 同时更新内存缓存（兼容）
             _ip_cache.set(cache_key, result, _get_cache_ttl())
             return result
         except Exception as e:

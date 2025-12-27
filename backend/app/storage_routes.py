@@ -213,6 +213,45 @@ async def clear_dashboard_cache(
     )
 
 
+# 新缓存管理器状态端点
+
+@router.get("/cache/stats", response_model=StorageInfoResponse)
+async def get_cache_stats(
+    _: str = Depends(verify_auth),
+):
+    """
+    获取新缓存管理器（SQLite + Redis）的统计信息。
+    """
+    from .cache_manager import get_cache_manager as get_new_cache_manager
+    
+    cache = get_new_cache_manager()
+    stats = cache.get_stats()
+    
+    return StorageInfoResponse(
+        success=True,
+        data=stats,
+    )
+
+
+@router.post("/cache/cleanup-expired", response_model=CacheResponse)
+async def cleanup_expired_cache(
+    _: str = Depends(verify_auth),
+):
+    """
+    清理新缓存管理器中的过期数据。
+    """
+    from .cache_manager import get_cache_manager as get_new_cache_manager
+    
+    cache = get_new_cache_manager()
+    deleted = cache.cleanup_expired()
+    
+    return CacheResponse(
+        success=True,
+        message=f"Cleaned up {deleted} expired cache entries",
+        data={"deleted": deleted},
+    )
+
+
 # Storage Info Endpoint
 
 @router.get("/info", response_model=StorageInfoResponse)

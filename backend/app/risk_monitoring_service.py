@@ -82,12 +82,21 @@ class RiskMonitoringService:
 
     def __init__(self, db: Optional[DatabaseManager] = None):
         self._db = db
+        self._cache_manager = None
 
     @property
     def db(self) -> DatabaseManager:
         if self._db is None:
             self._db = get_db_manager()
         return self._db
+    
+    @property
+    def cache(self):
+        """获取缓存管理器（延迟加载）"""
+        if self._cache_manager is None:
+            from .cache_manager import get_cache_manager
+            self._cache_manager = get_cache_manager()
+        return self._cache_manager
 
     def get_leaderboards(
         self,
@@ -100,9 +109,9 @@ class RiskMonitoringService:
         Get leaderboards for multiple time windows.
 
         Performance optimization:
+        - 三层缓存：Redis → SQLite → PostgreSQL
         - Per-window cache to support independent refresh
         - No JOIN with users table (fetch user info separately for top N only)
-        - Each window queried separately for accurate data
         """
         now = int(time.time())
         cache_ttl = _get_cache_ttl()
@@ -117,11 +126,17 @@ class RiskMonitoringService:
             if not seconds:
                 continue
 
-            # Per-window cache key
-            window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
-
-            # Check per-window cache
+            # 优先使用新的缓存管理器（SQLite + Redis）
             if use_cache:
+                cached = self.cache.get_leaderboard(w, sort_by, limit)
+                if cached is not None:
+                    window_results[w] = cached
+                    for item in cached:
+                        all_user_ids.add(item.get("user_id"))
+                    continue
+                
+                # 降级到内存缓存（兼容旧逻辑）
+                window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
                 cached = _cache.get(window_cache_key)
                 if cached is not None:
                     window_results[w] = cached
@@ -129,13 +144,17 @@ class RiskMonitoringService:
                         all_user_ids.add(item["user_id"])
                     continue
 
-            # Cache miss or no_cache - query database
+            # Cache miss - query database (只读)
             raw_data = self._get_leaderboard_raw(
                 window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
             )
             window_results[w] = raw_data
 
-            # Update per-window cache
+            # 保存到新缓存管理器（SQLite + Redis）
+            self.cache.set_leaderboard(w, sort_by, raw_data, cache_ttl)
+            
+            # 同时更新内存缓存（兼容）
+            window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
             _cache.set(window_cache_key, raw_data, cache_ttl)
 
             # Collect user IDs for batch fetch
