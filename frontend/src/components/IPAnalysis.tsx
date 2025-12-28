@@ -344,7 +344,7 @@ export function IPAnalysis() {
         trigger: 'item',
         formatter: (params: any) => {
           if (params.value) {
-            return `<strong>${params.name}</strong><br/>流量: ${formatNumber(params.value)}`
+            return `<strong>${params.name}</strong><br/>流量: ${params.value.toLocaleString('zh-CN')}`
           }
           return params.name
         }
@@ -419,7 +419,7 @@ export function IPAnalysis() {
         trigger: 'item',
         formatter: (params: any) => {
           if (params.value) {
-            return `<strong>${params.name}</strong><br/>流量: ${formatNumber(params.value)}`
+            return `<strong>${params.name}</strong><br/>流量: ${params.value.toLocaleString('zh-CN')}`
           }
           return params.name
         }
@@ -533,12 +533,14 @@ export function IPAnalysis() {
         <StatCard
           title="独立 IP 数"
           value={formatNumber(data?.total_ips || 0)}
+          rawValue={data?.total_ips || 0}
           icon={MapPin}
           color="blue"
         />
         <StatCard
           title="总流量"
           value={formatNumber(data?.total_requests || 0)}
+          rawValue={data?.total_requests || 0}
           icon={Activity}
           color="emerald"
         />
@@ -669,7 +671,7 @@ export function IPAnalysis() {
                         </div>
                       </td>
                       <td className="py-3 px-4 text-right tabular-nums font-medium">
-                        {formatNumber(item.request_count)}
+                        {item.request_count.toLocaleString('zh-CN')}
                       </td>
                     </tr>
                   ))}
@@ -707,10 +709,10 @@ export function IPAnalysis() {
                     <tr key={index} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
                       <td className="py-3 px-4">{item.region}</td>
                       <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">
-                        {item.ip_count}
+                        {item.ip_count.toLocaleString('zh-CN')}
                       </td>
                       <td className="py-3 px-4 text-right tabular-nums font-medium">
-                        {formatNumber(item.request_count)}
+                        {item.request_count.toLocaleString('zh-CN')}
                       </td>
                       <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">
                         {item.percentage.toFixed(1)}%
@@ -759,11 +761,12 @@ export function IPAnalysis() {
 interface StatCardProps {
   title: string
   value: string
+  rawValue?: number  // 原始数值，用于 tooltip 显示完整数字
   icon: React.ElementType
   color: string
 }
 
-function StatCard({ title, value, icon: Icon, color }: StatCardProps) {
+function StatCard({ title, value, rawValue, icon: Icon, color }: StatCardProps) {
   const colorMap: Record<string, { bg: string }> = {
     blue: { bg: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' },
     emerald: { bg: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' },
@@ -778,7 +781,12 @@ function StatCard({ title, value, icon: Icon, color }: StatCardProps) {
         <div className="flex justify-between items-start">
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="text-2xl font-bold tracking-tight">{value}</div>
+            <div 
+              className="text-2xl font-bold tracking-tight cursor-default"
+              title={rawValue !== undefined ? rawValue.toLocaleString('zh-CN') : undefined}
+            >
+              {value}
+            </div>
           </div>
           <div className={cn("p-2.5 rounded-xl", theme.bg)}>
             <Icon className="w-5 h-5" />

@@ -251,7 +251,8 @@ export function Dashboard() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatCard 
             title="请求总数" 
-            value={formatNumber(usage?.total_requests || 0)} 
+            value={formatNumber(usage?.total_requests || 0)}
+            rawValue={usage?.total_requests || 0}
             icon={BarChart3}
             color="indigo"
             variant="compact"
@@ -259,6 +260,7 @@ export function Dashboard() {
           <StatCard 
             title="消耗额度" 
             value={formatQuota(usage?.total_quota_used || 0)} 
+            rawValue={usage?.total_quota_used ? usage.total_quota_used / 500000 : 0}
             icon={Zap}
             color="amber"
             variant="compact"
@@ -266,6 +268,7 @@ export function Dashboard() {
           <StatCard
             title="输入Token"
             value={formatNumber(usage?.total_prompt_tokens || 0)}
+            rawValue={usage?.total_prompt_tokens || 0}
             icon={Users} // Reusing Users icon for visual consistency or change to another
             color="cyan"
             variant="compact"
@@ -274,6 +277,7 @@ export function Dashboard() {
           <StatCard
             title="输出Token"
             value={formatNumber(usage?.total_completion_tokens || 0)}
+            rawValue={usage?.total_completion_tokens || 0}
             icon={Users}
             color="teal"
             variant="compact"
@@ -372,6 +376,7 @@ export function Dashboard() {
 interface StatCardProps {
   title: string
   value: number | string
+  rawValue?: number  // 原始数值，用于 tooltip 显示完整数字
   subValue?: string
   icon: React.ElementType
   color: string
@@ -379,7 +384,7 @@ interface StatCardProps {
   customLabel?: string
 }
 
-function StatCard({ title, value, subValue, icon: Icon, color, variant = 'default', customLabel }: StatCardProps) {
+function StatCard({ title, value, rawValue, subValue, icon: Icon, color, variant = 'default', customLabel }: StatCardProps) {
   // Map color names to Tailwind classes
   const colorMap: Record<string, { bg: string, text: string, ring: string }> = {
     blue: { bg: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300', text: 'text-blue-600', ring: 'group-hover:ring-blue-200' },
@@ -403,7 +408,12 @@ function StatCard({ title, value, subValue, icon: Icon, color, variant = 'defaul
         <CardContent className="p-4 flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{customLabel || title}</p>
-            <div className="text-xl font-bold tracking-tight">{value}</div>
+            <div 
+              className="text-xl font-bold tracking-tight cursor-default"
+              title={rawValue !== undefined ? rawValue.toLocaleString('zh-CN') : undefined}
+            >
+              {value}
+            </div>
           </div>
           <div className={cn("p-2 rounded-full", theme.bg)}>
             <Icon className="w-4 h-4" />
