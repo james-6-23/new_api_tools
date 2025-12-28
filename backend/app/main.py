@@ -325,6 +325,98 @@ async def background_log_sync():
         await asyncio.sleep(300)
 
 
+async def _warmup_dashboard_data():
+    """
+    预热 Dashboard 数据，避免首次访问时数据库超时。
+
+    对于大型系统（千万级日志），直接查询可能需要 10-30 秒。
+    在启动时预热可以确保用户首次访问时数据已经缓存。
+
+    前端 Dashboard 首次加载会并发调用：
+    1. /api/dashboard/overview?period=7d
+    2. /api/dashboard/usage?period=7d
+    3. /api/dashboard/models?period=7d&limit=8
+    4. /api/dashboard/trends/daily?days=7
+    5. /api/dashboard/top-users?period=7d&limit=10  <-- 关键！
+
+    必须全部预热，否则首次访问会导致高并发数据库查询。
+    
+    缓存存储：使用 CacheManager 统一缓存管理器（SQLite + Redis 混合）
+    """
+    from .cached_dashboard import get_cached_dashboard_service
+    from .user_management_service import get_user_management_service
+
+    logger.phase(4, "预热 Dashboard 数据")
+    warmup_start = time.time()
+
+    dashboard_service = get_cached_dashboard_service()
+    user_service = get_user_management_service()
+
+    # 预热项目列表（按前端加载顺序）
+    # 必须包含所有 Dashboard 首次加载时调用的 API
+    warmup_items = [
+        # === 核心 Dashboard API（前端 Promise.all 并发调用）===
+        ("overview_7d", lambda: dashboard_service.get_system_overview(period="7d", use_cache=False)),
+        ("usage_7d", lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False)),
+        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=20, use_cache=False)),
+        ("trends_daily_7d", lambda: dashboard_service.get_daily_trends(days=7, use_cache=False)),
+        ("top_users_7d", lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False)),  # 关键！
+
+        # === 常用的其他时间周期 ===
+        ("overview_24h", lambda: dashboard_service.get_system_overview(period="24h", use_cache=False)),
+        ("usage_24h", lambda: dashboard_service.get_usage_statistics(period="24h", use_cache=False)),
+        ("trends_hourly_24h", lambda: dashboard_service.get_hourly_trends(hours=24, use_cache=False)),
+
+        # === 3天周期（用户切换时间周期时需要）===
+        ("overview_3d", lambda: dashboard_service.get_system_overview(period="3d", use_cache=False)),
+        ("usage_3d", lambda: dashboard_service.get_usage_statistics(period="3d", use_cache=False)),
+        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=20, use_cache=False)),
+        ("trends_daily_3d", lambda: dashboard_service.get_daily_trends(days=3, use_cache=False)),
+        ("top_users_3d", lambda: dashboard_service.get_top_users(period="3d", limit=10, use_cache=False)),
+
+        # === 14天周期（用户切换时间周期时需要）===
+        ("overview_14d", lambda: dashboard_service.get_system_overview(period="14d", use_cache=False)),
+        ("usage_14d", lambda: dashboard_service.get_usage_statistics(period="14d", use_cache=False)),
+        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=20, use_cache=False)),
+        ("trends_daily_14d", lambda: dashboard_service.get_daily_trends(days=14, use_cache=False)),
+        ("top_users_14d", lambda: dashboard_service.get_top_users(period="14d", limit=10, use_cache=False)),
+
+        # === 用户统计（UserManagement 页面需要）===
+        ("user_stats", lambda: user_service.get_activity_stats()),
+    ]
+
+    total_items = len(warmup_items)
+    success_count = 0
+    failed_items = []
+
+    for idx, (name, fetch_func) in enumerate(warmup_items):
+        try:
+            item_start = time.time()
+            # 在线程池中执行，避免阻塞事件循环
+            await asyncio.get_event_loop().run_in_executor(None, fetch_func)
+            item_elapsed = time.time() - item_start
+            logger.success(f"Dashboard {name} 预热完成", 耗时=f"{item_elapsed:.2f}s")
+            success_count += 1
+        except Exception as e:
+            failed_items.append(name)
+            logger.warn(f"Dashboard {name} 预热失败: {e}")
+
+    total_elapsed = time.time() - warmup_start
+
+    # 输出汇总（与排行榜预热格式一致）
+    if failed_items:
+        logger.kvs({
+            "成功项目": f"{success_count}/{total_items}",
+            "失败项目": ", ".join(failed_items),
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+    else:
+        logger.kvs({
+            "成功项目": f"{success_count}/{total_items}",
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+
+
 async def background_cache_warmup():
     """
     后台缓存预热任务 - 智能恢复模式
@@ -591,7 +683,14 @@ async def background_cache_warmup():
     })
     logger.banner("✅ 缓存预热完成")
 
-    # === 阶段4：延迟预热 IP 地区分布（低优先级）===
+    # === 阶段4：预热 Dashboard 数据（重要！避免首次访问超时）===
+    await asyncio.sleep(2)
+    try:
+        await _warmup_dashboard_data()
+    except Exception as e:
+        logger.warn(f"Dashboard 预热异常: {e}")
+
+    # === 阶段5：延迟预热 IP 地区分布（低优先级）===
     # 等待 10 秒后执行，不阻塞主预热流程
     await asyncio.sleep(10)
     try:

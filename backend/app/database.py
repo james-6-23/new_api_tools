@@ -412,6 +412,10 @@ class DatabaseManager:
             ("idx_logs_type_created", "logs", ["type", "created_at"]),
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),
 
+            # Dashboard model usage query optimization
+            # Query: WHERE created_at >= x AND type = 2 GROUP BY model_name
+            ("idx_logs_type_created_model", "logs", ["type", "created_at", "model_name"]),
+
             # IP monitoring indexes - optimized for common queries
             # Query: WHERE created_at >= x AND ip <> '' GROUP BY ip
             ("idx_logs_ip_created", "logs", ["ip", "created_at"]),
@@ -533,10 +537,11 @@ class DatabaseManager:
             ("idx_logs_created_user_type", "logs"),
             ("idx_logs_type_created", "logs"),
             ("idx_logs_user_created", "logs"),
+            ("idx_logs_type_created_model", "logs"),  # Dashboard model usage
             ("idx_logs_ip_created", "logs"),
             ("idx_logs_created_ip_token", "logs"),
             ("idx_logs_created_user_ip", "logs"),
-            ("idx_logs_created_token_ip", "logs"),  # NEW: for get_multi_ip_tokens
+            ("idx_logs_created_token_ip", "logs"),  # for get_multi_ip_tokens
             ("idx_logs_token_created_ip", "logs"),
             ("idx_logs_user_created_ip", "logs"),
             ("idx_users_deleted_status", "users"),

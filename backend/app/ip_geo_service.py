@@ -9,6 +9,7 @@ IP 地理位置查询服务 - NewAPI Middleware Tool
 """
 import os
 import time
+import asyncio
 import ipaddress
 import httpx
 from pathlib import Path
@@ -324,10 +325,15 @@ class IPGeoService:
         total = len(ips)
         cached_count = 0
         queried_count = 0
+        private_count = 0
+        
+        if total == 0:
+            return results
         
         # 进度日志间隔（每处理 500 个 IP 输出一次）
         progress_interval = 500
         last_progress = 0
+        start_time = time.time()
         
         for idx, ip in enumerate(ips):
             if not ip:
@@ -345,6 +351,7 @@ class IPGeoService:
                 info = self._create_private_ip_info(ip)
                 self._set_cached(info)
                 results[ip] = info
+                private_count += 1
                 continue
             
             # 数据库不可用
@@ -359,15 +366,24 @@ class IPGeoService:
             results[ip] = info
             queried_count += 1
             
-            # 输出进度日志
+            # 输出进度日志（包含预计剩余时间）
             if log_progress and (idx - last_progress) >= progress_interval:
                 progress_pct = (idx + 1) / total * 100
-                logger.system(f"[IP分布] GeoIP 查询进度: {idx + 1:,}/{total:,} ({progress_pct:.1f}%)")
+                elapsed = time.time() - start_time
+                if idx > 0:
+                    remaining = elapsed / (idx + 1) * (total - idx - 1)
+                    logger.system(f"[IP分布] GeoIP 查询进度: {idx + 1:,}/{total:,} ({progress_pct:.1f}%)，剩余约 {remaining:.0f}s")
+                else:
+                    logger.system(f"[IP分布] GeoIP 查询进度: {idx + 1:,}/{total:,} ({progress_pct:.1f}%)")
                 last_progress = idx
+                
+                # 让出 CPU，避免阻塞其他任务
+                await asyncio.sleep(0)
         
         # 最终进度日志
         if log_progress and total > 0:
-            logger.system(f"[IP分布] GeoIP 查询完成: 缓存命中 {cached_count:,}, 新查询 {queried_count:,}")
+            elapsed = time.time() - start_time
+            logger.system(f"[IP分布] GeoIP 查询完成: 缓存命中 {cached_count:,}, 新查询 {queried_count:,}, 私有IP {private_count:,}, 耗时 {elapsed:.1f}s")
         
         return results
     

@@ -1,13 +1,19 @@
 """
 Cached Dashboard Service for NewAPI Middleware Tool.
 Wraps DashboardService with caching layer to reduce database load.
+
+针对大型系统（千万级日志），使用更长的缓存TTL以减少数据库压力。
+
+缓存架构：
+- 使用 CacheManager 统一缓存管理器（SQLite + Redis 混合）
+- Redis 可用时优先使用 Redis（毫秒级响应）
+- Redis 不可用时降级到 SQLite（仍然很快）
 """
-import logging
 import time
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
-from .cache import cached, get_cache_manager
+from .cache_manager import get_cache_manager as get_unified_cache_manager
 from .dashboard_service import (
     DashboardService,
     DailyTrend,
@@ -18,19 +24,46 @@ from .dashboard_service import (
     get_dashboard_service,
 )
 from .local_storage import get_local_storage
+from .logger import logger
 
-logger = logging.getLogger(__name__)
+
+def _get_ttl_multiplier() -> float:
+    """
+    根据系统规模获取缓存TTL倍数。
+    大型系统使用更长的缓存时间以减少数据库压力。
+    """
+    try:
+        from .system_scale_service import get_detected_settings
+        settings = get_detected_settings()
+        scale = settings.scale if hasattr(settings, 'scale') else 'medium'
+
+        # 大型/超大型系统使用更长的缓存
+        multipliers = {
+            'tiny': 0.5,      # 小型系统可以更频繁刷新
+            'small': 1.0,
+            'medium': 1.5,
+            'large': 3.0,     # 大型系统缓存时间x3
+            'xlarge': 5.0,    # 超大型系统缓存时间x5
+        }
+        return multipliers.get(scale, 1.5)
+    except Exception:
+        return 1.5  # 默认使用1.5倍
 
 
 class CachedDashboardService:
     """
     Dashboard service with caching layer.
     Caches expensive database queries to reduce load.
+    
+    使用 CacheManager 统一缓存管理器：
+    - L1: Redis（如果可用）
+    - L2: SQLite（持久化备份）
     """
 
     def __init__(self):
         self._service = get_dashboard_service()
         self._storage = get_local_storage()
+        self._cache = get_unified_cache_manager()  # 使用统一缓存管理器
 
     @property
     def service(self) -> DashboardService:
@@ -49,9 +82,10 @@ class CachedDashboardService:
         cache_key = f"dashboard:overview:{period}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            # 使用统一缓存管理器
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug("Using cached system overview")
+                logger.debug(f"[Dashboard] overview:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range for active counts
@@ -75,9 +109,12 @@ class CachedDashboardService:
             "7d": 300,
             "14d": 600,
         }
-        self._storage.cache_set(cache_key, data, ttl=ttl_map.get(period, 300))
+        ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
+        
+        # 使用统一缓存管理器保存
+        self._cache.set(cache_key, data, ttl=ttl)
 
-        # Also save as snapshot
+        # Also save as snapshot (保留本地快照功能)
         self._storage.save_stats_snapshot("overview", data)
 
         return data
@@ -100,9 +137,9 @@ class CachedDashboardService:
         cache_key = f"dashboard:usage:{period}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached usage stats for {period}")
+                logger.debug(f"[Dashboard] usage:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -124,7 +161,7 @@ class CachedDashboardService:
             **asdict(stats),
         }
 
-        # Cache based on period
+        # Cache based on period (大型系统自动延长TTL)
         ttl_map = {
             "1h": 60,      # 1 minute for hourly
             "6h": 120,     # 2 minutes
@@ -133,7 +170,8 @@ class CachedDashboardService:
             "7d": 600,     # 10 minutes
             "14d": 900,    # 15 minutes
         }
-        self._storage.cache_set(cache_key, data, ttl=ttl_map.get(period, 300))
+        ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
         return data
 
@@ -157,9 +195,9 @@ class CachedDashboardService:
         cache_key = f"dashboard:models:{period}:{limit}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached model usage for {period}")
+                logger.debug(f"[Dashboard] models:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -180,10 +218,11 @@ class CachedDashboardService:
         )
         data = [asdict(m) for m in models]
 
-        # Cache for 10 minutes
-        self._storage.cache_set(cache_key, data, ttl=600)
+        # Cache for 10 minutes (大型系统自动延长)
+        ttl = int(600 * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
-        # Save snapshot
+        # Save snapshot (保留本地快照功能)
         self._storage.save_stats_snapshot("models", {"period": period, "models": data})
 
         return data
@@ -206,17 +245,18 @@ class CachedDashboardService:
         cache_key = f"dashboard:trends:daily:{days}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached daily trends for {days} days")
+                logger.debug(f"[Dashboard] trends:daily:{days} 命中缓存")
                 return cached_data
 
         # Fetch fresh data
         trends = self.service.get_daily_trends(days=days)
         data = [asdict(t) for t in trends]
 
-        # Cache for 15 minutes
-        self._storage.cache_set(cache_key, data, ttl=900)
+        # Cache for 15 minutes (大型系统自动延长)
+        ttl = int(900 * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
         return data
 
@@ -238,16 +278,17 @@ class CachedDashboardService:
         cache_key = f"dashboard:trends:hourly:{hours}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached hourly trends for {hours} hours")
+                logger.debug(f"[Dashboard] trends:hourly:{hours} 命中缓存")
                 return cached_data
 
         # Fetch fresh data
         data = self.service.get_hourly_trends(hours=hours)
 
-        # Cache for 5 minutes
-        self._storage.cache_set(cache_key, data, ttl=300)
+        # Cache for 5 minutes (大型系统自动延长)
+        ttl = int(300 * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
         return data
 
@@ -271,9 +312,9 @@ class CachedDashboardService:
         cache_key = f"dashboard:topusers:{period}:{limit}"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"Using cached top users for {period}")
+                logger.debug(f"[Dashboard] topusers:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -294,8 +335,9 @@ class CachedDashboardService:
         )
         data = [asdict(u) for u in users]
 
-        # Cache for 10 minutes
-        self._storage.cache_set(cache_key, data, ttl=600)
+        # Cache for 10 minutes (大型系统自动延长)
+        ttl = int(600 * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
         return data
 
@@ -312,22 +354,24 @@ class CachedDashboardService:
         cache_key = "dashboard:channels"
 
         if use_cache:
-            cached_data = self._storage.cache_get(cache_key)
+            cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug("Using cached channel status")
+                logger.debug("[Dashboard] channels 命中缓存")
                 return cached_data
 
         # Fetch fresh data
         data = self.service.get_channel_status()
 
-        # Cache for 2 minutes
-        self._storage.cache_set(cache_key, data, ttl=120)
+        # Cache for 2 minutes (大型系统自动延长)
+        ttl = int(120 * _get_ttl_multiplier())
+        self._cache.set(cache_key, data, ttl=ttl)
 
         return data
 
     def invalidate_cache(self, pattern: Optional[str] = None) -> int:
         """
         Invalidate dashboard cache.
+        注意：此方法仅清除本地 SQLite 缓存，Redis 缓存会自动过期。
 
         Args:
             pattern: Optional pattern to match (e.g., 'dashboard:overview')

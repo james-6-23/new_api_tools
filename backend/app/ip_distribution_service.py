@@ -340,41 +340,73 @@ def get_ip_distribution_service() -> IPDistributionService:
 
 async def warmup_ip_distribution():
     """
-    预热 IP 地区分布数据（仅 24h 窗口）
+    预热 IP 地区分布数据（所有窗口：1h/6h/24h/7d）
     
     特点：
     1. 延迟执行，不阻塞系统启动
-    2. 只预热 24h 数据，其他窗口按需查询
+    2. 预热所有窗口数据，用户切换时无需等待
     3. 失败不影响系统运行
     4. 输出详细进度日志
+    
+    缓存存储：使用 CacheManager 统一缓存管理器（SQLite + Redis 混合）
     """
     try:
         service = get_ip_distribution_service()
-        
-        # 检查是否已有缓存
         cache = get_cache_manager()
-        if cache.get("ip_dist:24h"):
-            logger.debug("[IP分布] 24h 缓存已存在，跳过预热")
-            return
         
-        logger.system("[IP分布] 开始预热 24h 数据...")
-        start = time.time()
+        # 需要预热的窗口列表
+        windows_to_warmup = ["1h", "6h", "24h", "7d"]
         
-        # 执行查询（use_cache=False 强制刷新，log_progress=True 输出进度）
-        result = await service.get_distribution(window="24h", use_cache=False, log_progress=True)
+        logger.system(f"[IP分布] 开始预热 {len(windows_to_warmup)} 个窗口数据...")
+        total_start = time.time()
         
-        elapsed = time.time() - start
+        warmed = []
+        skipped = []
+        failed = []
         
-        # 输出预热结果摘要
-        if result:
-            logger.system(
-                f"[IP分布] 预热完成，耗时 {elapsed:.2f}s | "
-                f"IP数: {result.get('total_ips', 0):,} | "
-                f"请求数: {result.get('total_requests', 0):,} | "
-                f"国内: {result.get('domestic_percentage', 0):.1f}%"
-            )
-        else:
-            logger.system(f"[IP分布] 预热完成，耗时 {elapsed:.2f}s (无数据)")
+        for idx, window in enumerate(windows_to_warmup):
+            # 检查是否已有缓存
+            if cache.get(f"ip_dist:{window}"):
+                skipped.append(window)
+                continue
+            
+            try:
+                start = time.time()
+                # 执行查询（use_cache=False 强制刷新）
+                # 只对第一个窗口输出详细进度，避免日志过多
+                log_progress = (idx == 0 and not skipped)
+                result = await service.get_distribution(window=window, use_cache=False, log_progress=log_progress)
+                elapsed = time.time() - start
+                
+                if result:
+                    logger.success(
+                        f"IP分布 {window} 预热完成",
+                        耗时=f"{elapsed:.2f}s",
+                        IP数=result.get('total_ips', 0),
+                        请求数=result.get('total_requests', 0),
+                    )
+                    warmed.append(window)
+                else:
+                    logger.bullet(f"IP分布 {window} 预热完成 (无数据)，耗时 {elapsed:.2f}s")
+                    warmed.append(window)
+                    
+            except Exception as e:
+                logger.warn(f"IP分布 {window} 预热失败: {e}")
+                failed.append(window)
+        
+        total_elapsed = time.time() - total_start
+        
+        # 输出汇总（与排行榜预热格式一致）
+        summary = {}
+        if warmed:
+            summary["成功"] = ", ".join(warmed)
+        if skipped:
+            summary["跳过(已缓存)"] = ", ".join(skipped)
+        if failed:
+            summary["失败"] = ", ".join(failed)
+        summary["总耗时"] = f"{total_elapsed:.1f}s"
+        
+        logger.kvs(summary)
         
     except Exception as e:
-        logger.warning(f"[IP分布] 预热失败: {e}")
+        logger.warn(f"[IP分布] 预热失败: {e}")
