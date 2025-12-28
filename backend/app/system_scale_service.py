@@ -281,7 +281,7 @@ def get_detected_settings() -> ScaleSettings:
     if _detected_settings is None:
         service = get_scale_service()
         _detected_settings = service.get_current_settings()
-        logger.system(f"系统规模检测完成: {_detected_settings.description}")
+        logger.success(f"系统规模检测完成: {_detected_settings.description}")
     return _detected_settings
 
 

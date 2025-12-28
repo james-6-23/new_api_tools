@@ -152,12 +152,12 @@ class CacheManager:
             )
             self._redis.ping()
             self._redis_available = True
-            logger.system(f"[缓存] Redis 连接成功: {redis_host}")
+            logger.success("Redis 连接成功", host=redis_host)
         except ImportError:
-            logger.warning("[缓存] redis 库未安装，使用纯 SQLite 模式")
+            logger.bullet("redis 库未安装，使用纯 SQLite 模式")
             self._redis_available = False
         except Exception as e:
-            logger.warning(f"[缓存] Redis 连接失败: {e}，降级到 SQLite")
+            logger.warn(f"Redis 连接失败: {e}，降级到 SQLite")
             self._redis_available = False
     
     @property
@@ -469,11 +469,11 @@ class CacheManager:
                             pass
         
         except Exception as e:
-            logger.warning(f"[缓存] 恢复到 Redis 失败: {e}")
-        
+            logger.warn(f"恢复到 Redis 失败: {e}")
+
         if restored > 0:
-            logger.system(f"[缓存] 从 SQLite 恢复 {restored} 条数据到 Redis")
-        
+            logger.success("从 SQLite 恢复缓存到 Redis", count=restored)
+
         return restored
 
     # ==================== 清理和统计 ====================

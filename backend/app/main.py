@@ -138,16 +138,15 @@ async def lifespan(app: FastAPI):
             result = service.detect_scale()
             metrics = result.get("metrics", {})
             settings = result.get("settings", {})
-            logger.system(
-                f"系统规模检测完成: {settings.get('description', '未知')} | "
-                f"用户={metrics.get('total_users', 0)} | "
-                f"24h活跃={metrics.get('active_users_24h', 0)} | "
-                f"24h日志={metrics.get('logs_24h', 0):,} | "
-                f"RPM={metrics.get('rpm_avg', 0):.1f} | "
-                f"推荐刷新间隔={settings.get('frontend_refresh_interval', 60)}s"
-            )
+            logger.stats_box(f"系统规模: {settings.get('description', '未知')}", {
+                "总用户": metrics.get('total_users', 0),
+                "24h活跃": metrics.get('active_users_24h', 0),
+                "24h日志": metrics.get('logs_24h', 0),
+                "RPM": f"{metrics.get('rpm_avg', 0):.1f}",
+                "刷新间隔": f"{settings.get('frontend_refresh_interval', 60)}s",
+            })
         except Exception as e:
-            logger.warning(f"系统规模检测失败: {e}", category="系统")
+            logger.fail(f"系统规模检测失败", error=str(e))
     except Exception as e:
         logger.warning(f"数据库初始化失败: {e}", category="数据库")
 
@@ -292,7 +291,7 @@ async def background_log_sync():
 
     # 启动后等待 10 秒再开始同步
     await asyncio.sleep(10)
-    logger.system("后台日志同步任务已启动")
+    logger.success("后台日志同步任务已启动", category="任务")
 
     while True:
         try:
@@ -389,9 +388,7 @@ async def background_cache_warmup():
         else:
             logger.warning("索引创建超时，继续预热（可能较慢）")
     
-    logger.system("=" * 50)
-    logger.system("缓存恢复任务启动")
-    logger.system("=" * 50)
+    logger.banner("🚀 缓存恢复任务启动")
 
     _set_warmup_status("initializing", 0, "正在初始化缓存...")
 
@@ -399,27 +396,31 @@ async def background_cache_warmup():
     cache = get_cache_manager()
     
     # 阶段1：从 SQLite 恢复到 Redis（如果 Redis 可用）
+    logger.phase(1, "从 SQLite 恢复缓存到 Redis")
     if cache.redis_available:
-        logger.system("[阶段1] 从 SQLite 恢复缓存到 Redis")
         restored = cache.restore_to_redis()
         if restored > 0:
-            logger.system(f"[阶段1] 恢复完成: {restored} 条数据")
+            logger.success(f"恢复完成", count=restored)
+        else:
+            logger.bullet("无缓存数据需要恢复")
     else:
-        logger.system("[阶段1] Redis 未配置，使用纯 SQLite 模式")
+        logger.bullet("Redis 未配置，使用纯 SQLite 模式")
     
     # 阶段2：检查缓存有效性
+    logger.phase(2, "检查缓存有效性")
     _set_warmup_status("initializing", 20, "正在检查缓存有效性...")
-    
+
     windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
     cached_windows = cache.get_cached_windows()
     missing_windows = [w for w in windows if w not in cached_windows]
-    
+
     if not missing_windows:
         # 所有缓存都有效，直接完成
         elapsed = time.time() - warmup_start_time
         _set_warmup_status("ready", 100, f"缓存恢复完成，耗时 {elapsed:.2f}s")
-        logger.system(f"[完成] 所有缓存有效，无需预热，耗时 {elapsed:.2f}s")
-        logger.system("=" * 50)
+        logger.success("所有缓存有效，无需预热")
+        logger.timer("总耗时", elapsed)
+        logger.divider("═")
         
         # 延迟预热 IP 地区分布（低优先级）
         await asyncio.sleep(10)
@@ -433,9 +434,9 @@ async def background_cache_warmup():
         await _background_refresh_loop(cache)
         return
     
-    logger.system(f"[阶段2] 已缓存: {cached_windows or '无'}")
-    logger.system(f"[阶段2] 需预热: {missing_windows}")
-    
+    logger.bullet(f"已缓存: {cached_windows or '无'}")
+    logger.bullet(f"需预热: {missing_windows}")
+
     # 检测系统规模
     scale_service = get_scale_service()
     scale_result = scale_service.detect_scale()
@@ -443,12 +444,14 @@ async def background_cache_warmup():
     metrics = scale_result.get("metrics", {})
 
     # 输出系统规模详情
-    logger.system(f"[规模检测] 系统规模: {scale.value}")
-    logger.system(f"[规模检测] 总用户数: {metrics.get('total_users', 0):,}")
-    logger.system(f"[规模检测] 活跃用户(24h): {metrics.get('active_users_24h', 0):,}")
-    logger.system(f"[规模检测] 日志数(24h): {metrics.get('logs_24h', 0):,}")
-    logger.system(f"[规模检测] 总日志数: {metrics.get('total_logs', 0):,}")
-    logger.system(f"[规模检测] 平均 RPM: {metrics.get('rpm_avg', 0):.1f}")
+    logger.stats_box("系统规模检测", {
+        "系统规模": scale.value,
+        "总用户数": metrics.get('total_users', 0),
+        "活跃用户(24h)": metrics.get('active_users_24h', 0),
+        "日志数(24h)": metrics.get('logs_24h', 0),
+        "总日志数": metrics.get('total_logs', 0),
+        "平均 RPM": f"{metrics.get('rpm_avg', 0):.1f}",
+    })
 
     # 获取预热策略
     strategy = WARMUP_STRATEGY.get(scale.value, WARMUP_STRATEGY["medium"])
@@ -500,13 +503,14 @@ async def background_cache_warmup():
     estimated_records = total_to_warm * 50
 
     # === 阶段3：仅预热缺失的窗口 ===
-    logger.system("-" * 50)
-    logger.system("[阶段3] 预热缺失的窗口")
-    logger.system(f"[阶段3] 待预热窗口数: {total_to_warm} 个")
-    logger.system(f"[阶段3] 预计扫描日志: {total_logs_to_scan:,} 条 (使用索引聚合，不加载全量数据)")
-    logger.system(f"[阶段3] 预计缓存数据: {estimated_records} 条 (每窗口 Top 50 用户)")
-    logger.system(f"[阶段3] 查询延迟: {query_delay}s/窗口")
-    logger.system(f"[阶段3] 预计耗时: {estimated_total_time:.0f}~{estimated_total_time * 1.5:.0f} 秒")
+    logger.phase(3, "预热缺失的窗口")
+    logger.kvs({
+        "待预热窗口": f"{total_to_warm} 个",
+        "预计扫描日志": f"{total_logs_to_scan:,} 条",
+        "预计缓存数据": f"{estimated_records} 条",
+        "查询延迟": f"{query_delay}s/窗口",
+        "预计耗时": f"{estimated_total_time:.0f}~{estimated_total_time * 1.5:.0f} 秒",
+    })
     _set_warmup_status("initializing", 30, f"正在预热 {total_to_warm} 个窗口，预计扫描 {total_logs_to_scan:,} 条日志...")
 
     from .risk_monitoring_service import get_risk_monitoring_service
@@ -533,7 +537,7 @@ async def background_cache_warmup():
             _set_warmup_status("initializing", progress, f"正在预热: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s")
         
         window_start = time.time()
-        logger.system(f"[预热] 开始预热 {window} 窗口 ({idx + 1}/{total_to_warm})，预计扫描 {window_estimated_logs:,} 条日志...")
+        logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口，预计扫描 {window_estimated_logs:,} 条日志...")
         
         try:
             # 查询 PostgreSQL（只读）
@@ -549,40 +553,43 @@ async def background_cache_warmup():
             
             window_elapsed = time.time() - window_start
             window_times.append(window_elapsed)  # 记录实际耗时
-            
+
             if data and window in data.get("windows", {}):
                 result_count = len(data["windows"][window])
                 warmed.append(window)
-                logger.system(f"[预热] {window} 完成，返回 {result_count} 条数据，耗时 {window_elapsed:.2f}s")
+                logger.success(f"{window} 预热完成", 数据=result_count, 耗时=f"{window_elapsed:.2f}s")
             else:
                 failed.append(window)
-                logger.warning(f"[预热] {window} 无数据，耗时 {window_elapsed:.2f}s")
-                
+                logger.warn(f"{window} 无数据", 耗时=f"{window_elapsed:.2f}s")
+
         except Exception as e:
             window_elapsed = time.time() - window_start
             window_times.append(window_elapsed)  # 即使失败也记录耗时
             failed.append(window)
-            logger.warning(f"[预热] {window} 失败: {e}，耗时 {window_elapsed:.2f}s")
-        
+            logger.fail(f"{window} 预热失败", error=str(e), 耗时=f"{window_elapsed:.2f}s")
+
         # 延迟，避免数据库压力
         if query_delay > 0 and idx < total_to_warm - 1:
-            logger.system(f"[预热] 等待 {query_delay}s 后继续下一个窗口...")
             await asyncio.sleep(query_delay)
 
-    # 完成
+    # 完成汇总
     total_elapsed = time.time() - warmup_start_time
     total_cached_records = len(warmed) * 50  # 每个窗口 50 条
-    
+
+    logger.divider("═")
     if failed:
         _set_warmup_status("ready", 100, f"预热完成（部分失败），耗时 {total_elapsed:.1f}s")
-        logger.system(f"[完成] 成功: {warmed}, 失败: {failed}")
+        logger.bullet(f"成功: {warmed}")
+        logger.bullet(f"失败: {failed}")
     else:
         _set_warmup_status("ready", 100, f"预热完成，耗时 {total_elapsed:.1f}s")
-        logger.system(f"[完成] 全部成功: {warmed}")
-    
-    logger.system(f"[完成] 已缓存数据: {total_cached_records} 条 ({len(warmed)} 个窗口 × 50 用户)")
-    logger.system(f"[完成] 总耗时: {total_elapsed:.1f}s")
-    logger.system("=" * 50)
+        logger.success(f"全部窗口预热完成", 窗口=warmed)
+
+    logger.kvs({
+        "已缓存数据": f"{total_cached_records} 条 ({len(warmed)} 窗口 × 50 用户)",
+        "总耗时": f"{total_elapsed:.1f}s",
+    })
+    logger.banner("✅ 缓存预热完成")
 
     # === 阶段4：延迟预热 IP 地区分布（低优先级）===
     # 等待 10 秒后执行，不阻塞主预热流程
@@ -1233,7 +1240,7 @@ async def background_ai_auto_ban_scan():
 
     # 启动后等待 30 秒再开始
     await asyncio.sleep(30)
-    logger.system("AI 自动封禁后台任务已启动")
+    logger.success("AI 自动封禁后台任务已启动", category="任务")
 
     while True:
         try:
@@ -1304,7 +1311,7 @@ async def background_geoip_update():
         except Exception as e:
             logger.error(f"[GeoIP] 数据库下载异常: {e}")
     else:
-        logger.system("[GeoIP] 数据库已就绪，后台更新任务已启动")
+        logger.success("GeoIP 数据库已就绪，后台更新任务已启动", category="任务")
 
     while True:
         try:

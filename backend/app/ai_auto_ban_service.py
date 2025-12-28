@@ -221,7 +221,7 @@ class AIAutoBanService:
                 stored_config["whitelist_initialized"] = True
                 self._storage.set_config(AI_CONFIG_KEY, stored_config)
                 
-                logger.system(f"AI封禁白名单已初始化，添加 {len(admin_ids)} 个管理员用户")
+                logger.success(f"AI封禁白名单已初始化", 管理员数=len(admin_ids))
             else:
                 # 只标记已初始化
                 stored_config["whitelist_initialized"] = True

@@ -37,6 +37,9 @@ class LogLevel(Enum):
 class Colors:
     RESET = "\033[0m"
     BOLD = "\033[1m"
+    DIM = "\033[2m"
+    ITALIC = "\033[3m"
+    UNDERLINE = "\033[4m"
 
     # 前景色
     BLACK = "\033[30m"
@@ -47,6 +50,7 @@ class Colors:
     MAGENTA = "\033[35m"
     CYAN = "\033[36m"
     WHITE = "\033[37m"
+    GRAY = "\033[90m"
 
     # 亮色
     BRIGHT_RED = "\033[91m"
@@ -55,11 +59,16 @@ class Colors:
     BRIGHT_BLUE = "\033[94m"
     BRIGHT_MAGENTA = "\033[95m"
     BRIGHT_CYAN = "\033[96m"
+    BRIGHT_WHITE = "\033[97m"
 
     # 背景色
     BG_RED = "\033[41m"
     BG_GREEN = "\033[42m"
     BG_YELLOW = "\033[43m"
+    BG_BLUE = "\033[44m"
+    BG_MAGENTA = "\033[45m"
+    BG_CYAN = "\033[46m"
+    BG_GRAY = "\033[100m"
 
 
 class LogFormatter(logging.Formatter):
@@ -289,6 +298,285 @@ class AppLogger:
     def task_error(self, message: str, **kwargs):
         """任务错误日志"""
         self.error(message, category="任务", **kwargs)
+
+    # ========== 格式化输出方法 ==========
+
+    def _colorize(self, text: str, color: str) -> str:
+        """为文本添加颜色"""
+        if sys.stdout.isatty():
+            return f"{color}{text}{Colors.RESET}"
+        return text
+
+    def _format_value(self, value: Any) -> str:
+        """格式化并高亮值"""
+        if isinstance(value, bool):
+            if value:
+                return self._colorize("✓ 是", Colors.BRIGHT_GREEN)
+            else:
+                return self._colorize("✗ 否", Colors.BRIGHT_RED)
+        elif isinstance(value, (int, float)):
+            # 数字使用青色高亮
+            if isinstance(value, float):
+                formatted = f"{value:,.2f}"
+            else:
+                formatted = f"{value:,}"
+            return self._colorize(formatted, Colors.BRIGHT_CYAN)
+        elif isinstance(value, str):
+            # 特殊状态关键词高亮
+            lower = value.lower()
+            if lower in ('success', 'ok', '成功', '完成', 'ready', 'active'):
+                return self._colorize(value, Colors.BRIGHT_GREEN)
+            elif lower in ('error', 'fail', 'failed', '失败', '错误'):
+                return self._colorize(value, Colors.BRIGHT_RED)
+            elif lower in ('warning', 'warn', '警告', 'pending', '等待'):
+                return self._colorize(value, Colors.BRIGHT_YELLOW)
+            elif lower in ('skip', 'skipped', '跳过', 'none', '无'):
+                return self._colorize(value, Colors.GRAY)
+            return self._colorize(value, Colors.BRIGHT_WHITE)
+        elif isinstance(value, list):
+            if not value:
+                return self._colorize("无", Colors.GRAY)
+            items = ", ".join(str(v) for v in value)
+            return self._colorize(f"[{items}]", Colors.BRIGHT_CYAN)
+        return str(value)
+
+    def banner(self, title: str, char: str = "=", width: int = 60, category: str = "系统"):
+        """
+        打印大标题横幅
+
+        示例输出:
+        ════════════════════════════════════════════════════════════
+          🚀 缓存恢复任务启动
+        ════════════════════════════════════════════════════════════
+        """
+        line = char * width
+        colored_line = self._colorize(line, Colors.BRIGHT_CYAN)
+        colored_title = self._colorize(f"  {title}", Colors.BOLD + Colors.BRIGHT_WHITE)
+
+        self._logger.log(logging.INFO, "", extra={"category": category})
+        self._logger.log(logging.INFO, colored_line, extra={"category": category})
+        self._logger.log(logging.INFO, colored_title, extra={"category": category})
+        self._logger.log(logging.INFO, colored_line, extra={"category": category})
+
+    def section(self, title: str, char: str = "-", width: int = 50, category: str = "系统"):
+        """
+        打印小节标题
+
+        示例输出:
+        ────────────────────────────────────────────────────
+        📋 阶段3: 预热缺失的窗口
+        ────────────────────────────────────────────────────
+        """
+        line = char * width
+        colored_line = self._colorize(line, Colors.GRAY)
+        colored_title = self._colorize(f"📋 {title}", Colors.BOLD + Colors.BRIGHT_YELLOW)
+
+        self._logger.log(logging.INFO, colored_line, extra={"category": category})
+        self._logger.log(logging.INFO, colored_title, extra={"category": category})
+
+    def divider(self, char: str = "─", width: int = 50, category: str = "系统"):
+        """打印分隔线"""
+        line = self._colorize(char * width, Colors.GRAY)
+        self._logger.log(logging.INFO, line, extra={"category": category})
+
+    def kv(self, label: str, value: Any, category: str = "系统", prefix: str = "  "):
+        """
+        打印带高亮的键值对
+
+        示例输出:
+          总用户数: 6,068
+          活跃用户(24h): 313
+        """
+        formatted_value = self._format_value(value)
+        colored_label = self._colorize(f"{prefix}{label}:", Colors.GRAY)
+        message = f"{colored_label} {formatted_value}"
+        self._logger.log(logging.INFO, message, extra={"category": category})
+
+    def kvs(self, data: dict, category: str = "系统", prefix: str = "  "):
+        """
+        批量打印键值对
+        """
+        for key, value in data.items():
+            self.kv(key, value, category, prefix)
+
+    def progress(
+        self,
+        current: int,
+        total: int,
+        label: str = "",
+        category: str = "系统",
+        width: int = 30
+    ):
+        """
+        打印进度条
+
+        示例输出:
+          预热进度: [████████████░░░░░░░░░░░░░░░░░░] 40% (2/5)
+        """
+        if total <= 0:
+            return
+
+        ratio = current / total
+        filled = int(width * ratio)
+        empty = width - filled
+
+        bar = "█" * filled + "░" * empty
+        percent = int(ratio * 100)
+
+        colored_bar = self._colorize(bar, Colors.BRIGHT_CYAN)
+        colored_percent = self._colorize(f"{percent}%", Colors.BRIGHT_GREEN if percent == 100 else Colors.BRIGHT_YELLOW)
+        colored_count = self._colorize(f"({current}/{total})", Colors.GRAY)
+
+        if label:
+            message = f"  {label}: [{colored_bar}] {colored_percent} {colored_count}"
+        else:
+            message = f"  [{colored_bar}] {colored_percent} {colored_count}"
+
+        self._logger.log(logging.INFO, message, extra={"category": category})
+
+    def step(self, current: int, total: int, message: str, category: str = "系统"):
+        """
+        打印步骤进度
+
+        示例输出:
+          [2/5] 预热 3h 窗口...
+        """
+        step_indicator = self._colorize(f"[{current}/{total}]", Colors.BRIGHT_CYAN)
+        full_message = f"  {step_indicator} {message}"
+        self._logger.log(logging.INFO, full_message, extra={"category": category})
+
+    def success(self, message: str, category: str = "系统", **kwargs):
+        """
+        打印成功消息
+
+        示例输出:
+          ✓ 缓存预热完成
+        """
+        icon = self._colorize("✓", Colors.BRIGHT_GREEN)
+        colored_msg = self._colorize(message, Colors.BRIGHT_GREEN)
+        full_message = f"  {icon} {colored_msg}"
+        if kwargs:
+            details = " | ".join(f"{k}={self._format_value(v)}" for k, v in kwargs.items())
+            full_message += f" | {details}"
+        self._logger.log(logging.INFO, full_message, extra={"category": category})
+
+    def fail(self, message: str, category: str = "系统", **kwargs):
+        """
+        打印失败消息
+
+        示例输出:
+          ✗ 缓存预热失败
+        """
+        icon = self._colorize("✗", Colors.BRIGHT_RED)
+        colored_msg = self._colorize(message, Colors.BRIGHT_RED)
+        full_message = f"  {icon} {colored_msg}"
+        if kwargs:
+            details = " | ".join(f"{k}={self._format_value(v)}" for k, v in kwargs.items())
+            full_message += f" | {details}"
+        self._logger.log(logging.ERROR, full_message, extra={"category": category})
+
+    def bullet(self, message: str, category: str = "系统", indent: int = 1):
+        """
+        打印项目符号列表项
+
+        示例输出:
+          • 已缓存: 1h, 3h, 6h
+          • 需预热: 12h, 24h
+        """
+        prefix = "  " * indent
+        bullet = self._colorize("•", Colors.BRIGHT_CYAN)
+        full_message = f"{prefix}{bullet} {message}"
+        self._logger.log(logging.INFO, full_message, extra={"category": category})
+
+    def table_row(self, cols: list, widths: list = None, category: str = "系统"):
+        """
+        打印表格行
+
+        示例:
+          | 窗口  | 日志数   | 耗时   | 状态   |
+          | 1h    | 926     | 0.01s | 完成   |
+        """
+        if widths is None:
+            widths = [12] * len(cols)
+
+        cells = []
+        for i, col in enumerate(cols):
+            width = widths[i] if i < len(widths) else 12
+            # 计算实际显示宽度（考虑中文字符）
+            display_width = sum(2 if '\u4e00' <= c <= '\u9fff' else 1 for c in str(col))
+            padding = width - display_width
+            cells.append(f"{col}{' ' * max(0, padding)}")
+
+        row = self._colorize("│ ", Colors.GRAY) + self._colorize(" │ ", Colors.GRAY).join(cells) + self._colorize(" │", Colors.GRAY)
+        self._logger.log(logging.INFO, f"  {row}", extra={"category": category})
+
+    def stats_box(self, title: str, stats: dict, category: str = "系统"):
+        """
+        打印统计信息框
+
+        示例输出:
+        ┌─────────────────────────────────────┐
+        │  📊 系统规模检测结果                  │
+        ├─────────────────────────────────────┤
+        │  系统规模: 中型系统                   │
+        │  总用户数: 6,068                     │
+        │  活跃用户: 313                       │
+        └─────────────────────────────────────┘
+        """
+        box_width = 45
+
+        # 顶边
+        top = self._colorize(f"  ┌{'─' * box_width}┐", Colors.GRAY)
+        self._logger.log(logging.INFO, top, extra={"category": category})
+
+        # 标题行
+        title_text = f"  📊 {title}"
+        title_padding = box_width - len(title_text) - 2
+        title_line = self._colorize("  │", Colors.GRAY) + self._colorize(title_text, Colors.BOLD + Colors.BRIGHT_WHITE) + " " * max(0, title_padding) + self._colorize("│", Colors.GRAY)
+        self._logger.log(logging.INFO, title_line, extra={"category": category})
+
+        # 分隔线
+        sep = self._colorize(f"  ├{'─' * box_width}┤", Colors.GRAY)
+        self._logger.log(logging.INFO, sep, extra={"category": category})
+
+        # 内容行
+        for key, value in stats.items():
+            formatted_value = self._format_value(value)
+            # 去掉 ANSI 颜色码计算实际宽度
+            import re
+            plain_value = re.sub(r'\033\[[0-9;]*m', '', formatted_value)
+            content = f"  {key}: {formatted_value}"
+            plain_content = f"  {key}: {plain_value}"
+            padding = box_width - len(plain_content) - 2
+            content_line = self._colorize("  │", Colors.GRAY) + content + " " * max(0, padding) + self._colorize("│", Colors.GRAY)
+            self._logger.log(logging.INFO, content_line, extra={"category": category})
+
+        # 底边
+        bottom = self._colorize(f"  └{'─' * box_width}┘", Colors.GRAY)
+        self._logger.log(logging.INFO, bottom, extra={"category": category})
+
+    def phase(self, phase_num: int, title: str, category: str = "系统"):
+        """
+        打印阶段标题
+
+        示例输出:
+        ▸ 阶段 1: 从 SQLite 恢复缓存到 Redis
+        """
+        phase_label = self._colorize(f"▸ 阶段 {phase_num}:", Colors.BOLD + Colors.BRIGHT_MAGENTA)
+        colored_title = self._colorize(title, Colors.BRIGHT_WHITE)
+        self._logger.log(logging.INFO, f"{phase_label} {colored_title}", extra={"category": category})
+
+    def timer(self, label: str, seconds: float, category: str = "系统"):
+        """
+        打印计时信息
+
+        示例输出:
+          ⏱ 预热完成: 12.7s
+        """
+        icon = self._colorize("⏱", Colors.BRIGHT_YELLOW)
+        time_str = self._colorize(f"{seconds:.2f}s", Colors.BRIGHT_CYAN)
+        message = f"  {icon} {label}: {time_str}"
+        self._logger.log(logging.INFO, message, extra={"category": category})
 
     # ========== 业务场景快捷方法 ==========
 

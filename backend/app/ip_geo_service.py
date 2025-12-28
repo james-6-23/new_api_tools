@@ -139,21 +139,21 @@ class IPGeoService:
         if os.path.exists(GEOIP_CITY_DB):
             try:
                 self._city_reader = geoip2.database.Reader(GEOIP_CITY_DB)
-                logger.info(f"已加载 GeoLite2-City 数据库: {GEOIP_CITY_DB}")
+                logger.success(f"GeoLite2-City 数据库已加载", path=GEOIP_CITY_DB)
             except Exception as e:
-                logger.error(f"加载 GeoLite2-City 数据库失败: {e}")
+                logger.fail(f"GeoLite2-City 数据库加载失败", error=str(e))
         else:
-            logger.warning(f"GeoLite2-City 数据库不存在: {GEOIP_CITY_DB}")
-        
+            logger.warn(f"GeoLite2-City 数据库不存在: {GEOIP_CITY_DB}")
+
         # 尝试加载 ASN 数据库
         if os.path.exists(GEOIP_ASN_DB):
             try:
                 self._asn_reader = geoip2.database.Reader(GEOIP_ASN_DB)
-                logger.info(f"已加载 GeoLite2-ASN 数据库: {GEOIP_ASN_DB}")
+                logger.success(f"GeoLite2-ASN 数据库已加载", path=GEOIP_ASN_DB)
             except Exception as e:
-                logger.error(f"加载 GeoLite2-ASN 数据库失败: {e}")
+                logger.fail(f"GeoLite2-ASN 数据库加载失败", error=str(e))
         else:
-            logger.warning(f"GeoLite2-ASN 数据库不存在: {GEOIP_ASN_DB}")
+            logger.warn(f"GeoLite2-ASN 数据库不存在: {GEOIP_ASN_DB}")
         
         self._db_available = self._city_reader is not None
         
