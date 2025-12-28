@@ -313,16 +313,18 @@ class DashboardService:
         Returns:
             List of DailyTrend for each day.
         """
-        # Ensure we include today
-        now = datetime.now()
-        date_list = [(now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
-        date_list.reverse()  # Sort ascending
-        
-        # Calculate start timestamp from the first date in our list (at 00:00:00)
-        start_date_str = date_list[0]
-        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
-        start_time = int(start_dt.timestamp())
+        # 使用滚动时间窗口，与 get_usage_statistics 保持一致
         end_time = int(time.time())
+        start_time = end_time - (days * 24 * 3600)
+        
+        # 生成日期列表（从 start_time 所在日期到今天）
+        now = datetime.now()
+        start_dt = datetime.fromtimestamp(start_time)
+        date_list = []
+        current_dt = start_dt
+        while current_dt.date() <= now.date():
+            date_list.append(current_dt.strftime("%Y-%m-%d"))
+            current_dt += timedelta(days=1)
 
         # 根据数据库类型选择正确的日期函数
         from .database import DatabaseEngine
