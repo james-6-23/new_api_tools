@@ -76,7 +76,9 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 | **基础配置** | | |
 | `FRONTEND_PORT` | 服务访问端口 | `1145` |
 | `ADMIN_PASSWORD` | 管理后台登录密码 | `123456` |
+| `API_KEY` | 后端 API 密钥（可选） | - |
 | `JWT_SECRET` | JWT 签名密钥 | `random_string` |
+| `JWT_EXPIRE_HOURS` | JWT 过期时间（小时） | `24` |
 | **数据库配置** | | |
 | `DB_ENGINE` | 数据库类型 | `postgres` 或 `mysql` |
 | `DB_DNS` | 数据库地址 (Docker网络名或IP) | `new-api-db` |
@@ -84,6 +86,11 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 | `DB_NAME` | 数据库名称 | `new-api` |
 | `DB_USER` | 数据库用户名 | `postgres` |
 | `DB_PASSWORD` | 数据库密码 | - |
+| **Redis 缓存配置** | | |
+| `REDIS_HOST` | Redis 服务地址 | `redis`（Docker内部） |
+| `REDIS_PORT` | Redis 端口 | `6379` |
+| `REDIS_PASSWORD` | Redis 密码（可选） | 留空或设置密码 |
+| `REDIS_DB` | Redis 数据库编号 | `0` |
 | **Docker配置** | | |
 | `NEWAPI_NETWORK` | NewAPI 所在的 Docker 网络名称 | `new-api_default` |
 
