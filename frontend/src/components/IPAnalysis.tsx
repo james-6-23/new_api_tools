@@ -456,36 +456,11 @@ export function IPAnalysis() {
       ])
     )
 
-    // 转换数据为 ECharts 格式，Top 5 添加特殊样式
-    const mapData = data.by_country.map((item, index) => {
-      const name = countryCodeToName[item.country_code] || item.country
-      const isTop5 = index < 5
-      return {
-        name,
-        value: item.request_count,
-        // Top 5 显示标签和特殊边框
-        label: isTop5 ? {
-          show: true,
-          formatter: `{top|#${index + 1}}`,
-          rich: {
-            top: {
-              backgroundColor: isDarkMode ? '#fbbf24' : '#f59e0b',
-              color: isDarkMode ? '#1e293b' : '#fff',
-              padding: [2, 6],
-              borderRadius: 10,
-              fontSize: 10,
-              fontWeight: 'bold',
-            }
-          }
-        } : undefined,
-        itemStyle: isTop5 ? {
-          borderColor: isDarkMode ? '#fbbf24' : '#f59e0b',
-          borderWidth: 2,
-          shadowColor: isDarkMode ? 'rgba(251, 191, 36, 0.5)' : 'rgba(245, 158, 11, 0.5)',
-          shadowBlur: 10,
-        } : undefined,
-      }
-    })
+    // 转换数据为 ECharts 格式
+    const mapData = data.by_country.map(item => ({
+      name: countryCodeToName[item.country_code] || item.country,
+      value: item.request_count,
+    }))
 
     // 主题相关配色
     const themeColors = isDarkMode ? {
@@ -613,36 +588,11 @@ export function IPAnalysis() {
       ])
     )
 
-    // 转换数据为 ECharts 格式，Top 5 添加特殊样式
-    const mapData = data.by_province.map((item, index) => {
-      const name = provinceNameMap[item.region || ''] || item.region
-      const isTop5 = index < 5
-      return {
-        name,
-        value: item.request_count,
-        // Top 5 显示标签和特殊边框
-        label: isTop5 ? {
-          show: true,
-          formatter: `{top|#${index + 1}}`,
-          rich: {
-            top: {
-              backgroundColor: isDarkMode ? '#fbbf24' : '#f59e0b',
-              color: isDarkMode ? '#1e293b' : '#fff',
-              padding: [2, 6],
-              borderRadius: 10,
-              fontSize: 10,
-              fontWeight: 'bold',
-            }
-          }
-        } : undefined,
-        itemStyle: isTop5 ? {
-          borderColor: isDarkMode ? '#fbbf24' : '#f59e0b',
-          borderWidth: 2,
-          shadowColor: isDarkMode ? 'rgba(251, 191, 36, 0.5)' : 'rgba(245, 158, 11, 0.5)',
-          shadowBlur: 10,
-        } : undefined,
-      }
-    })
+    // 转换数据为 ECharts 格式
+    const mapData = data.by_province.map(item => ({
+      name: provinceNameMap[item.region || ''] || item.region,
+      value: item.request_count,
+    }))
 
     // 主题相关配色
     const themeColors = isDarkMode ? {
@@ -936,11 +886,6 @@ export function IPAnalysis() {
                 style={{ height: '450px', width: '100%' }}
                 opts={{ renderer: 'canvas' }}
               />
-              {/* 热点图例 */}
-              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/80 backdrop-blur-sm border shadow-sm text-xs">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold">#1</span>
-                <span className="text-muted-foreground">Top 5 流量排名</span>
-              </div>
             </div>
           ) : (
             <div className="h-[450px] flex items-center justify-center text-muted-foreground bg-muted/20 rounded-b-lg">
