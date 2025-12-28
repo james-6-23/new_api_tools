@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, User } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -3770,156 +3770,310 @@ export function RealtimeRanking() {
             </DialogContent>
           </Dialog>
 
-          {/* 审查记录详情弹窗 */}
+          {/* 审查记录详情弹窗 - Terminal Intelligence 风格 */}
           <Dialog open={!!selectedAuditLog} onOpenChange={(open) => !open && setSelectedAuditLog(null)}>
-            <DialogContent className="max-w-3xl p-0 overflow-hidden border-0 rounded-2xl shadow-2xl bg-white">
+            <DialogContent className="max-w-4xl p-0 overflow-hidden border border-slate-800/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950">
               {selectedAuditLog && (
                 <>
-                  {/* Header */}
-                  <div className={cn(
-                    "p-6 border-b",
-                    selectedAuditLog.status === 'success' ? "bg-emerald-50" :
-                      selectedAuditLog.status === 'partial' ? "bg-amber-50" :
-                        selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-50" :
-                          "bg-slate-50"
-                  )}>
-                    <DialogHeader>
-                      <DialogTitle className="flex items-center gap-3 text-xl">
-                        <div className={cn(
-                          "p-2.5 rounded-xl",
-                          selectedAuditLog.status === 'success' ? "bg-emerald-100 text-emerald-600" :
-                            selectedAuditLog.status === 'partial' ? "bg-amber-100 text-amber-600" :
-                              selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-100 text-red-600" :
-                                "bg-slate-100 text-slate-600"
-                        )}>
-                          <Activity className="h-5 w-5" />
+                  {/* Header - 深色渐变带扫描线效果 */}
+                  <div className="relative overflow-hidden">
+                    {/* 背景网格图案 */}
+                    <div className="absolute inset-0 opacity-5" style={{
+                      backgroundImage: `linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px)`,
+                      backgroundSize: '20px 20px'
+                    }} />
+                    {/* 状态色渐变光晕 */}
+                    <div className={cn(
+                      "absolute -top-20 -right-20 w-60 h-60 rounded-full blur-3xl opacity-20",
+                      selectedAuditLog.status === 'success' ? "bg-emerald-500" :
+                        selectedAuditLog.status === 'partial' ? "bg-amber-500" :
+                          selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-500" :
+                            "bg-blue-500"
+                    )} />
+
+                    <div className="relative p-6 pb-5">
+                      <DialogHeader>
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-4">
+                            {/* 状态指示器 - 脉冲动画 */}
+                            <div className={cn(
+                              "relative p-3 rounded-xl border",
+                              selectedAuditLog.status === 'success' ? "bg-emerald-500/10 border-emerald-500/30" :
+                                selectedAuditLog.status === 'partial' ? "bg-amber-500/10 border-amber-500/30" :
+                                  selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-500/10 border-red-500/30" :
+                                    "bg-blue-500/10 border-blue-500/30"
+                            )}>
+                              <Activity className={cn(
+                                "h-6 w-6",
+                                selectedAuditLog.status === 'success' ? "text-emerald-400" :
+                                  selectedAuditLog.status === 'partial' ? "text-amber-400" :
+                                    selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "text-red-400" :
+                                      "text-blue-400"
+                              )} />
+                              {/* 脉冲环 */}
+                              <div className={cn(
+                                "absolute inset-0 rounded-xl animate-ping opacity-20",
+                                selectedAuditLog.status === 'success' ? "bg-emerald-500" :
+                                  selectedAuditLog.status === 'partial' ? "bg-amber-500" :
+                                    selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "bg-red-500" :
+                                      "bg-blue-500"
+                              )} style={{ animationDuration: '2s' }} />
+                            </div>
+                            <div>
+                              <DialogTitle className="text-xl font-bold text-white tracking-tight">
+                                AI 审查报告
+                              </DialogTitle>
+                              <DialogDescription className="mt-1.5 flex items-center gap-3 text-slate-400">
+                                <code className="font-mono text-xs bg-slate-800/80 px-2 py-1 rounded border border-slate-700/50 text-cyan-400">
+                                  #{selectedAuditLog.scan_id}
+                                </code>
+                                <span className="text-xs">{new Date(selectedAuditLog.created_at * 1000).toLocaleString('zh-CN')}</span>
+                              </DialogDescription>
+                            </div>
+                          </div>
+                          {/* 状态徽章 */}
+                          <div className="flex items-center gap-2">
+                            <Badge className={cn(
+                              "px-3 py-1 text-xs font-medium border",
+                              selectedAuditLog.dry_run
+                                ? "bg-violet-500/10 text-violet-400 border-violet-500/30"
+                                : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                            )}>
+                              {selectedAuditLog.dry_run ? '◉ 试运行' : '● 正式运行'}
+                            </Badge>
+                          </div>
                         </div>
-                        AI 审查报告
-                      </DialogTitle>
-                      <DialogDescription className="mt-2 flex items-center gap-3">
-                        <span className="font-mono text-sm bg-white/50 px-2 py-0.5 rounded">#{selectedAuditLog.scan_id}</span>
-                        <span>{new Date(selectedAuditLog.created_at * 1000).toLocaleString('zh-CN')}</span>
-                      </DialogDescription>
-                    </DialogHeader>
+                      </DialogHeader>
+                    </div>
                   </div>
 
                   {/* Body */}
-                  <div className="p-6 space-y-6">
-                    {/* 状态概览 */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                        <div className="text-3xl font-black text-slate-700">{selectedAuditLog.total_scanned}</div>
-                        <div className="text-xs text-slate-500 mt-1">扫描用户</div>
-                      </div>
-                      <div className="text-center p-4 rounded-xl bg-red-50 border border-red-100">
-                        <div className="text-3xl font-black text-red-600">{selectedAuditLog.banned_count}</div>
-                        <div className="text-xs text-red-500 mt-1">封禁用户</div>
-                      </div>
-                      <div className="text-center p-4 rounded-xl bg-amber-50 border border-amber-100">
-                        <div className="text-3xl font-black text-amber-600">{selectedAuditLog.warned_count}</div>
-                        <div className="text-xs text-amber-500 mt-1">告警用户</div>
-                      </div>
-                      <div className="text-center p-4 rounded-xl bg-slate-50 border border-slate-100">
-                        <div className="text-3xl font-black text-slate-600">{selectedAuditLog.skipped_count}</div>
-                        <div className="text-xs text-slate-500 mt-1">跳过用户</div>
-                      </div>
+                  <div className="p-6 pt-2 space-y-5">
+                    {/* 统计卡片 - 玻璃态效果 */}
+                    <div className="grid grid-cols-4 gap-3">
+                      {[
+                        { value: selectedAuditLog.total_scanned, label: '扫描', color: 'cyan', icon: '◎' },
+                        { value: selectedAuditLog.banned_count, label: '封禁', color: 'red', icon: '✕' },
+                        { value: selectedAuditLog.warned_count, label: '告警', color: 'amber', icon: '△' },
+                        { value: selectedAuditLog.skipped_count, label: '跳过', color: 'slate', icon: '○' },
+                      ].map((stat, i) => (
+                        <div key={i} className={cn(
+                          "relative group p-4 rounded-xl border backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]",
+                          stat.color === 'cyan' && "bg-cyan-500/5 border-cyan-500/20 hover:border-cyan-500/40",
+                          stat.color === 'red' && "bg-red-500/5 border-red-500/20 hover:border-red-500/40",
+                          stat.color === 'amber' && "bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40",
+                          stat.color === 'slate' && "bg-slate-500/5 border-slate-500/20 hover:border-slate-500/40",
+                        )}>
+                          <div className={cn(
+                            "text-3xl font-black tracking-tighter font-mono",
+                            stat.color === 'cyan' && "text-cyan-400",
+                            stat.color === 'red' && "text-red-400",
+                            stat.color === 'amber' && "text-amber-400",
+                            stat.color === 'slate' && "text-slate-400",
+                          )}>
+                            {stat.value}
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={cn(
+                              "text-xs opacity-60",
+                              stat.color === 'cyan' && "text-cyan-400",
+                              stat.color === 'red' && "text-red-400",
+                              stat.color === 'amber' && "text-amber-400",
+                              stat.color === 'slate' && "text-slate-400",
+                            )}>{stat.icon}</span>
+                            <span className="text-xs text-slate-500 font-medium">{stat.label}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
 
-                    {/* 执行信息 */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    {/* 执行元数据 */}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-1 text-xs">
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-500">状态:</span>
-                        <Badge
-                          variant={
-                            selectedAuditLog.status === 'success' ? 'success' :
-                              selectedAuditLog.status === 'partial' ? 'warning' :
-                                selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? 'destructive' :
-                                  'secondary'
-                          }
-                        >
-                          {selectedAuditLog.status === 'success' ? '成功' :
-                            selectedAuditLog.status === 'partial' ? '部分成功' :
-                              selectedAuditLog.status === 'failed' ? '失败' :
-                                selectedAuditLog.status === 'empty' ? '无数据' :
-                                  selectedAuditLog.status === 'suspended' ? '已暂停' :
-                                    selectedAuditLog.status === 'skipped' ? '跳过' : selectedAuditLog.status}
-                        </Badge>
+                        <span className="text-slate-600">状态</span>
+                        <span className={cn(
+                          "font-medium",
+                          selectedAuditLog.status === 'success' ? "text-emerald-400" :
+                            selectedAuditLog.status === 'partial' ? "text-amber-400" :
+                              selectedAuditLog.status === 'failed' || selectedAuditLog.status === 'suspended' ? "text-red-400" :
+                                "text-slate-400"
+                        )}>
+                          {selectedAuditLog.status === 'success' ? '✓ 成功' :
+                            selectedAuditLog.status === 'partial' ? '◐ 部分成功' :
+                              selectedAuditLog.status === 'failed' ? '✕ 失败' :
+                                selectedAuditLog.status === 'empty' ? '○ 无数据' :
+                                  selectedAuditLog.status === 'suspended' ? '◫ 已暂停' :
+                                    selectedAuditLog.status === 'skipped' ? '→ 跳过' : selectedAuditLog.status}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-500">模式:</span>
-                        <Badge variant={selectedAuditLog.dry_run ? 'secondary' : 'destructive'}>
-                          {selectedAuditLog.dry_run ? '试运行' : '正式运行'}
-                        </Badge>
+                        <span className="text-slate-600">窗口</span>
+                        <code className="font-mono text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">{selectedAuditLog.window}</code>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-slate-500">时间窗口:</span>
-                        <span className="font-medium">{selectedAuditLog.window}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500">耗时:</span>
-                        <span className="font-mono">{selectedAuditLog.elapsed_seconds}s</span>
+                        <span className="text-slate-600">耗时</span>
+                        <code className="font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">{selectedAuditLog.elapsed_seconds}s</code>
                       </div>
                     </div>
 
                     {/* 错误信息 */}
                     {selectedAuditLog.error_message && (
-                      <div className="p-4 rounded-xl bg-red-50 border border-red-200">
-                        <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
+                      <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/20">
+                        <div className="flex items-center gap-2 text-red-400 font-medium text-sm mb-2">
                           <AlertTriangle className="h-4 w-4" />
                           错误信息
                         </div>
-                        <p className="text-sm text-red-600">{selectedAuditLog.error_message}</p>
+                        <p className="text-sm text-red-300/80 font-mono">{selectedAuditLog.error_message}</p>
                       </div>
                     )}
 
                     {/* 处理详情 */}
                     {selectedAuditLog.details && Array.isArray(selectedAuditLog.details) && selectedAuditLog.details.length > 0 && (
                       <div className="space-y-3">
-                        <h4 className="font-semibold text-slate-700 flex items-center gap-2">
-                          <Eye className="h-4 w-4" />
-                          处理详情 ({selectedAuditLog.details.length} 条)
-                        </h4>
-                        <div className="max-h-64 overflow-y-auto space-y-2">
+                        <div className="flex items-center justify-between px-1">
+                          <h4 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                            <Eye className="h-4 w-4 text-slate-500" />
+                            处理详情
+                          </h4>
+                          <span className="text-xs text-slate-600 font-mono">{selectedAuditLog.details.length} 条记录</span>
+                        </div>
+
+                        <div className="max-h-80 overflow-y-auto space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
                           {selectedAuditLog.details.map((detail: any, idx: number) => (
-                            <div key={idx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 text-sm">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">{detail.username || `用户 ${detail.user_id}`}</span>
-                                  <span className="text-slate-400 text-xs">ID: {detail.user_id}</span>
+                            <div
+                              key={idx}
+                              className={cn(
+                                "relative p-4 rounded-xl border transition-all duration-200 hover:translate-x-1",
+                                "bg-gradient-to-r from-slate-800/80 to-slate-800/40",
+                                detail.action === 'ban' && "border-l-2 border-l-red-500 border-red-500/20 hover:bg-red-500/5",
+                                detail.action === 'warn' && "border-l-2 border-l-amber-500 border-amber-500/20 hover:bg-amber-500/5",
+                                detail.action === 'monitor' && "border-l-2 border-l-blue-500 border-blue-500/20 hover:bg-blue-500/5",
+                                detail.action === 'skip' && "border-l-2 border-l-slate-500 border-slate-500/20 hover:bg-slate-500/5",
+                                detail.action === 'error' && "border-l-2 border-l-rose-500 border-rose-500/20 hover:bg-rose-500/5",
+                              )}
+                            >
+                              {/* 用户信息行 */}
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-4 rounded-full text-xs font-semibold bg-slate-700/50 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-slate-600/50 hover:border-cyan-500/50 transition-all duration-200"
+                                    onClick={() => {
+                                      setSelectedAuditLog(null)
+                                      openUserAnalysisFromIP(detail.user_id, detail.username || `用户${detail.user_id}`)
+                                    }}
+                                  >
+                                    <User className="h-3 w-3 mr-1.5" />
+                                    {detail.username || `用户 ${detail.user_id}`}
+                                  </Button>
+                                  <code className="text-[10px] text-slate-600 font-mono">#{detail.user_id}</code>
                                 </div>
-                                <Badge
-                                  variant={
-                                    detail.action === 'ban' ? 'destructive' :
-                                      detail.action === 'warn' ? 'warning' :
-                                        detail.action === 'error' ? 'destructive' :
-                                          'secondary'
-                                  }
-                                  className="text-xs"
-                                >
+                                <div className={cn(
+                                  "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+                                  detail.action === 'ban' && "bg-red-500/20 text-red-400",
+                                  detail.action === 'warn' && "bg-amber-500/20 text-amber-400",
+                                  detail.action === 'monitor' && "bg-blue-500/20 text-blue-400",
+                                  detail.action === 'skip' && "bg-slate-500/20 text-slate-400",
+                                  detail.action === 'error' && "bg-rose-500/20 text-rose-400",
+                                )}>
                                   {detail.action === 'ban' ? '封禁' :
                                     detail.action === 'warn' ? '告警' :
                                       detail.action === 'monitor' ? '观察' :
                                         detail.action === 'skip' ? '跳过' :
                                           detail.action === 'error' ? '错误' : detail.action}
-                                </Badge>
+                                </div>
                               </div>
+
                               {detail.assessment && (
-                                <div className="flex items-center gap-4 text-xs text-slate-500">
-                                  <span>风险分: <span className={cn(
-                                    "font-bold",
-                                    detail.assessment.risk_score >= 8 ? "text-red-600" :
-                                      detail.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
-                                  )}>{detail.assessment.risk_score}/10</span></span>
-                                  <span>置信度: <span className="font-bold">{(detail.assessment.confidence * 100).toFixed(0)}%</span></span>
+                                <div className="space-y-3">
+                                  {/* 风险评估指标 */}
+                                  <div className="flex items-center gap-6">
+                                    {/* 风险分环形指示器 */}
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative w-10 h-10">
+                                        <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                                          <circle cx="18" cy="18" r="15" fill="none" stroke="currentColor" strokeWidth="3" className="text-slate-700" />
+                                          <circle
+                                            cx="18" cy="18" r="15" fill="none" strokeWidth="3" strokeLinecap="round"
+                                            strokeDasharray={`${detail.assessment.risk_score * 10}, 100`}
+                                            className={cn(
+                                              detail.assessment.risk_score >= 8 ? "stroke-red-500" :
+                                                detail.assessment.risk_score >= 5 ? "stroke-amber-500" : "stroke-emerald-500"
+                                            )}
+                                          />
+                                        </svg>
+                                        <span className={cn(
+                                          "absolute inset-0 flex items-center justify-center text-xs font-bold",
+                                          detail.assessment.risk_score >= 8 ? "text-red-400" :
+                                            detail.assessment.risk_score >= 5 ? "text-amber-400" : "text-emerald-400"
+                                        )}>
+                                          {detail.assessment.risk_score}
+                                        </span>
+                                      </div>
+                                      <div className="text-[10px] text-slate-500 leading-tight">
+                                        <div>风险分</div>
+                                        <div className="text-slate-600">/10</div>
+                                      </div>
+                                    </div>
+
+                                    {/* 置信度条 */}
+                                    <div className="flex-1 max-w-32">
+                                      <div className="flex items-center justify-between text-[10px] mb-1">
+                                        <span className="text-slate-500">置信度</span>
+                                        <span className="font-mono font-bold text-slate-300">{(detail.assessment.confidence * 100).toFixed(0)}%</span>
+                                      </div>
+                                      <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
+                                          style={{ width: `${detail.assessment.confidence * 100}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* AI 模型和 Token 信息 */}
+                                  {(detail.assessment.model || detail.assessment.total_tokens > 0) && (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {detail.assessment.model && (
+                                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/80 border border-slate-700/50">
+                                          <span className="text-[10px] text-slate-500">模型</span>
+                                          <code className="text-[11px] font-mono text-violet-400">{detail.assessment.model}</code>
+                                        </div>
+                                      )}
+                                      {detail.assessment.total_tokens > 0 && (
+                                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/80 border border-slate-700/50">
+                                          <span className="text-[10px] text-slate-500">Tokens</span>
+                                          <code className="text-[11px] font-mono text-emerald-400">
+                                            {detail.assessment.prompt_tokens}<span className="text-slate-600">+</span>{detail.assessment.completion_tokens}<span className="text-slate-600">=</span><span className="text-emerald-300">{detail.assessment.total_tokens}</span>
+                                          </code>
+                                        </div>
+                                      )}
+                                      {detail.assessment.api_duration_ms > 0 && (
+                                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/80 border border-slate-700/50">
+                                          <span className="text-[10px] text-slate-500">耗时</span>
+                                          <code className="text-[11px] font-mono text-amber-400">{detail.assessment.api_duration_ms}<span className="text-slate-600">ms</span></code>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* AI 分析理由 */}
+                                  {detail.assessment.reason && (
+                                    <div className="relative pl-3 border-l-2 border-slate-700">
+                                      <div className="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-slate-600" />
+                                      <p className="text-xs text-slate-400 leading-relaxed">
+                                        {detail.assessment.reason}
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                               )}
-                              {detail.assessment?.reason && (
-                                <p className="mt-2 text-xs text-slate-600 bg-white p-2 rounded border border-slate-100">
-                                  {detail.assessment.reason}
-                                </p>
-                              )}
+
                               {detail.message && detail.action === 'error' && (
-                                <p className="mt-2 text-xs text-red-600">{detail.message}</p>
+                                <div className="mt-3 p-2 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                                  <p className="text-xs text-rose-400 font-mono">{detail.message}</p>
+                                </div>
                               )}
                             </div>
                           ))}
@@ -3929,19 +4083,25 @@ export function RealtimeRanking() {
 
                     {/* 无详情时的提示 */}
                     {(!selectedAuditLog.details || !Array.isArray(selectedAuditLog.details) || selectedAuditLog.details.length === 0) && selectedAuditLog.total_scanned === 0 && (
-                      <div className="text-center py-8 text-slate-500">
-                        <Clock className="h-10 w-10 mx-auto mb-2 text-slate-300" />
-                        <p>本次扫描未发现可疑用户</p>
+                      <div className="text-center py-12">
+                        <div className="relative inline-block">
+                          <Clock className="h-12 w-12 text-slate-700" />
+                          <div className="absolute inset-0 animate-ping opacity-20">
+                            <Clock className="h-12 w-12 text-cyan-500" />
+                          </div>
+                        </div>
+                        <p className="mt-4 text-slate-500">本次扫描未发现可疑用户</p>
+                        <p className="text-xs text-slate-600 mt-1">系统运行正常</p>
                       </div>
                     )}
                   </div>
 
-                  <DialogFooter className="p-6 pt-0 sm:justify-center">
+                  <DialogFooter className="p-6 pt-2 border-t border-slate-800/50 sm:justify-center">
                     <Button
                       onClick={() => setSelectedAuditLog(null)}
-                      className="w-full sm:w-40 h-10 rounded-full bg-slate-900 hover:bg-slate-800 text-white"
+                      className="w-full sm:w-44 h-11 rounded-full bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-medium border border-slate-600/50 transition-all duration-200 hover:scale-[1.02]"
                     >
-                      关闭
+                      关闭报告
                     </Button>
                   </DialogFooter>
                 </>

@@ -139,7 +139,7 @@ async def verify_auth(
         if token_data is not None:
             return "jwt"
         else:
-            logger.warning(f"Invalid JWT token for request: {request.method} {request.url.path}")
+            # 不在这里打印日志，由中间件统一记录 401 错误
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={

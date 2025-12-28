@@ -244,6 +244,12 @@ class AppLogger:
         message = f"{method_str} | {path} | {status} | {error}"
         self._log(logging.ERROR, message, category="接口", ip=ip, **kwargs)
 
+    def api_warn(self, method: str, path: str, status: int, error: str, ip: str, **kwargs):
+        """API警告日志（用于401认证失败等正常流程）"""
+        method_str = f"{method:<6}"
+        message = f"{method_str} | {path} | {status} | {error}"
+        self._log(logging.WARNING, message, category="接口", ip=ip, **kwargs)
+
     def db(self, message: str, **kwargs):
         """数据库日志"""
         self.info(message, category="数据库", **kwargs)

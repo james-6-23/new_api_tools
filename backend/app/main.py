@@ -1270,6 +1270,15 @@ async def log_requests(request: Request, call_next):
             "服务器内部错误",
             client_host
         )
+    elif status_code == 401:
+        # 401 认证失败是正常流程（token 过期等），用 WARN 级别
+        logger.api_warn(
+            request.method,
+            request.url.path,
+            status_code,
+            "认证失败",
+            client_host
+        )
     elif status_code >= 400:
         logger.api_error(
             request.method,

@@ -48,6 +48,12 @@ class AIAssessmentResult:
     reason: str              # 封禁/告警理由
     action: AIBanAction
     raw_response: Optional[str] = None
+    # AI API 调用信息
+    model: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    api_duration_ms: int = 0  # API 调用耗时（毫秒）
 
 
 # 配置常量
@@ -514,12 +520,17 @@ class AIAutoBanService:
         # 否则默认补充 /v1
         return f"{base}/v1{endpoint}"
 
-    async def _call_openai_api(self, prompt: str) -> Optional[str]:
-        """调用 OpenAI API（带重试和故障处理）"""
+    async def _call_openai_api(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """
+        调用 OpenAI API（带重试和故障处理）
+
+        Returns:
+            成功时返回包含 content、usage、model、duration_ms 的字典，失败返回 None
+        """
         if not self._openai_api_key:
             logger.warning("AI自动封禁: OpenAI API Key 未配置")
             return None
-        
+
         # 检查 API 是否处于暂停状态
         if self._api_suspended:
             # 检查冷却期是否已过
@@ -532,12 +543,12 @@ class AIAutoBanService:
                 logger.info("AI自动封禁: API 冷却期结束，尝试恢复服务")
                 self._api_suspended = False
                 self._consecutive_failures = 0
-        
+
         headers = {
             "Authorization": f"Bearer {self._openai_api_key}",
             "Content-Type": "application/json",
         }
-        
+
         payload = {
             "model": self._ai_model,
             "messages": [
@@ -547,12 +558,13 @@ class AIAutoBanService:
             "temperature": 0.3,
             "max_tokens": 500,
         }
-        
+
         last_error = None
         url = self._get_endpoint_url(self._openai_base_url, "/chat/completions")
-        
+
         for attempt in range(1, API_MAX_RETRIES + 1):
             try:
+                start_time = time.time()
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(
                         url,
@@ -561,15 +573,29 @@ class AIAutoBanService:
                     )
                     response.raise_for_status()
                     data = response.json()
-                    
+                    duration_ms = int((time.time() - start_time) * 1000)
+
                     # 成功调用，重置失败计数
                     if self._consecutive_failures > 0:
                         logger.info(f"AI自动封禁: API 调用恢复正常，之前连续失败 {self._consecutive_failures} 次")
                     self._consecutive_failures = 0
                     self._last_error_message = ""
-                    
-                    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    
+
+                    # 提取 usage 信息
+                    usage = data.get("usage", {})
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    # 获取实际使用的模型（API 返回的可能和请求的不同）
+                    actual_model = data.get("model", self._ai_model)
+
+                    return {
+                        "content": content,
+                        "model": actual_model,
+                        "prompt_tokens": usage.get("prompt_tokens", 0),
+                        "completion_tokens": usage.get("completion_tokens", 0),
+                        "total_tokens": usage.get("total_tokens", 0),
+                        "duration_ms": duration_ms,
+                    }
+
             except httpx.HTTPStatusError as e:
                 last_error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
                 logger.warning(f"AI自动封禁: API 请求失败 (尝试 {attempt}/{API_MAX_RETRIES}) - {last_error}")
@@ -579,18 +605,18 @@ class AIAutoBanService:
             except Exception as e:
                 last_error = str(e)
                 logger.warning(f"AI自动封禁: API 调用异常 (尝试 {attempt}/{API_MAX_RETRIES}) - {e}")
-            
+
             # 如果不是最后一次尝试，等待后重试
             if attempt < API_MAX_RETRIES:
                 await asyncio.sleep(API_RETRY_DELAY * attempt)  # 递增延迟
-        
+
         # 所有重试都失败了
         self._consecutive_failures += 1
         self._last_failure_time = time.time()
         self._last_error_message = last_error or "未知错误"
-        
+
         logger.error(f"AI自动封禁: API 调用失败，已重试 {API_MAX_RETRIES} 次，连续失败 {self._consecutive_failures} 次，错误: {last_error}")
-        
+
         # 检查是否需要暂停服务
         if self._consecutive_failures >= API_MAX_CONSECUTIVE_FAILURES:
             self._api_suspended = True
@@ -602,7 +628,7 @@ class AIAutoBanService:
                 last_error=self._last_error_message,
                 cooldown_seconds=API_FAILURE_COOLDOWN,
             )
-        
+
         return None
 
     async def fetch_models(self, base_url: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -757,11 +783,19 @@ class AIAutoBanService:
                 "message": f"测试失败: {str(e)}",
             }
 
-    def _parse_ai_response(self, response: str) -> Optional[AIAssessmentResult]:
+    def _parse_ai_response(
+        self,
+        response: str,
+        model: Optional[str] = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        api_duration_ms: int = 0,
+    ) -> Optional[AIAssessmentResult]:
         """解析 AI 响应"""
         if not response:
             return None
-        
+
         try:
             # 尝试提取 JSON
             json_str = response
@@ -769,14 +803,14 @@ class AIAutoBanService:
                 json_str = response.split("```json")[1].split("```")[0]
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0]
-            
+
             data = json.loads(json_str.strip())
-            
+
             should_ban = bool(data.get("should_ban", False))
             risk_score = int(data.get("risk_score", 1))
             confidence = float(data.get("confidence", 0.0))
             reason = str(data.get("reason", ""))
-            
+
             # 确定动作
             if should_ban and risk_score >= RISK_SCORE_BAN_THRESHOLD and confidence >= CONFIDENCE_THRESHOLD:
                 action = AIBanAction.BAN
@@ -786,7 +820,7 @@ class AIAutoBanService:
                 action = AIBanAction.MONITOR
             else:
                 action = AIBanAction.SKIP
-            
+
             return AIAssessmentResult(
                 should_ban=should_ban,
                 risk_score=risk_score,
@@ -794,6 +828,11 @@ class AIAutoBanService:
                 reason=reason,
                 action=action,
                 raw_response=response,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                api_duration_ms=api_duration_ms,
             )
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.error(f"AI自动封禁: 解析响应失败 - {e}, 原始响应: {response[:200]}")
@@ -802,17 +841,17 @@ class AIAutoBanService:
     async def assess_user(self, user_id: int, analysis: Dict[str, Any]) -> Optional[AIAssessmentResult]:
         """
         对单个用户进行 AI 风险评估
-        
+
         Args:
             user_id: 用户ID
             analysis: 用户行为分析数据
-            
+
         Returns:
             AI 评估结果
         """
         user = analysis.get("user", {})
         user_role = user.get("role", 0)
-        
+
         # 检查白名单
         if self._is_whitelisted(user_id, user_role):
             return AIAssessmentResult(
@@ -822,15 +861,23 @@ class AIAutoBanService:
                 reason="白名单用户，跳过评估",
                 action=AIBanAction.SKIP,
             )
-        
+
         # 构建 prompt 并调用 AI
         prompt = self._build_assessment_prompt(analysis)
-        response = await self._call_openai_api(prompt)
-        
-        if not response:
+        api_result = await self._call_openai_api(prompt)
+
+        if not api_result:
             return None
-        
-        return self._parse_ai_response(response)
+
+        # 解析响应并传入 API 调用信息
+        return self._parse_ai_response(
+            response=api_result.get("content", ""),
+            model=api_result.get("model"),
+            prompt_tokens=api_result.get("prompt_tokens", 0),
+            completion_tokens=api_result.get("completion_tokens", 0),
+            total_tokens=api_result.get("total_tokens", 0),
+            api_duration_ms=api_result.get("duration_ms", 0),
+        )
 
     async def process_user(
         self,
@@ -865,6 +912,12 @@ class AIAutoBanService:
             "confidence": assessment.confidence,
             "reason": assessment.reason,
             "action": assessment.action.value,
+            # AI API 调用信息
+            "model": assessment.model,
+            "prompt_tokens": assessment.prompt_tokens,
+            "completion_tokens": assessment.completion_tokens,
+            "total_tokens": assessment.total_tokens,
+            "api_duration_ms": assessment.api_duration_ms,
         }
         result["action"] = assessment.action.value
         
