@@ -456,43 +456,36 @@ export function IPAnalysis() {
       ])
     )
 
-    // 转换数据为 ECharts 格式
-    const mapData = data.by_country.map(item => ({
-      name: countryCodeToName[item.country_code] || item.country,
-      value: item.request_count,
-    }))
-
-    // Top 5 热点数据 - 用于涟漪效果
-    const top5Data = data.by_country.slice(0, 5).map(item => {
-      const name = countryCodeToName[item.country_code] || item.country || ''
-      // 获取国家中心坐标（常用国家）
-      const coords: Record<string, [number, number]> = {
-        'China': [104.1954, 35.8617],
-        'United States': [-95.7129, 37.0902],
-        'Japan': [138.2529, 36.2048],
-        'Germany': [10.4515, 51.1657],
-        'United Kingdom': [-3.4360, 55.3781],
-        'France': [2.2137, 46.2276],
-        'Russia': [105.3188, 61.5240],
-        'South Korea': [127.7669, 35.9078],
-        'Canada': [-106.3468, 56.1304],
-        'Australia': [133.7751, -25.2744],
-        'Brazil': [-51.9253, -14.2350],
-        'India': [78.9629, 20.5937],
-        'Singapore': [103.8198, 1.3521],
-        'Netherlands': [5.2913, 52.1326],
-        'Hong Kong': [114.1694, 22.3193],
-        'Taiwan': [120.9605, 23.6978],
-      }
-      const coord = name ? coords[name] : undefined
+    // 转换数据为 ECharts 格式，Top 5 添加特殊样式
+    const mapData = data.by_country.map((item, index) => {
+      const name = countryCodeToName[item.country_code] || item.country
+      const isTop5 = index < 5
       return {
         name,
-        value: coord ? [...coord, item.request_count] : undefined,
-        itemStyle: {
-          color: isDarkMode ? '#60a5fa' : '#3b82f6'
-        }
+        value: item.request_count,
+        // Top 5 显示标签和特殊边框
+        label: isTop5 ? {
+          show: true,
+          formatter: `{top|#${index + 1}}`,
+          rich: {
+            top: {
+              backgroundColor: isDarkMode ? '#fbbf24' : '#f59e0b',
+              color: isDarkMode ? '#1e293b' : '#fff',
+              padding: [2, 6],
+              borderRadius: 10,
+              fontSize: 10,
+              fontWeight: 'bold',
+            }
+          }
+        } : undefined,
+        itemStyle: isTop5 ? {
+          borderColor: isDarkMode ? '#fbbf24' : '#f59e0b',
+          borderWidth: 2,
+          shadowColor: isDarkMode ? 'rgba(251, 191, 36, 0.5)' : 'rgba(245, 158, 11, 0.5)',
+          shadowBlur: 10,
+        } : undefined,
       }
-    }).filter(item => item.value)
+    })
 
     // 主题相关配色
     const themeColors = isDarkMode ? {
@@ -571,17 +564,6 @@ export function IPAnalysis() {
         itemWidth: 12,
         itemHeight: 120,
       },
-      geo: {
-        map: 'world',
-        roam: true,
-        scaleLimit: { min: 1, max: 10 },
-        zoom: 1.2,
-        silent: true,
-        itemStyle: {
-          areaColor: themeColors.bgColor,
-          borderColor: 'transparent',
-        }
-      },
       series: [
         {
           name: '流量分布',
@@ -611,27 +593,6 @@ export function IPAnalysis() {
           },
           label: { show: false },
           data: mapData
-        },
-        // 涟漪效果层 - Top 5 热点
-        {
-          name: '热点',
-          type: 'effectScatter',
-          coordinateSystem: 'geo',
-          data: top5Data,
-          symbolSize: (val: number[]) => Math.min(Math.max(Math.sqrt(val[2]) / 10, 8), 30),
-          showEffectOn: 'render',
-          rippleEffect: {
-            brushType: 'stroke',
-            scale: 3,
-            period: 4,
-          },
-          label: { show: false },
-          itemStyle: {
-            color: isDarkMode ? '#60a5fa' : '#3b82f6',
-            shadowBlur: 10,
-            shadowColor: isDarkMode ? 'rgba(96, 165, 250, 0.5)' : 'rgba(59, 130, 246, 0.5)',
-          },
-          zlevel: 1,
         }
       ]
     }
@@ -652,47 +613,36 @@ export function IPAnalysis() {
       ])
     )
 
-    // 转换数据为 ECharts 格式
-    const mapData = data.by_province.map(item => ({
-      name: provinceNameMap[item.region || ''] || item.region,
-      value: item.request_count,
-    }))
-
-    // Top 5 热点数据 - 用于涟漪效果
-    const top5Data = data.by_province.slice(0, 5).map(item => {
-      const name = provinceNameMap[item.region || ''] || item.region || ''
-      // 省份中心坐标
-      const coords: Record<string, [number, number]> = {
-        '北京': [116.4074, 39.9042],
-        '上海': [121.4737, 31.2304],
-        '广东': [113.2644, 23.1291],
-        '浙江': [120.1551, 30.2741],
-        '江苏': [118.7969, 32.0603],
-        '四川': [104.0657, 30.6595],
-        '山东': [117.0009, 36.6758],
-        '河南': [113.6254, 34.7466],
-        '湖北': [114.3055, 30.5928],
-        '福建': [119.3064, 26.0753],
-        '湖南': [112.9823, 28.1941],
-        '安徽': [117.2830, 31.8612],
-        '河北': [114.4680, 38.0428],
-        '陕西': [108.9540, 34.2658],
-        '辽宁': [123.4315, 41.7968],
-        '天津': [117.1907, 39.1256],
-        '重庆': [106.5516, 29.5630],
-        '江西': [115.8921, 28.6765],
-        '云南': [102.7123, 25.0406],
-        '山西': [112.5493, 37.8706],
-      }
-      const coord = name ? coords[name] : undefined
+    // 转换数据为 ECharts 格式，Top 5 添加特殊样式
+    const mapData = data.by_province.map((item, index) => {
+      const name = provinceNameMap[item.region || ''] || item.region
+      const isTop5 = index < 5
       return {
         name,
-        value: coord ? [...coord, item.request_count] : undefined,
-        itemStyle: {
-          color: isDarkMode ? '#f472b6' : '#ec4899'
-        }
+        value: item.request_count,
+        // Top 5 显示标签和特殊边框
+        label: isTop5 ? {
+          show: true,
+          formatter: `{top|#${index + 1}}`,
+          rich: {
+            top: {
+              backgroundColor: isDarkMode ? '#fbbf24' : '#f59e0b',
+              color: isDarkMode ? '#1e293b' : '#fff',
+              padding: [2, 6],
+              borderRadius: 10,
+              fontSize: 10,
+              fontWeight: 'bold',
+            }
+          }
+        } : undefined,
+        itemStyle: isTop5 ? {
+          borderColor: isDarkMode ? '#fbbf24' : '#f59e0b',
+          borderWidth: 2,
+          shadowColor: isDarkMode ? 'rgba(251, 191, 36, 0.5)' : 'rgba(245, 158, 11, 0.5)',
+          shadowBlur: 10,
+        } : undefined,
       }
-    }).filter(item => item.value)
+    })
 
     // 主题相关配色
     const themeColors = isDarkMode ? {
@@ -771,17 +721,6 @@ export function IPAnalysis() {
         itemWidth: 12,
         itemHeight: 120,
       },
-      geo: {
-        map: 'china',
-        roam: true,
-        scaleLimit: { min: 1, max: 10 },
-        zoom: 1.2,
-        silent: true,
-        itemStyle: {
-          areaColor: themeColors.bgColor,
-          borderColor: 'transparent',
-        }
-      },
       series: [
         {
           name: '流量分布',
@@ -811,27 +750,6 @@ export function IPAnalysis() {
           },
           label: { show: false },
           data: mapData
-        },
-        // 涟漪效果层 - Top 5 热点
-        {
-          name: '热点',
-          type: 'effectScatter',
-          coordinateSystem: 'geo',
-          data: top5Data,
-          symbolSize: (val: number[]) => Math.min(Math.max(Math.sqrt(val[2]) / 10, 8), 30),
-          showEffectOn: 'render',
-          rippleEffect: {
-            brushType: 'stroke',
-            scale: 3,
-            period: 4,
-          },
-          label: { show: false },
-          itemStyle: {
-            color: isDarkMode ? '#f472b6' : '#ec4899',
-            shadowBlur: 10,
-            shadowColor: isDarkMode ? 'rgba(244, 114, 182, 0.5)' : 'rgba(236, 72, 153, 0.5)',
-          },
-          zlevel: 1,
         }
       ]
     }
@@ -1019,12 +937,9 @@ export function IPAnalysis() {
                 opts={{ renderer: 'canvas' }}
               />
               {/* 热点图例 */}
-              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 backdrop-blur-sm border shadow-sm text-xs">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", mapType === 'world' ? "bg-blue-500" : "bg-pink-500")}></span>
-                </span>
-                <span className="text-muted-foreground">Top 5 热点</span>
+              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background/80 backdrop-blur-sm border shadow-sm text-xs">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold">#1</span>
+                <span className="text-muted-foreground">Top 5 流量排名</span>
               </div>
             </div>
           ) : (

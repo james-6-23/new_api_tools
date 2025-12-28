@@ -169,7 +169,13 @@ class RiskMonitoringService:
 
             # 保存到新缓存管理器（SQLite + Redis）
             self.cache.set_leaderboard(w, sort_by, raw_data, cache_ttl)
-            
+            logger.success(
+                f"风控排行 缓存更新: {w}",
+                sort_by=sort_by,
+                users=len(raw_data),
+                TTL=f"{cache_ttl}s"
+            )
+
             # 同时更新内存缓存（兼容）
             window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
             _cache.set(window_cache_key, raw_data, cache_ttl)
@@ -944,7 +950,14 @@ class RiskMonitoringService:
                     "max_requests_per_token": max_requests_per_token,
                 },
             }
-            _cache.set(cache_key, result, _get_cache_ttl())
+            ttl = _get_cache_ttl()
+            _cache.set(cache_key, result, ttl)
+            logger.success(
+                f"风控 缓存更新: token_rotation",
+                users=len(items),
+                min_tokens=min_tokens,
+                TTL=f"{ttl}s"
+            )
             return result
 
         except Exception as e:
@@ -1119,7 +1132,14 @@ class RiskMonitoringService:
                     "min_invited": min_invited,
                 },
             }
-            _cache.set(cache_key, result, _get_cache_ttl())
+            ttl = _get_cache_ttl()
+            _cache.set(cache_key, result, ttl)
+            logger.success(
+                f"风控 缓存更新: affiliated_accounts",
+                groups=len(items),
+                min_invited=min_invited,
+                TTL=f"{ttl}s"
+            )
             return result
 
         except Exception as e:
@@ -1280,7 +1300,14 @@ class RiskMonitoringService:
                     "min_users": min_users,
                 },
             }
-            _cache.set(cache_key, result, _get_cache_ttl())
+            ttl = _get_cache_ttl()
+            _cache.set(cache_key, result, ttl)
+            logger.success(
+                f"风控 缓存更新: same_ip_registrations",
+                ips=len(items),
+                min_users=min_users,
+                TTL=f"{ttl}s"
+            )
             return result
 
         except Exception as e:

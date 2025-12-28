@@ -363,12 +363,19 @@ class IPMonitoringService:
                     })
 
             result = {"items": items, "total": len(items)}
-            
+
             # 保存到新缓存管理器（SQLite + Redis）
-            self.cache.set_ip_monitoring("shared_ips", window_name, items, _get_cache_ttl())
-            
+            ttl = _get_cache_ttl()
+            self.cache.set_ip_monitoring("shared_ips", window_name, items, ttl)
+            logger.success(
+                f"IP监控 缓存更新: shared_ips",
+                window=window_name,
+                items=len(items),
+                TTL=f"{ttl}s"
+            )
+
             # 同时更新内存缓存（兼容）
-            _ip_cache.set(cache_key, result, _get_cache_ttl())
+            _ip_cache.set(cache_key, result, ttl)
             return result
         except Exception as e:
             logger.db_error(f"获取共享 IP 失败: {e}")
@@ -477,7 +484,14 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
-            _ip_cache.set(cache_key, result, _get_cache_ttl())
+            ttl = _get_cache_ttl()
+            _ip_cache.set(cache_key, result, ttl)
+            logger.success(
+                f"IP监控 缓存更新: multi_ip_tokens",
+                items=len(items),
+                min_ips=min_ips,
+                TTL=f"{ttl}s"
+            )
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 令牌失败: {e}")
@@ -582,7 +596,14 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
-            _ip_cache.set(cache_key, result, _get_cache_ttl())
+            ttl = _get_cache_ttl()
+            _ip_cache.set(cache_key, result, ttl)
+            logger.success(
+                f"IP监控 缓存更新: multi_ip_users",
+                items=len(items),
+                min_ips=min_ips,
+                TTL=f"{ttl}s"
+            )
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 用户失败: {e}")

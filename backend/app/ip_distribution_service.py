@@ -99,7 +99,13 @@ class IPDistributionService:
             if log_progress:
                 logger.system("[IP分布] 无 IP 数据")
             result = self._empty_result()
-            self._cache.set(cache_key, result, ttl=CACHE_TTL.get(window, 1800))
+            ttl = CACHE_TTL.get(window, 1800)
+            self._cache.set(cache_key, result, ttl=ttl)
+            logger.success(
+                f"IP分布 缓存更新: {window}",
+                状态="空数据",
+                TTL=f"{ttl}s"
+            )
             return result
         
         total_ips = len(ip_stats)
@@ -119,10 +125,19 @@ class IPDistributionService:
         # 聚合统计
         result = self._aggregate_stats(ip_stats, geo_results)
         result["snapshot_time"] = int(time.time())
-        
+
         # 缓存结果
-        self._cache.set(cache_key, result, ttl=CACHE_TTL.get(window, 1800))
-        
+        ttl = CACHE_TTL.get(window, 1800)
+        self._cache.set(cache_key, result, ttl=ttl)
+        logger.success(
+            f"IP分布 缓存更新: {window}",
+            IP数=total_ips,
+            请求数=total_requests,
+            国家数=len(result['by_country']),
+            省份数=len(result['by_province']),
+            TTL=f"{ttl}s"
+        )
+
         if log_progress:
             logger.system(f"[IP分布] 统计完成: {len(result['by_country'])} 个国家, {len(result['by_province'])} 个省份")
         

@@ -109,9 +109,16 @@ class CachedDashboardService:
             "14d": 600,
         }
         ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
-        
+
         # 使用统一缓存管理器保存
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: overview",
+            period=period,
+            users=data.get("total_users", 0),
+            tokens=data.get("total_tokens", 0),
+            TTL=f"{ttl}s"
+        )
 
         # Also save as snapshot (保留本地快照功能)
         self._storage.save_stats_snapshot("overview", data)
@@ -170,6 +177,13 @@ class CachedDashboardService:
         }
         ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: usage",
+            period=period,
+            requests=data.get("request_count", 0),
+            tokens=data.get("total_tokens", 0),
+            TTL=f"{ttl}s"
+        )
 
         return data
 
@@ -218,6 +232,13 @@ class CachedDashboardService:
         # Cache for 10 minutes (大型系统自动延长)
         ttl = int(600 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: models",
+            period=period,
+            limit=limit,
+            models=len(data),
+            TTL=f"{ttl}s"
+        )
 
         # Save snapshot (保留本地快照功能)
         self._storage.save_stats_snapshot("models", {"period": period, "models": data})
@@ -253,6 +274,12 @@ class CachedDashboardService:
         # Cache for 15 minutes (大型系统自动延长)
         ttl = int(900 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: daily_trends",
+            days=days,
+            records=len(data),
+            TTL=f"{ttl}s"
+        )
 
         return data
 
@@ -284,6 +311,12 @@ class CachedDashboardService:
         # Cache for 5 minutes (大型系统自动延长)
         ttl = int(300 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: hourly_trends",
+            hours=hours,
+            records=len(data),
+            TTL=f"{ttl}s"
+        )
 
         return data
 
@@ -332,6 +365,13 @@ class CachedDashboardService:
         # Cache for 10 minutes (大型系统自动延长)
         ttl = int(600 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: top_users",
+            period=period,
+            limit=limit,
+            users=len(data),
+            TTL=f"{ttl}s"
+        )
 
         return data
 
@@ -358,6 +398,11 @@ class CachedDashboardService:
         # Cache for 2 minutes (大型系统自动延长)
         ttl = int(120 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+        logger.success(
+            f"Dashboard 缓存更新: channels",
+            channels=len(data),
+            TTL=f"{ttl}s"
+        )
 
         return data
 
