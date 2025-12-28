@@ -157,10 +157,7 @@ async def lifespan(app: FastAPI):
         _indexes_ready = False  # 有索引需要创建，标记为未就绪
         index_task = asyncio.create_task(background_ensure_indexes())
 
-    # 启动 AI 自动封禁后台任务
-    ai_ban_task = asyncio.create_task(background_ai_auto_ban_scan())
-
-    # 启动后台缓存预热任务（预热完成后会启动日志同步任务）
+    # 启动后台缓存预热任务（预热完成后会启动日志同步任务和 AI 封禁任务）
     cache_warmup_task = asyncio.create_task(background_cache_warmup())
 
     # 启动 GeoIP 数据库自动更新任务
@@ -172,7 +169,6 @@ async def lifespan(app: FastAPI):
     yield
 
     # 停止后台任务
-    ai_ban_task.cancel()
     cache_warmup_task.cancel()
     geoip_update_task.cancel()
     ip_recording_task.cancel()
@@ -281,8 +277,7 @@ async def background_log_sync():
     """后台定时同步日志分析数据"""
     from .log_analytics_service import get_log_analytics_service
 
-    # 启动后等待 10 秒再开始同步
-    await asyncio.sleep(10)
+    # 预热完成后立即启动
     logger.success("后台日志同步任务已启动", category="任务")
 
     while True:
@@ -337,51 +332,74 @@ async def _warmup_dashboard_data():
     """
     from .cached_dashboard import get_cached_dashboard_service
     from .user_management_service import get_user_management_service
+    from .system_scale_service import get_scale_service
 
     logger.phase(4, "预热 Dashboard 数据")
     warmup_start = time.time()
 
     dashboard_service = get_cached_dashboard_service()
     user_service = get_user_management_service()
+    
+    # 获取系统规模信息用于估算
+    try:
+        scale_service = get_scale_service()
+        scale_result = scale_service.detect_scale()
+        metrics = scale_result.get("metrics", {})
+        logs_24h = metrics.get('logs_24h', 0)
+        total_logs = metrics.get('total_logs', 0)
+    except:
+        logs_24h = 0
+        total_logs = 0
 
     # 预热项目列表（按前端加载顺序）
     # 必须包含所有 Dashboard 首次加载时调用的 API
+    # 格式: (name, fetch_func, estimated_logs_multiplier)
+    # multiplier 基于 24h 日志数估算扫描量
     warmup_items = [
         # === 核心 Dashboard API（前端 Promise.all 并发调用）===
-        ("overview_7d", lambda: dashboard_service.get_system_overview(period="7d", use_cache=False)),
-        ("usage_7d", lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False)),
-        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=20, use_cache=False)),
-        ("trends_daily_7d", lambda: dashboard_service.get_daily_trends(days=7, use_cache=False)),
-        ("top_users_7d", lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False)),  # 关键！
+        ("overview_7d", lambda: dashboard_service.get_system_overview(period="7d", use_cache=False), 5.0),
+        ("usage_7d", lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False), 5.0),
+        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=20, use_cache=False), 5.0),
+        ("trends_daily_7d", lambda: dashboard_service.get_daily_trends(days=7, use_cache=False), 5.0),
+        ("top_users_7d", lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False), 5.0),
 
         # === 常用的其他时间周期 ===
-        ("overview_24h", lambda: dashboard_service.get_system_overview(period="24h", use_cache=False)),
-        ("usage_24h", lambda: dashboard_service.get_usage_statistics(period="24h", use_cache=False)),
-        ("trends_hourly_24h", lambda: dashboard_service.get_hourly_trends(hours=24, use_cache=False)),
+        ("overview_24h", lambda: dashboard_service.get_system_overview(period="24h", use_cache=False), 1.0),
+        ("usage_24h", lambda: dashboard_service.get_usage_statistics(period="24h", use_cache=False), 1.0),
+        ("trends_hourly_24h", lambda: dashboard_service.get_hourly_trends(hours=24, use_cache=False), 1.0),
 
         # === 3天周期（用户切换时间周期时需要）===
-        ("overview_3d", lambda: dashboard_service.get_system_overview(period="3d", use_cache=False)),
-        ("usage_3d", lambda: dashboard_service.get_usage_statistics(period="3d", use_cache=False)),
-        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=20, use_cache=False)),
-        ("trends_daily_3d", lambda: dashboard_service.get_daily_trends(days=3, use_cache=False)),
-        ("top_users_3d", lambda: dashboard_service.get_top_users(period="3d", limit=10, use_cache=False)),
+        ("overview_3d", lambda: dashboard_service.get_system_overview(period="3d", use_cache=False), 2.5),
+        ("usage_3d", lambda: dashboard_service.get_usage_statistics(period="3d", use_cache=False), 2.5),
+        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=20, use_cache=False), 2.5),
+        ("trends_daily_3d", lambda: dashboard_service.get_daily_trends(days=3, use_cache=False), 2.5),
+        ("top_users_3d", lambda: dashboard_service.get_top_users(period="3d", limit=10, use_cache=False), 2.5),
 
         # === 14天周期（用户切换时间周期时需要）===
-        ("overview_14d", lambda: dashboard_service.get_system_overview(period="14d", use_cache=False)),
-        ("usage_14d", lambda: dashboard_service.get_usage_statistics(period="14d", use_cache=False)),
-        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=20, use_cache=False)),
-        ("trends_daily_14d", lambda: dashboard_service.get_daily_trends(days=14, use_cache=False)),
-        ("top_users_14d", lambda: dashboard_service.get_top_users(period="14d", limit=10, use_cache=False)),
+        ("overview_14d", lambda: dashboard_service.get_system_overview(period="14d", use_cache=False), 10.0),
+        ("usage_14d", lambda: dashboard_service.get_usage_statistics(period="14d", use_cache=False), 10.0),
+        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=20, use_cache=False), 10.0),
+        ("trends_daily_14d", lambda: dashboard_service.get_daily_trends(days=14, use_cache=False), 10.0),
+        ("top_users_14d", lambda: dashboard_service.get_top_users(period="14d", limit=10, use_cache=False), 10.0),
 
         # === 用户统计（UserManagement 页面需要）===
-        ("user_stats", lambda: user_service.get_activity_stats()),
+        ("user_stats", lambda: user_service.get_activity_stats(), 1.0),
     ]
+    
+    # 计算预计扫描总日志数
+    total_estimated_logs = sum(int(logs_24h * m) for _, _, m in warmup_items)
+    
+    logger.kvs({
+        "待预热项目": f"{len(warmup_items)} 个",
+        "预计扫描日志": f"{total_estimated_logs:,} 条",
+    })
 
     total_items = len(warmup_items)
     success_count = 0
     failed_items = []
 
-    for idx, (name, fetch_func) in enumerate(warmup_items):
+    for idx, (name, fetch_func, multiplier) in enumerate(warmup_items):
+        estimated_logs = int(logs_24h * multiplier)
         try:
             item_start = time.time()
             # 在线程池中执行，避免阻塞事件循环
@@ -503,14 +521,12 @@ async def background_cache_warmup():
         logger.success("所有缓存有效，无需预热排行榜")
         
         # 预热 Dashboard 数据
-        await asyncio.sleep(2)
         try:
             await _warmup_dashboard_data()
         except Exception as e:
             logger.warn(f"Dashboard 预热异常: {e}")
         
         # 预热 IP 地区分布
-        await asyncio.sleep(2)
         try:
             from .ip_distribution_service import warmup_ip_distribution
             await warmup_ip_distribution()
@@ -525,8 +541,9 @@ async def background_cache_warmup():
             "总耗时": f"{elapsed:.1f}s",
         })
         
-        # 预热完成后启动后台日志同步任务
+        # 预热完成后启动后台任务
         asyncio.create_task(background_log_sync())
+        asyncio.create_task(background_ai_auto_ban_scan())
         
         # 进入定时刷新循环
         await _background_refresh_loop(cache)
@@ -689,14 +706,12 @@ async def background_cache_warmup():
     })
 
     # === 阶段4：预热 Dashboard 数据（重要！避免首次访问超时）===
-    await asyncio.sleep(2)
     try:
         await _warmup_dashboard_data()
     except Exception as e:
         logger.warn(f"Dashboard 预热异常: {e}")
 
-    # === 阶段5：延迟预热 IP 地区分布（低优先级）===
-    await asyncio.sleep(2)
+    # === 阶段5：预热 IP 地区分布 ===
     try:
         from .ip_distribution_service import warmup_ip_distribution
         await warmup_ip_distribution()
@@ -710,8 +725,9 @@ async def background_cache_warmup():
         "总耗时": f"{total_warmup_elapsed:.1f}s",
     })
 
-    # 预热完成后启动后台日志同步任务
+    # 预热完成后启动后台任务
     asyncio.create_task(background_log_sync())
+    asyncio.create_task(background_ai_auto_ban_scan())
 
     # 进入定时刷新循环
     await _background_refresh_loop(cache)
@@ -1351,8 +1367,7 @@ async def background_ai_auto_ban_scan():
     """后台定时执行 AI 自动封禁扫描"""
     from .ai_auto_ban_service import get_ai_auto_ban_service
 
-    # 启动后等待 30 秒再开始
-    await asyncio.sleep(30)
+    # 预热完成后立即启动
     logger.success("AI 自动封禁后台任务已启动", category="任务")
 
     while True:
