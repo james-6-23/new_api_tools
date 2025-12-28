@@ -150,9 +150,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"数据库初始化失败: {e}", category="数据库")
 
-    # 启动后台日志同步任务
-    sync_task = asyncio.create_task(background_log_sync())
-
     # 启动后台索引创建任务（仅当有缺失索引时）
     global _indexes_ready
     index_task = None
@@ -163,7 +160,7 @@ async def lifespan(app: FastAPI):
     # 启动 AI 自动封禁后台任务
     ai_ban_task = asyncio.create_task(background_ai_auto_ban_scan())
 
-    # 启动后台缓存预热任务
+    # 启动后台缓存预热任务（预热完成后会启动日志同步任务）
     cache_warmup_task = asyncio.create_task(background_cache_warmup())
 
     # 启动 GeoIP 数据库自动更新任务
@@ -175,17 +172,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # 停止后台任务
-    sync_task.cancel()
     ai_ban_task.cancel()
     cache_warmup_task.cancel()
     geoip_update_task.cancel()
     ip_recording_task.cancel()
     if index_task:
         index_task.cancel()
-    try:
-        await sync_task
-    except asyncio.CancelledError:
-        pass
     try:
         await ai_ban_task
     except asyncio.CancelledError:
@@ -507,20 +499,34 @@ async def background_cache_warmup():
     missing_windows = [w for w in windows if w not in cached_windows]
 
     if not missing_windows:
-        # 所有缓存都有效，直接完成
-        elapsed = time.time() - warmup_start_time
-        _set_warmup_status("ready", 100, f"缓存恢复完成，耗时 {elapsed:.2f}s")
-        logger.success("所有缓存有效，无需预热")
-        logger.timer("总耗时", elapsed)
-        logger.divider("═")
+        # 所有缓存都有效，但仍需预热 Dashboard 和 IP 分布
+        logger.success("所有缓存有效，无需预热排行榜")
         
-        # 延迟预热 IP 地区分布（低优先级）
-        await asyncio.sleep(10)
+        # 预热 Dashboard 数据
+        await asyncio.sleep(2)
+        try:
+            await _warmup_dashboard_data()
+        except Exception as e:
+            logger.warn(f"Dashboard 预热异常: {e}")
+        
+        # 预热 IP 地区分布
+        await asyncio.sleep(2)
         try:
             from .ip_distribution_service import warmup_ip_distribution
             await warmup_ip_distribution()
         except Exception as e:
             logger.warning(f"[IP分布] 预热异常: {e}")
+        
+        # 所有预热完成
+        elapsed = time.time() - warmup_start_time
+        _set_warmup_status("ready", 100, f"缓存恢复完成，耗时 {elapsed:.2f}s")
+        logger.banner("✅ 缓存预热完成")
+        logger.kvs({
+            "总耗时": f"{elapsed:.1f}s",
+        })
+        
+        # 预热完成后启动后台日志同步任务
+        asyncio.create_task(background_log_sync())
         
         # 进入定时刷新循环
         await _background_refresh_loop(cache)
@@ -681,7 +687,6 @@ async def background_cache_warmup():
         "已缓存数据": f"{total_cached_records} 条 ({len(warmed)} 窗口 × 50 用户)",
         "总耗时": f"{total_elapsed:.1f}s",
     })
-    logger.banner("✅ 缓存预热完成")
 
     # === 阶段4：预热 Dashboard 数据（重要！避免首次访问超时）===
     await asyncio.sleep(2)
@@ -691,13 +696,22 @@ async def background_cache_warmup():
         logger.warn(f"Dashboard 预热异常: {e}")
 
     # === 阶段5：延迟预热 IP 地区分布（低优先级）===
-    # 等待 10 秒后执行，不阻塞主预热流程
-    await asyncio.sleep(10)
+    await asyncio.sleep(2)
     try:
         from .ip_distribution_service import warmup_ip_distribution
         await warmup_ip_distribution()
     except Exception as e:
         logger.warning(f"[IP分布] 预热异常: {e}")
+
+    # 所有预热完成后输出完成日志
+    total_warmup_elapsed = time.time() - warmup_start_time
+    logger.banner("✅ 缓存预热完成")
+    logger.kvs({
+        "总耗时": f"{total_warmup_elapsed:.1f}s",
+    })
+
+    # 预热完成后启动后台日志同步任务
+    asyncio.create_task(background_log_sync())
 
     # 进入定时刷新循环
     await _background_refresh_loop(cache)

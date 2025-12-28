@@ -416,7 +416,7 @@ class DashboardService:
             FROM logs
             WHERE created_at >= :start_time AND created_at <= :end_time
                 AND type = 2
-            GROUP BY FLOOR(created_at / 3600)
+            GROUP BY hour_ts
             ORDER BY hour_ts ASC
         """
         result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
