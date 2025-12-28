@@ -185,17 +185,18 @@ class CacheManager:
         优先级：Redis → SQLite
         """
         cache_key = f"lb:{window}:{sort_by}"
-        
+
         # L1: 尝试 Redis
         if self.redis_available:
             try:
                 data = self._redis.get(cache_key)
                 if data:
                     result = json.loads(data)
+                    logger.info(f"[缓存命中] Redis ✓ 排行榜 window={window} sort={sort_by}", category="缓存")
                     return result[:limit]
             except Exception as e:
                 logger.debug(f"[缓存] Redis 读取失败: {e}")
-        
+
         # L2: 尝试 SQLite
         now = int(time.time())
         try:
@@ -204,13 +205,14 @@ class CacheManager:
                     SELECT data FROM leaderboard_cache
                     WHERE window = ? AND sort_by = ? AND expires_at > ?
                 ''', (window, sort_by, now)).fetchone()
-                
+
                 if row:
                     result = json.loads(row['data'])
+                    logger.info(f"[缓存命中] SQLite ✓ 排行榜 window={window} sort={sort_by}", category="缓存")
                     return result[:limit]
         except Exception as e:
             logger.debug(f"[缓存] SQLite 读取失败: {e}")
-        
+
         return None
     
     def set_leaderboard(
@@ -258,16 +260,17 @@ class CacheManager:
     ) -> Optional[List[Dict]]:
         """获取 IP 监控缓存"""
         cache_key = f"ip:{type_name}:{window}"
-        
+
         # L1: Redis
         if self.redis_available:
             try:
                 data = self._redis.get(cache_key)
                 if data:
+                    logger.info(f"[缓存命中] Redis ✓ IP监控 type={type_name} window={window}", category="缓存")
                     return json.loads(data)[:limit]
             except Exception:
                 pass
-        
+
         # L2: SQLite
         now = int(time.time())
         try:
@@ -276,12 +279,13 @@ class CacheManager:
                     SELECT data FROM ip_monitoring_cache
                     WHERE type = ? AND window = ? AND expires_at > ?
                 ''', (type_name, window, now)).fetchone()
-                
+
                 if row:
+                    logger.info(f"[缓存命中] SQLite ✓ IP监控 type={type_name} window={window}", category="缓存")
                     return json.loads(row['data'])[:limit]
         except Exception:
             pass
-        
+
         return None
     
     def set_ip_monitoring(
@@ -325,10 +329,11 @@ class CacheManager:
             try:
                 data = self._redis.get(f"cache:{key}")
                 if data:
+                    logger.info(f"[缓存命中] Redis ✓ key={key}", category="缓存")
                     return json.loads(data)
             except Exception:
                 pass
-        
+
         # L2: SQLite
         now = int(time.time())
         try:
@@ -337,12 +342,13 @@ class CacheManager:
                     SELECT data FROM generic_cache
                     WHERE key = ? AND expires_at > ?
                 ''', (key, now)).fetchone()
-                
+
                 if row:
+                    logger.info(f"[缓存命中] SQLite ✓ key={key}", category="缓存")
                     return json.loads(row['data'])
         except Exception:
             pass
-        
+
         return None
     
     def set(self, key: str, data: Any, ttl: int = 300):

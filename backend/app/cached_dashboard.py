@@ -85,7 +85,6 @@ class CachedDashboardService:
             # 使用统一缓存管理器
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] overview:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range for active counts
@@ -139,7 +138,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] usage:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -197,7 +195,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] models:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -247,7 +244,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] trends:daily:{days} 命中缓存")
                 return cached_data
 
         # Fetch fresh data
@@ -280,7 +276,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] trends:hourly:{hours} 命中缓存")
                 return cached_data
 
         # Fetch fresh data
@@ -314,7 +309,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug(f"[Dashboard] topusers:{period} 命中缓存")
                 return cached_data
 
         # Calculate time range
@@ -356,7 +350,6 @@ class CachedDashboardService:
         if use_cache:
             cached_data = self._cache.get(cache_key)
             if cached_data:
-                logger.debug("[Dashboard] channels 命中缓存")
                 return cached_data
 
         # Fetch fresh data
