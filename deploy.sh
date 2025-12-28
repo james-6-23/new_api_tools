@@ -171,7 +171,31 @@ detect_environment() {
   fi
   [[ -n "$NEWAPI_NETWORK" ]] || die "无法确定 NewAPI 容器的 Docker 网络"
   container_is_on_network "$NEWAPI_CONTAINER" "$NEWAPI_NETWORK" || die "容器 '$NEWAPI_CONTAINER' 未连接到网络 '$NEWAPI_NETWORK'"
-  log_success "检测到网络: $NEWAPI_NETWORK"
+
+  # 检查是否为默认 bridge 网络（不支持 network-scoped alias）
+  ORIGINAL_NETWORK="$NEWAPI_NETWORK"
+  USE_BRIDGE_MODE=false
+
+  if [[ "$NEWAPI_NETWORK" == "bridge" ]]; then
+    log_warn "检测到 NewAPI 使用默认 bridge 网络"
+    log_warn "默认 bridge 网络不支持 Docker 服务发现，将使用 IPv4 地址模式"
+    log_info ""
+    log_info "提示：为获得更好的体验，建议将 NewAPI 部署在用户自定义网络中"
+    log_info ""
+    USE_BRIDGE_MODE=true
+
+    # 创建一个用户自定义网络供 docker-compose 使用
+    # 这样可以避免 "network-scoped alias" 错误
+    if ! docker network inspect newapi-tools-network >/dev/null 2>&1; then
+      log_info "创建网络 'newapi-tools-network' 供服务使用..."
+      docker network create newapi-tools-network || die "创建网络失败"
+    fi
+    # 使用新创建的网络作为 NEWAPI_NETWORK（供 docker-compose.yml 使用）
+    NEWAPI_NETWORK="newapi-tools-network"
+    log_success "使用网络: $NEWAPI_NETWORK (数据库连接将使用 IPv4 地址)"
+  else
+    log_success "检测到网络: $NEWAPI_NETWORK"
+  fi
 
   # 检测数据库 DSN
   local detected_dsn=""
@@ -199,11 +223,12 @@ detect_environment() {
     fi
   fi
 
-  # 通过端口检测
+  # 通过端口检测（使用原始网络，因为数据库可能还未连接到新网络）
+  local detect_network="${ORIGINAL_NETWORK:-$NEWAPI_NETWORK}"
   if [[ -z "$db_container" ]]; then
     local pg_cid mysql_cid
-    pg_cid="$(detect_db_container_by_exposed_port "$NEWAPI_NETWORK" '5432/tcp' || true)"
-    mysql_cid="$(detect_db_container_by_exposed_port "$NEWAPI_NETWORK" '3306/tcp' || true)"
+    pg_cid="$(detect_db_container_by_exposed_port "$detect_network" '5432/tcp' || true)"
+    mysql_cid="$(detect_db_container_by_exposed_port "$detect_network" '3306/tcp' || true)"
     if [[ -n "$pg_cid" && -z "$mysql_cid" ]]; then
       DB_ENGINE="${DB_ENGINE:-postgres}"
       db_container="$pg_cid"
@@ -215,46 +240,57 @@ detect_environment() {
 
   DB_ENGINE="${DB_ENGINE:-postgres}"
 
-  # 尝试常见容器名
+  # 尝试常见容器名（使用原始网络）
   if [[ -z "$db_container" ]]; then
-    if docker ps -q --filter "network=$NEWAPI_NETWORK" --filter "name=^/postgres$" | head -n 1 | grep -q .; then
+    if docker ps -q --filter "network=$detect_network" --filter "name=^/postgres$" | head -n 1 | grep -q .; then
       db_container="postgres"
       DB_ENGINE="postgres"
       db_service="postgres"
-    elif docker ps -q --filter "network=$NEWAPI_NETWORK" --filter "name=^/mysql$" | head -n 1 | grep -q .; then
+    elif docker ps -q --filter "network=$detect_network" --filter "name=^/mysql$" | head -n 1 | grep -q .; then
       db_container="mysql"
       DB_ENGINE="mysql"
       db_service="mysql"
     fi
   fi
 
-  [[ -n "$db_container" ]] || die "在网络 '$NEWAPI_NETWORK' 上找不到数据库容器"
+  [[ -n "$db_container" ]] || die "在网络 '$detect_network' 上找不到数据库容器"
   DB_CONTAINER="$db_container"
 
   # 设置 DB_DNS
-  # 优先级：1. 用户指定的 DB_DNS  2. IPv4 地址（避免 IPv6 问题）  3. 服务名
+  # 优先级：1. 用户指定的 DB_DNS  2. IPv4 地址（bridge模式必须）  3. 服务名
   if [[ -n "$DB_DNS" ]]; then
-    # 用户已指定，保持不变
+    # 用户已指定（从 SQL_DSN 解析出来），保持不变
     log_info "使用指定的数据库主机: $DB_DNS"
   else
-    # 尝试获取 IPv4 地址（某些 MySQL 客户端在 IPv6 下有问题）
+    # 尝试获取 IPv4 地址
     local db_ipv4=""
-    db_ipv4="$(get_container_ipv4 "$db_container" "$NEWAPI_NETWORK" | trim)"
-    
-    if [[ -n "$db_ipv4" ]]; then
-      DB_DNS="$db_ipv4"
-      log_info "使用数据库 IPv4 地址: $db_ipv4"
-    elif [[ -n "$db_service" ]]; then
-      DB_DNS="$db_service"
-      log_info "使用数据库服务名: $db_service"
-    else
-      db_service="$(docker_inspect_label "$db_container" 'com.docker.compose.service' | trim)"
-      if [[ -n "$db_service" ]]; then
-        DB_DNS="$db_service"
+    db_ipv4="$(get_container_ipv4 "$db_container" "$detect_network" | trim)"
+
+    if [[ "$USE_BRIDGE_MODE" == "true" ]]; then
+      # Bridge 模式：必须使用 IPv4 地址，因为不支持服务发现
+      if [[ -n "$db_ipv4" ]]; then
+        DB_DNS="$db_ipv4"
+        log_info "使用数据库 IPv4 地址: $db_ipv4 (bridge 模式)"
       else
-        DB_DNS="$db_container"
+        die "无法获取数据库容器的 IPv4 地址，请手动指定 DB_DNS 环境变量"
       fi
-      log_info "使用数据库主机: $DB_DNS"
+    else
+      # 用户自定义网络：优先使用 IPv4，其次使用服务名
+      if [[ -n "$db_ipv4" ]]; then
+        DB_DNS="$db_ipv4"
+        log_info "使用数据库 IPv4 地址: $db_ipv4"
+      elif [[ -n "$db_service" ]]; then
+        DB_DNS="$db_service"
+        log_info "使用数据库服务名: $db_service"
+      else
+        db_service="$(docker_inspect_label "$db_container" 'com.docker.compose.service' | trim)"
+        if [[ -n "$db_service" ]]; then
+          DB_DNS="$db_service"
+        else
+          DB_DNS="$db_container"
+        fi
+        log_info "使用数据库主机: $DB_DNS"
+      fi
     fi
   fi
 
@@ -449,7 +485,8 @@ start_services() {
 
   # 将容器连接到 NewAPI 网络（用于访问数据库）
   # 注意：docker-compose.yml 中也配置了网络，这里是双重保障
-  if [[ -n "$NEWAPI_NETWORK" ]]; then
+  # 在 bridge 模式下跳过，因为我们使用 IPv4 地址连接数据库
+  if [[ "$USE_BRIDGE_MODE" != "true" && -n "$NEWAPI_NETWORK" ]]; then
     log_info "连接到 NewAPI 网络: $NEWAPI_NETWORK"
     docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络已连接"
   fi
