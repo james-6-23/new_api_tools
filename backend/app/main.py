@@ -155,8 +155,10 @@ async def lifespan(app: FastAPI):
     sync_task = asyncio.create_task(background_log_sync())
 
     # 启动后台索引创建任务（仅当有缺失索引时）
+    global _indexes_ready
     index_task = None
     if db and not index_status.get("all_ready", True):
+        _indexes_ready = False  # 有索引需要创建，标记为未就绪
         index_task = asyncio.create_task(background_ensure_indexes())
 
     # 启动 AI 自动封禁后台任务
@@ -210,6 +212,8 @@ async def background_ensure_indexes():
     Background task to create missing indexes without blocking app startup.
     Creates indexes one by one with delays to minimize database load.
     """
+    global _indexes_ready
+    
     # Wait a bit for app to fully start
     await asyncio.sleep(5)
     
@@ -228,6 +232,13 @@ async def background_ensure_indexes():
         logger.system("索引创建任务已取消")
     except Exception as e:
         logger.warning(f"后台索引创建失败: {e}", category="数据库")
+    finally:
+        # 无论成功失败，都标记索引任务完成，让预热继续
+        _indexes_ready = True
+
+
+# 索引创建完成标志
+_indexes_ready = True  # 默认 True，如果没有索引任务则直接就绪
 
 
 async def background_enforce_ip_recording():
@@ -320,9 +331,10 @@ async def background_cache_warmup():
     后台缓存预热任务 - 智能恢复模式
     
     新策略：
-    1. 优先从 SQLite 恢复缓存（秒级恢复）
-    2. 仅缺失的窗口才查询 PostgreSQL
-    3. 恢复后进入定时刷新循环
+    1. 等待索引创建完成（如果有）
+    2. 优先从 SQLite 恢复缓存（秒级恢复）
+    3. 仅缺失的窗口才查询 PostgreSQL
+    4. 恢复后进入定时刷新循环
     """
     from .system_scale_service import get_detected_settings, get_scale_service, SystemScale
     from .database import get_db_manager
@@ -332,6 +344,24 @@ async def background_cache_warmup():
 
     # 启动后等待 3 秒，让数据库连接就绪
     await asyncio.sleep(3)
+    
+    # 等待索引创建完成（最多等待 10 分钟）
+    global _indexes_ready
+    if not _indexes_ready:
+        logger.system("等待索引创建完成后再开始预热...")
+        _set_warmup_status("initializing", 0, "等待索引创建完成...")
+        
+        wait_count = 0
+        max_wait = 600  # 最多等待 600 秒（10 分钟）
+        while not _indexes_ready and wait_count < max_wait:
+            await asyncio.sleep(5)
+            wait_count += 5
+        
+        if _indexes_ready:
+            logger.system("索引创建完成，开始预热")
+        else:
+            logger.warning("索引创建超时，继续预热（可能较慢）")
+    
     logger.system("=" * 50)
     logger.system("缓存恢复任务启动")
     logger.system("=" * 50)
