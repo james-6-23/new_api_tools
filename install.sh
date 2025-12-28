@@ -308,10 +308,11 @@ show_management_menu() {
     echo "  7) 重新配置   (备份当前配置，重新运行部署向导)"
     echo "  8) 重新安装   (删除容器和配置，保留数据，全新部署)"
     echo "  9) 完全卸载   (删除所有内容，包括数据，需确认)"
+    echo " 10) 完全重装   (完全卸载后重新安装，需确认)"
     echo ""
     echo "  0) 退出"
     echo ""
-    read -r -p "请选择操作 [0-9]: " choice
+    read -r -p "请选择操作 [0-10]: " choice
 
     case "$choice" in
       1)
@@ -361,6 +362,9 @@ show_management_menu() {
       9)
         do_purge_interactive "$target_dir"
         exit 0
+        ;;
+      10)
+        do_full_reinstall_interactive "$target_dir"
         ;;
       0|"")
         log_info "退出"
@@ -555,6 +559,76 @@ do_purge_interactive() {
   rm -rf "$dir_to_remove"
 
   log_success "完全卸载完成"
+}
+
+#######################################
+# 交互式完全重装 (卸载后重新安装)
+#######################################
+do_full_reinstall_interactive() {
+  local project_dir="$1"
+
+  echo ""
+  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}  警告: 完全重新安装${NC}"
+  echo -e "${RED}========================================${NC}"
+  echo ""
+  echo -e "${RED}将执行以下操作:${NC}"
+  echo -e "  1. 完全卸载现有服务（删除所有数据）"
+  echo -e "  2. 重新克隆项目"
+  echo -e "  3. 重新运行部署向导"
+  echo ""
+  echo -e "${RED}所有数据将被永久删除，无法恢复!${NC}"
+  echo ""
+  read -r -p "输入 'REINSTALL' 确认完全重装: " confirm
+
+  if [[ "$confirm" != "REINSTALL" ]]; then
+    log_info "已取消"
+    return 0
+  fi
+
+  log_warn "正在执行完全重装..."
+
+  cd "$project_dir"
+
+  # 停止并删除容器和 volumes
+  log_info "停止并删除容器..."
+  $DOCKER_COMPOSE down -v 2>/dev/null || true
+
+  # 删除相关镜像
+  log_info "删除相关镜像..."
+  docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'new_api_tools|newapi-tools' | xargs -r docker rmi -f 2>/dev/null || true
+
+  # 删除网络
+  docker network rm newapi-tools-network 2>/dev/null || true
+  docker network rm new_api_tools_default 2>/dev/null || true
+
+  # 记录安装目录（项目目录的父目录）
+  local install_dir
+  install_dir=$(dirname "$project_dir")
+
+  # 切换到上级目录
+  cd "$install_dir"
+
+  # 删除项目目录
+  log_info "删除项目目录..."
+  rm -rf "$project_dir"
+
+  # 清理 Docker 资源
+  log_info "清理 Docker 资源..."
+  docker system prune -f 2>/dev/null || true
+
+  log_success "卸载完成，开始重新安装..."
+  echo ""
+
+  # 重新设置安装目录并执行安装
+  INSTALL_DIR="$install_dir"
+  REINSTALL=true
+
+  # 克隆项目
+  clone_or_update_project
+
+  # 运行部署脚本
+  run_deploy
 }
 
 #######################################
