@@ -197,6 +197,27 @@ export function IPAnalysis() {
   const refreshIntervalRef = useRef(refreshInterval)
   const [systemScale, setSystemScale] = useState<string>('')  // 系统规模描述
 
+  // 主题检测
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return document.documentElement.classList.contains('dark')
+    }
+    return false
+  })
+
+  // 监听主题变化
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          setIsDarkMode(document.documentElement.classList.contains('dark'))
+        }
+      })
+    })
+    observer.observe(document.documentElement, { attributes: true })
+    return () => observer.disconnect()
+  }, [])
+
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const [mapError, setMapError] = useState(false)
   
@@ -423,23 +444,113 @@ export function IPAnalysis() {
   // 世界地图配置
   const worldMapOption = useMemo(() => {
     if (!data || !mapLoaded) return {}
-    
+
     const maxValue = data.by_country[0]?.request_count || 100
-    
+    const totalRequests = data.total_requests || 1
+
+    // 构建数据映射用于 tooltip
+    const dataMap = new Map(
+      data.by_country.map(item => [
+        countryCodeToName[item.country_code] || item.country,
+        item
+      ])
+    )
+
     // 转换数据为 ECharts 格式
     const mapData = data.by_country.map(item => ({
       name: countryCodeToName[item.country_code] || item.country,
       value: item.request_count,
     }))
 
+    // Top 5 热点数据 - 用于涟漪效果
+    const top5Data = data.by_country.slice(0, 5).map(item => {
+      const name = countryCodeToName[item.country_code] || item.country || ''
+      // 获取国家中心坐标（常用国家）
+      const coords: Record<string, [number, number]> = {
+        'China': [104.1954, 35.8617],
+        'United States': [-95.7129, 37.0902],
+        'Japan': [138.2529, 36.2048],
+        'Germany': [10.4515, 51.1657],
+        'United Kingdom': [-3.4360, 55.3781],
+        'France': [2.2137, 46.2276],
+        'Russia': [105.3188, 61.5240],
+        'South Korea': [127.7669, 35.9078],
+        'Canada': [-106.3468, 56.1304],
+        'Australia': [133.7751, -25.2744],
+        'Brazil': [-51.9253, -14.2350],
+        'India': [78.9629, 20.5937],
+        'Singapore': [103.8198, 1.3521],
+        'Netherlands': [5.2913, 52.1326],
+        'Hong Kong': [114.1694, 22.3193],
+        'Taiwan': [120.9605, 23.6978],
+      }
+      const coord = name ? coords[name] : undefined
+      return {
+        name,
+        value: coord ? [...coord, item.request_count] : undefined,
+        itemStyle: {
+          color: isDarkMode ? '#60a5fa' : '#3b82f6'
+        }
+      }
+    }).filter(item => item.value)
+
+    // 主题相关配色
+    const themeColors = isDarkMode ? {
+      bgColor: '#0c1929',
+      areaColor: '#1e3a5f',
+      borderColor: '#2d4a6f',
+      emphasisColor: '#fbbf24',
+      textColor: '#94a3b8',
+      tooltipBg: 'rgba(15, 23, 42, 0.95)',
+      tooltipBorder: '#334155',
+      gradientColors: ['#1e3a5f', '#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd']
+    } : {
+      bgColor: '#f0f9ff',
+      areaColor: '#f8fafc',
+      borderColor: '#cbd5e1',
+      emphasisColor: '#f59e0b',
+      textColor: '#64748b',
+      tooltipBg: 'rgba(255, 255, 255, 0.98)',
+      tooltipBorder: '#e2e8f0',
+      gradientColors: ['#eff6ff', '#bfdbfe', '#60a5fa', '#3b82f6', '#1d4ed8']
+    }
+
     return {
+      backgroundColor: themeColors.bgColor,
       tooltip: {
         trigger: 'item',
+        backgroundColor: themeColors.tooltipBg,
+        borderColor: themeColors.tooltipBorder,
+        borderWidth: 1,
+        padding: [12, 16],
+        textStyle: {
+          color: isDarkMode ? '#e2e8f0' : '#1e293b',
+          fontSize: 13,
+        },
         formatter: (params: any) => {
-          if (params.value) {
-            return `<strong>${params.name}</strong><br/>流量: ${params.value.toLocaleString('zh-CN')}`
+          if (params.seriesType === 'effectScatter') {
+            return ''
           }
-          return params.name
+          const itemData = dataMap.get(params.name)
+          if (itemData) {
+            const percentage = ((itemData.request_count / totalRequests) * 100).toFixed(2)
+            return `
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid ${themeColors.tooltipBorder}">
+                ${params.name}
+              </div>
+              <div style="display: grid; grid-template-columns: auto auto; gap: 4px 16px; font-size: 13px;">
+                <span style="color: ${themeColors.textColor}">流量</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.request_count.toLocaleString('zh-CN')}</span>
+                <span style="color: ${themeColors.textColor}">占比</span>
+                <span style="font-weight: 500; text-align: right;">${percentage}%</span>
+                <span style="color: ${themeColors.textColor}">IP 数</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.ip_count.toLocaleString('zh-CN')}</span>
+                <span style="color: ${themeColors.textColor}">用户数</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.user_count.toLocaleString('zh-CN')}</span>
+              </div>
+            `
+          }
+          return `<div style="font-weight: 500">${params.name}</div><div style="color: ${themeColors.textColor}; font-size: 12px; margin-top: 4px;">暂无数据</div>`
         }
       },
       visualMap: {
@@ -449,13 +560,27 @@ export function IPAnalysis() {
         realtime: false,
         calculable: true,
         inRange: {
-          color: ['#e3f2fd', '#90caf9', '#42a5f5', '#1e88e5', '#1565c0']
+          color: themeColors.gradientColors
         },
         textStyle: {
-          color: '#666'
+          color: themeColors.textColor,
+          fontSize: 12
         },
-        left: 16,
-        bottom: 16,
+        left: 20,
+        bottom: 20,
+        itemWidth: 12,
+        itemHeight: 120,
+      },
+      geo: {
+        map: 'world',
+        roam: true,
+        scaleLimit: { min: 1, max: 10 },
+        zoom: 1.2,
+        silent: true,
+        itemStyle: {
+          areaColor: themeColors.bgColor,
+          borderColor: 'transparent',
+        }
       },
       series: [
         {
@@ -463,58 +588,169 @@ export function IPAnalysis() {
           type: 'map',
           map: 'world',
           roam: true,
-          scaleLimit: {
-            min: 1,
-            max: 8
-          },
+          scaleLimit: { min: 1, max: 10 },
           zoom: 1.2,
           emphasis: {
             label: {
               show: true,
-              color: '#333',
+              color: isDarkMode ? '#f8fafc' : '#1e293b',
               fontSize: 12,
+              fontWeight: 500,
             },
             itemStyle: {
-              areaColor: '#ffc107'
+              areaColor: themeColors.emphasisColor,
+              shadowColor: 'rgba(0, 0, 0, 0.3)',
+              shadowBlur: 10,
             }
           },
-          select: {
-            disabled: true
-          },
+          select: { disabled: true },
           itemStyle: {
-            areaColor: '#f5f5f5',
-            borderColor: '#e0e0e0',
+            areaColor: themeColors.areaColor,
+            borderColor: themeColors.borderColor,
             borderWidth: 0.5
           },
-          label: {
-            show: false
-          },
+          label: { show: false },
           data: mapData
+        },
+        // 涟漪效果层 - Top 5 热点
+        {
+          name: '热点',
+          type: 'effectScatter',
+          coordinateSystem: 'geo',
+          data: top5Data,
+          symbolSize: (val: number[]) => Math.min(Math.max(Math.sqrt(val[2]) / 10, 8), 30),
+          showEffectOn: 'render',
+          rippleEffect: {
+            brushType: 'stroke',
+            scale: 3,
+            period: 4,
+          },
+          label: { show: false },
+          itemStyle: {
+            color: isDarkMode ? '#60a5fa' : '#3b82f6',
+            shadowBlur: 10,
+            shadowColor: isDarkMode ? 'rgba(96, 165, 250, 0.5)' : 'rgba(59, 130, 246, 0.5)',
+          },
+          zlevel: 1,
         }
       ]
     }
-  }, [data, mapLoaded])
+  }, [data, mapLoaded, isDarkMode])
 
   // 中国地图配置
   const chinaMapOption = useMemo(() => {
     if (!data || !chinaMapLoaded) return {}
-    
+
     const maxValue = data.by_province[0]?.request_count || 100
-    
+    const totalRequests = data.by_province.reduce((sum, item) => sum + item.request_count, 0) || 1
+
+    // 构建数据映射用于 tooltip
+    const dataMap = new Map(
+      data.by_province.map(item => [
+        provinceNameMap[item.region || ''] || item.region,
+        item
+      ])
+    )
+
     // 转换数据为 ECharts 格式
     const mapData = data.by_province.map(item => ({
       name: provinceNameMap[item.region || ''] || item.region,
       value: item.request_count,
     }))
 
+    // Top 5 热点数据 - 用于涟漪效果
+    const top5Data = data.by_province.slice(0, 5).map(item => {
+      const name = provinceNameMap[item.region || ''] || item.region || ''
+      // 省份中心坐标
+      const coords: Record<string, [number, number]> = {
+        '北京': [116.4074, 39.9042],
+        '上海': [121.4737, 31.2304],
+        '广东': [113.2644, 23.1291],
+        '浙江': [120.1551, 30.2741],
+        '江苏': [118.7969, 32.0603],
+        '四川': [104.0657, 30.6595],
+        '山东': [117.0009, 36.6758],
+        '河南': [113.6254, 34.7466],
+        '湖北': [114.3055, 30.5928],
+        '福建': [119.3064, 26.0753],
+        '湖南': [112.9823, 28.1941],
+        '安徽': [117.2830, 31.8612],
+        '河北': [114.4680, 38.0428],
+        '陕西': [108.9540, 34.2658],
+        '辽宁': [123.4315, 41.7968],
+        '天津': [117.1907, 39.1256],
+        '重庆': [106.5516, 29.5630],
+        '江西': [115.8921, 28.6765],
+        '云南': [102.7123, 25.0406],
+        '山西': [112.5493, 37.8706],
+      }
+      const coord = name ? coords[name] : undefined
+      return {
+        name,
+        value: coord ? [...coord, item.request_count] : undefined,
+        itemStyle: {
+          color: isDarkMode ? '#f472b6' : '#ec4899'
+        }
+      }
+    }).filter(item => item.value)
+
+    // 主题相关配色
+    const themeColors = isDarkMode ? {
+      bgColor: '#180a14',
+      areaColor: '#3d1a2e',
+      borderColor: '#5c2d4a',
+      emphasisColor: '#fbbf24',
+      textColor: '#94a3b8',
+      tooltipBg: 'rgba(15, 23, 42, 0.95)',
+      tooltipBorder: '#334155',
+      gradientColors: ['#3d1a2e', '#be185d', '#ec4899', '#f472b6', '#fbcfe8']
+    } : {
+      bgColor: '#fdf2f8',
+      areaColor: '#fce7f3',
+      borderColor: '#f9a8d4',
+      emphasisColor: '#f59e0b',
+      textColor: '#64748b',
+      tooltipBg: 'rgba(255, 255, 255, 0.98)',
+      tooltipBorder: '#fce7f3',
+      gradientColors: ['#fdf2f8', '#fbcfe8', '#f472b6', '#ec4899', '#be185d']
+    }
+
     return {
+      backgroundColor: themeColors.bgColor,
       tooltip: {
         trigger: 'item',
+        backgroundColor: themeColors.tooltipBg,
+        borderColor: themeColors.tooltipBorder,
+        borderWidth: 1,
+        padding: [12, 16],
+        textStyle: {
+          color: isDarkMode ? '#e2e8f0' : '#1e293b',
+          fontSize: 13,
+        },
         formatter: (params: any) => {
-          if (params.value) {
-            return `<strong>${params.name}</strong><br/>流量: ${params.value.toLocaleString('zh-CN')}`
+          if (params.seriesType === 'effectScatter') {
+            return ''
           }
-          return params.name
+          const itemData = dataMap.get(params.name)
+          if (itemData) {
+            const percentage = ((itemData.request_count / totalRequests) * 100).toFixed(2)
+            return `
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid ${themeColors.tooltipBorder}">
+                ${params.name}
+              </div>
+              <div style="display: grid; grid-template-columns: auto auto; gap: 4px 16px; font-size: 13px;">
+                <span style="color: ${themeColors.textColor}">流量</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.request_count.toLocaleString('zh-CN')}</span>
+                <span style="color: ${themeColors.textColor}">占比</span>
+                <span style="font-weight: 500; text-align: right;">${percentage}%</span>
+                <span style="color: ${themeColors.textColor}">IP 数</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.ip_count.toLocaleString('zh-CN')}</span>
+                <span style="color: ${themeColors.textColor}">用户数</span>
+                <span style="font-weight: 500; text-align: right;">${itemData.user_count.toLocaleString('zh-CN')}</span>
+              </div>
+            `
+          }
+          return `<div style="font-weight: 500">${params.name}</div><div style="color: ${themeColors.textColor}; font-size: 12px; margin-top: 4px;">暂无数据</div>`
         }
       },
       visualMap: {
@@ -524,13 +760,27 @@ export function IPAnalysis() {
         realtime: false,
         calculable: true,
         inRange: {
-          color: ['#fce4ec', '#f48fb1', '#f06292', '#ec407a', '#e91e63']
+          color: themeColors.gradientColors
         },
         textStyle: {
-          color: '#666'
+          color: themeColors.textColor,
+          fontSize: 12
         },
-        left: 16,
-        bottom: 16,
+        left: 20,
+        bottom: 20,
+        itemWidth: 12,
+        itemHeight: 120,
+      },
+      geo: {
+        map: 'china',
+        roam: true,
+        scaleLimit: { min: 1, max: 10 },
+        zoom: 1.2,
+        silent: true,
+        itemStyle: {
+          areaColor: themeColors.bgColor,
+          borderColor: 'transparent',
+        }
       },
       series: [
         {
@@ -538,37 +788,54 @@ export function IPAnalysis() {
           type: 'map',
           map: 'china',
           roam: true,
-          scaleLimit: {
-            min: 1,
-            max: 8
-          },
+          scaleLimit: { min: 1, max: 10 },
           zoom: 1.2,
           emphasis: {
             label: {
               show: true,
-              color: '#333',
+              color: isDarkMode ? '#f8fafc' : '#1e293b',
               fontSize: 12,
+              fontWeight: 500,
             },
             itemStyle: {
-              areaColor: '#ffc107'
+              areaColor: themeColors.emphasisColor,
+              shadowColor: 'rgba(0, 0, 0, 0.3)',
+              shadowBlur: 10,
             }
           },
-          select: {
-            disabled: true
-          },
+          select: { disabled: true },
           itemStyle: {
-            areaColor: '#f5f5f5',
-            borderColor: '#e0e0e0',
+            areaColor: themeColors.areaColor,
+            borderColor: themeColors.borderColor,
             borderWidth: 0.5
           },
-          label: {
-            show: false
-          },
+          label: { show: false },
           data: mapData
+        },
+        // 涟漪效果层 - Top 5 热点
+        {
+          name: '热点',
+          type: 'effectScatter',
+          coordinateSystem: 'geo',
+          data: top5Data,
+          symbolSize: (val: number[]) => Math.min(Math.max(Math.sqrt(val[2]) / 10, 8), 30),
+          showEffectOn: 'render',
+          rippleEffect: {
+            brushType: 'stroke',
+            scale: 3,
+            period: 4,
+          },
+          label: { show: false },
+          itemStyle: {
+            color: isDarkMode ? '#f472b6' : '#ec4899',
+            shadowBlur: 10,
+            shadowColor: isDarkMode ? 'rgba(244, 114, 182, 0.5)' : 'rgba(236, 72, 153, 0.5)',
+          },
+          zlevel: 1,
         }
       ]
     }
-  }, [data, chinaMapLoaded])
+  }, [data, chinaMapLoaded, isDarkMode])
 
   const currentMapOption = mapType === 'world' ? worldMapOption : chinaMapOption
   const isCurrentMapLoaded = mapType === 'world' ? mapLoaded : chinaMapLoaded
@@ -729,9 +996,9 @@ export function IPAnalysis() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {mapError && mapType === 'world' ? (
-            <div className="h-[400px] flex flex-col items-center justify-center text-muted-foreground bg-muted/20 rounded-lg gap-3">
+            <div className="h-[450px] flex flex-col items-center justify-center text-muted-foreground bg-muted/20 rounded-b-lg gap-3">
               <AlertTriangle className="h-10 w-10 text-yellow-500" />
               <span>地图加载失败，请刷新页面重试</span>
               <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
@@ -739,19 +1006,29 @@ export function IPAnalysis() {
               </Button>
             </div>
           ) : !isCurrentMapLoaded ? (
-            <div className="h-[400px] flex items-center justify-center text-muted-foreground">
+            <div className="h-[450px] flex items-center justify-center text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin mr-2" />
               加载地图中...
             </div>
           ) : data && (mapType === 'world' ? data.by_country.length > 0 : data.by_province.length > 0) ? (
-            <ReactECharts
-              key={mapType}
-              option={currentMapOption}
-              style={{ height: '400px', width: '100%' }}
-              opts={{ renderer: 'canvas' }}
-            />
+            <div className="relative overflow-hidden rounded-b-lg">
+              <ReactECharts
+                key={`${mapType}-${isDarkMode ? 'dark' : 'light'}`}
+                option={currentMapOption}
+                style={{ height: '450px', width: '100%' }}
+                opts={{ renderer: 'canvas' }}
+              />
+              {/* 热点图例 */}
+              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 backdrop-blur-sm border shadow-sm text-xs">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className={cn("relative inline-flex rounded-full h-2.5 w-2.5", mapType === 'world' ? "bg-blue-500" : "bg-pink-500")}></span>
+                </span>
+                <span className="text-muted-foreground">Top 5 热点</span>
+              </div>
+            </div>
           ) : (
-            <div className="h-[400px] flex items-center justify-center text-muted-foreground bg-muted/20 rounded-lg">
+            <div className="h-[450px] flex items-center justify-center text-muted-foreground bg-muted/20 rounded-b-lg">
               暂无数据
             </div>
           )}
