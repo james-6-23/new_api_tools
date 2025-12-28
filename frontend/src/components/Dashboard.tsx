@@ -62,55 +62,88 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<PeriodType>('7d')
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
+  const requestTimeoutMs = 20_000
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
   }), [token])
 
-  const fetchOverview = useCallback(async () => {
+  const fetchOverview = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/overview?period=${period}`, { headers: getAuthHeaders() })
+      const cacheParam = noCache ? '&no_cache=true' : ''
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/overview?period=${period}${cacheParam}`,
+        { headers: getAuthHeaders(), signal },
+      )
       const data = await response.json()
       if (data.success) setOverview(data.data)
+      return true
     } catch (error) { console.error('Failed to fetch overview:', error) }
+    return false
   }, [apiUrl, getAuthHeaders, period])
 
-  const fetchUsage = useCallback(async () => {
+  const fetchUsage = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/usage?period=${period}`, { headers: getAuthHeaders() })
+      const cacheParam = noCache ? '&no_cache=true' : ''
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/usage?period=${period}${cacheParam}`,
+        { headers: getAuthHeaders(), signal },
+      )
       const data = await response.json()
       if (data.success) setUsage(data.data)
+      return true
     } catch (error) { console.error('Failed to fetch usage:', error) }
+    return false
   }, [apiUrl, getAuthHeaders, period])
 
-  const fetchModels = useCallback(async () => {
+  const fetchModels = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/models?period=${period}&limit=8`, { headers: getAuthHeaders() })
+      const cacheParam = noCache ? '&no_cache=true' : ''
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/models?period=${period}&limit=8${cacheParam}`,
+        { headers: getAuthHeaders(), signal },
+      )
       const data = await response.json()
       if (data.success) setModels(data.data)
+      return true
     } catch (error) { console.error('Failed to fetch models:', error) }
+    return false
   }, [apiUrl, getAuthHeaders, period])
 
-  const fetchTrends = useCallback(async () => {
+  const fetchTrends = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
     try {
+      const cacheParam = noCache ? '&no_cache=true' : ''
       let response
       if (period === '24h') {
         // 24小时使用小时级数据
-        response = await fetch(`${apiUrl}/api/dashboard/trends/hourly?hours=24`, { headers: getAuthHeaders() })
+        response = await fetch(
+          `${apiUrl}/api/dashboard/trends/hourly?hours=24${cacheParam}`,
+          { headers: getAuthHeaders(), signal },
+        )
       } else {
         const days = period === '3d' ? 3 : period === '7d' ? 7 : 14
-        response = await fetch(`${apiUrl}/api/dashboard/trends/daily?days=${days}`, { headers: getAuthHeaders() })
+        response = await fetch(
+          `${apiUrl}/api/dashboard/trends/daily?days=${days}${cacheParam}`,
+          { headers: getAuthHeaders(), signal },
+        )
       }
       const data = await response.json()
       if (data.success) setDailyTrends(data.data)
+      return true
     } catch (error) { console.error('Failed to fetch trends:', error) }
+    return false
   }, [apiUrl, getAuthHeaders, period])
 
-  const fetchAnalyticsSummary = useCallback(async () => {
+  const fetchAnalyticsSummary = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
     try {
-      const response = await fetch(`${apiUrl}/api/dashboard/top-users?period=${period}&limit=10`, { headers: getAuthHeaders() })
+      const cacheParam = noCache ? '&no_cache=true' : ''
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/top-users?period=${period}&limit=10${cacheParam}`,
+        { headers: getAuthHeaders(), signal },
+      )
       const data = await response.json()
       
       if (data.success && data.data.length > 0) {
@@ -132,23 +165,100 @@ export function Dashboard() {
       } else {
         setAnalyticsSummary(null)
       }
+      return true
     } catch (error) { console.error('Failed to fetch analytics summary:', error) }
+    return false
   }, [apiUrl, getAuthHeaders, period])
 
+  const fetchAll = useCallback(async (noCache = false, signal?: AbortSignal): Promise<boolean> => {
+    const results = await Promise.all([
+      fetchOverview(noCache, signal),
+      fetchUsage(noCache, signal),
+      fetchModels(noCache, signal),
+      fetchTrends(noCache, signal),
+      fetchAnalyticsSummary(noCache, signal),
+    ])
+    return results.every(Boolean)
+  }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
+
+  const refreshAll = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+    const results: boolean[] = []
+    results.push(await fetchOverview(true, signal))
+    results.push(await fetchUsage(true, signal))
+    results.push(await fetchModels(true, signal))
+    results.push(await fetchTrends(true, signal))
+    results.push(await fetchAnalyticsSummary(true, signal))
+    return results.every(Boolean)
+  }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
+
   useEffect(() => {
+    const controller = new AbortController()
+    let mounted = true
+
     const loadData = async () => {
+      setLoadError(null)
       setLoading(true)
-      await Promise.all([fetchOverview(), fetchUsage(), fetchModels(), fetchTrends(), fetchAnalyticsSummary()])
-      setLoading(false)
+
+      const timeoutId = window.setTimeout(() => {
+        if (mounted) setLoadError('仪表盘加载超时，请稍后重试（可能是数据库负载过高）')
+        controller.abort()
+      }, requestTimeoutMs)
+
+      try {
+        await fetchAll(false, controller.signal)
+      } finally {
+        window.clearTimeout(timeoutId)
+        if (mounted) setLoading(false)
+      }
     }
     loadData()
-  }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
+
+    return () => {
+      mounted = false
+      controller.abort()
+    }
+  }, [fetchAll, requestTimeoutMs])
+
+  const handleRetry = async () => {
+    setRefreshing(true)
+    setLoadError(null)
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), requestTimeoutMs)
+
+    try {
+      const ok = await fetchAll(false, controller.signal)
+      if (!ok || controller.signal.aborted) {
+        showToast('error', '重试失败，请稍后再试')
+        setLoadError('重试失败，请稍后再试（可能是数据库负载过高）')
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
+      setRefreshing(false)
+      controller.abort()
+    }
+  }
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await Promise.all([fetchOverview(), fetchUsage(), fetchModels(), fetchTrends(), fetchAnalyticsSummary()])
-    setRefreshing(false)
-    showToast('success', '数据已刷新')
+    setLoadError(null)
+
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), requestTimeoutMs)
+
+    try {
+      const ok = await refreshAll(controller.signal)
+      if (ok && !controller.signal.aborted) {
+        showToast('success', '数据已刷新')
+      } else {
+        showToast('error', '刷新失败，请稍后再试')
+        setLoadError('刷新失败，请稍后再试（可能是数据库负载过高）')
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
+      setRefreshing(false)
+      controller.abort()
+    }
   }
 
   const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
@@ -168,6 +278,18 @@ export function Dashboard() {
     )
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-40 gap-4">
+        <p className="text-sm text-muted-foreground text-center max-w-md">{loadError}</p>
+        <Button variant="outline" onClick={handleRetry} disabled={refreshing}>
+          <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
+          {refreshing ? '重试中...' : '重试'}
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Header Actions */}
@@ -179,7 +301,7 @@ export function Dashboard() {
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
             <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
-            刷新
+            {refreshing ? '正在获取最新数据...' : '刷新'}
           </Button>
           <div className="inline-flex rounded-lg border bg-muted/50 p-1">
             {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (

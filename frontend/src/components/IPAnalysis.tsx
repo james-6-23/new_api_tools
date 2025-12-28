@@ -186,6 +186,17 @@ export function IPAnalysis() {
   const mapLoadedRef = useRef(false)
   const chinaMapLoadedRef = useRef(false)
 
+  // 自动刷新相关状态
+  const IP_REFRESH_KEY = 'ip_analysis_refresh_interval'
+  const [refreshInterval, setRefreshInterval] = useState<number>(() => {
+    const saved = localStorage.getItem(IP_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 0  // 默认0，等待从后端获取
+  })
+  const [countdown, setCountdown] = useState(refreshInterval)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const refreshIntervalRef = useRef(refreshInterval)
+  const [systemScale, setSystemScale] = useState<string>('')  // 系统规模描述
+
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const [mapError, setMapError] = useState(false)
   
@@ -279,10 +290,39 @@ export function IPAnalysis() {
     'Authorization': `Bearer ${token}`,
   }), [token])
 
-  const fetchData = useCallback(async () => {
+  // 获取系统规模设置，自动调整刷新间隔（仅当用户没有手动设置时）
+  const fetchSystemScale = useCallback(async () => {
     try {
+      const response = await fetch(`${apiUrl}/api/system/scale`, { headers: getAuthHeaders() })
+      const res = await response.json()
+      if (res.success && res.data?.settings) {
+        const settings = res.data.settings
+        const interval = settings.frontend_refresh_interval || 60
+        setSystemScale(settings.description || '')
+
+        // 只有在用户没有手动设置过时，才使用系统推荐值
+        const saved = localStorage.getItem(IP_REFRESH_KEY)
+        if (!saved) {
+          setRefreshInterval(interval)
+          setCountdown(interval)
+          refreshIntervalRef.current = interval
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch system scale:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // 组件加载时获取系统规模设置
+  useEffect(() => {
+    fetchSystemScale()
+  }, [fetchSystemScale])
+
+  const fetchData = useCallback(async (noCache = false) => {
+    try {
+      const cacheParam = noCache ? '&no_cache=true' : ''
       const response = await fetch(
-        `${apiUrl}/api/dashboard/ip-distribution?window=${timeWindow}`,
+        `${apiUrl}/api/dashboard/ip-distribution?window=${timeWindow}${cacheParam}`,
         { headers: getAuthHeaders() }
       )
       const result = await response.json()
@@ -306,10 +346,63 @@ export function IPAnalysis() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await fetchData()
+    await fetchData(true)
     setRefreshing(false)
     showToast('success', '数据已刷新')
   }
+
+  // 更新 refreshIntervalRef
+  useEffect(() => {
+    refreshIntervalRef.current = refreshInterval
+  }, [refreshInterval])
+
+  // 保存刷新间隔到 localStorage
+  const handleRefreshIntervalChange = useCallback((val: number) => {
+    setRefreshInterval(val)
+    setCountdown(val)
+    refreshIntervalRef.current = val
+    if (val > 0) {
+      localStorage.setItem(IP_REFRESH_KEY, val.toString())
+      const label = val >= 60 ? `${val / 60}分钟` : `${val}秒`
+      showToast('success', `IP 分析自动刷新已设置为 ${label}`)
+    } else {
+      localStorage.removeItem(IP_REFRESH_KEY)
+      showToast('info', 'IP 分析自动刷新已关闭')
+    }
+  }, [showToast])
+
+  // 自动刷新逻辑
+  useEffect(() => {
+    if (refreshInterval <= 0) {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
+      return
+    }
+
+    setCountdown(refreshIntervalRef.current)
+
+    const doAutoRefresh = async () => {
+      await fetchData(true)
+    }
+
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          doAutoRefresh()
+          return refreshIntervalRef.current
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+      }
+    }
+  }, [refreshInterval, fetchData])
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -502,16 +595,35 @@ export function IPAnalysis() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleRefresh} 
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
             disabled={refreshing}
             className="h-9"
           >
             <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
-            刷新
+            {refreshing ? '正在获取最新数据...' : (
+              refreshInterval > 0 ? `刷新 (${countdown}s)` : '刷新'
+            )}
           </Button>
+          <select
+            value={refreshInterval}
+            onChange={(e) => handleRefreshIntervalChange(Number(e.target.value))}
+            className="h-9 px-2 text-xs rounded-md border bg-background hover:bg-accent cursor-pointer"
+            title={systemScale ? `当前系统规模: ${systemScale}` : ''}
+          >
+            <option value={0}>自动刷新: 关闭</option>
+            <option value={30}>30秒</option>
+            <option value={60}>1分钟</option>
+            <option value={300}>5分钟</option>
+            <option value={600}>10分钟</option>
+          </select>
+          {systemScale && (
+            <span className="text-xs text-muted-foreground hidden sm:inline" title="根据系统规模自动检测">
+              {systemScale}
+            </span>
+          )}
           <div className="inline-flex rounded-lg border bg-muted/50 p-1">
             {(['1h', '6h', '24h', '7d'] as TimeWindow[]).map((w) => (
               <Button

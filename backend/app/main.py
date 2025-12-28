@@ -359,7 +359,7 @@ async def _warmup_dashboard_data():
         # === 核心 Dashboard API（前端 Promise.all 并发调用）===
         ("overview_7d", lambda: dashboard_service.get_system_overview(period="7d", use_cache=False), 5.0),
         ("usage_7d", lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False), 5.0),
-        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=20, use_cache=False), 5.0),
+        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=8, use_cache=False), 5.0),
         ("trends_daily_7d", lambda: dashboard_service.get_daily_trends(days=7, use_cache=False), 5.0),
         ("top_users_7d", lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False), 5.0),
 
@@ -371,14 +371,14 @@ async def _warmup_dashboard_data():
         # === 3天周期（用户切换时间周期时需要）===
         ("overview_3d", lambda: dashboard_service.get_system_overview(period="3d", use_cache=False), 2.5),
         ("usage_3d", lambda: dashboard_service.get_usage_statistics(period="3d", use_cache=False), 2.5),
-        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=20, use_cache=False), 2.5),
+        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=8, use_cache=False), 2.5),
         ("trends_daily_3d", lambda: dashboard_service.get_daily_trends(days=3, use_cache=False), 2.5),
         ("top_users_3d", lambda: dashboard_service.get_top_users(period="3d", limit=10, use_cache=False), 2.5),
 
         # === 14天周期（用户切换时间周期时需要）===
         ("overview_14d", lambda: dashboard_service.get_system_overview(period="14d", use_cache=False), 10.0),
         ("usage_14d", lambda: dashboard_service.get_usage_statistics(period="14d", use_cache=False), 10.0),
-        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=20, use_cache=False), 10.0),
+        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=8, use_cache=False), 10.0),
         ("trends_daily_14d", lambda: dashboard_service.get_daily_trends(days=14, use_cache=False), 10.0),
         ("top_users_14d", lambda: dashboard_service.get_top_users(period="14d", limit=10, use_cache=False), 10.0),
 
@@ -658,12 +658,16 @@ async def background_cache_warmup():
             # 查询 PostgreSQL（只读）
             # 注意：这里只查询 Top 50 用户的聚合数据，不是全量数据
             # 即使有千万级日志，SQL 使用索引聚合，只返回 50 条结果
-            data = service.get_leaderboards(
-                windows=[window],
-                limit=50,
-                sort_by="requests",
-                use_cache=False,
-                log_progress=True
+            loop = asyncio.get_event_loop()
+            data = await loop.run_in_executor(
+                None,
+                lambda: service.get_leaderboards(
+                    windows=[window],
+                    limit=50,
+                    sort_by="requests",
+                    use_cache=False,
+                    log_progress=True,
+                ),
             )
             
             window_elapsed = time.time() - window_start
@@ -693,11 +697,9 @@ async def background_cache_warmup():
 
     logger.divider("═")
     if failed:
-        _set_warmup_status("ready", 100, f"预热完成（部分失败），耗时 {total_elapsed:.1f}s")
         logger.bullet(f"成功: {warmed}")
         logger.bullet(f"失败: {failed}")
     else:
-        _set_warmup_status("ready", 100, f"预热完成，耗时 {total_elapsed:.1f}s")
         logger.success(f"全部窗口预热完成", 窗口=warmed)
 
     logger.kvs({
@@ -705,11 +707,21 @@ async def background_cache_warmup():
         "总耗时": f"{total_elapsed:.1f}s",
     })
 
+    # 排行榜窗口预热完成，但系统仍需继续预热 Dashboard/IP 分布，避免前端提前进入导致 DB 负载骤增
+    window_status_msg = (
+        f"排行榜预热完成（部分失败），耗时 {total_elapsed:.1f}s，正在预热 Dashboard..."
+        if failed
+        else f"排行榜预热完成，耗时 {total_elapsed:.1f}s，正在预热 Dashboard..."
+    )
+    _set_warmup_status("initializing", 85, window_status_msg)
+
     # === 阶段4：预热 Dashboard 数据（重要！避免首次访问超时）===
     try:
         await _warmup_dashboard_data()
     except Exception as e:
         logger.warn(f"Dashboard 预热异常: {e}")
+    else:
+        _set_warmup_status("initializing", 92, "Dashboard 预热完成，正在预热 IP 地区分布...")
 
     # === 阶段5：预热 IP 地区分布 ===
     try:
@@ -720,6 +732,12 @@ async def background_cache_warmup():
 
     # 所有预热完成后输出完成日志
     total_warmup_elapsed = time.time() - warmup_start_time
+    final_msg = (
+        f"预热完成（部分失败），耗时 {total_warmup_elapsed:.1f}s"
+        if failed
+        else f"预热完成，耗时 {total_warmup_elapsed:.1f}s"
+    )
+    _set_warmup_status("ready", 100, final_msg)
     logger.banner("✅ 缓存预热完成")
     logger.kvs({
         "总耗时": f"{total_warmup_elapsed:.1f}s",
@@ -754,10 +772,14 @@ async def _background_refresh_loop(cache):
             
             for window in windows:
                 try:
-                    service.get_leaderboards(
-                        windows=[window],
-                        limit=50,
-                        use_cache=False
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: service.get_leaderboards(
+                            windows=[window],
+                            limit=50,
+                            use_cache=False,
+                        ),
                     )
                 except Exception:
                     pass

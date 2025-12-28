@@ -31,7 +31,7 @@ class BanRecordsResponse(BaseModel):
 
 
 @router.get("/leaderboards", response_model=LeaderboardsResponse)
-async def get_leaderboards(
+def get_leaderboards(
     windows: str = Query(default="1h,3h,6h,12h,24h", description="逗号分隔窗口 (1h/3h/6h/12h/24h)"),
     limit: int = Query(default=10, ge=1, le=50, description="每个榜单返回数量"),
     sort_by: str = Query(default="requests", description="排序维度 (requests/quota/failure_rate)"),
@@ -47,7 +47,7 @@ async def get_leaderboards(
 
 
 @router.get("/users/{user_id}/analysis", response_model=UserAnalysisResponse)
-async def get_user_analysis(
+def get_user_analysis(
     user_id: int,
     window: str = Query(default="24h", description="分析窗口 (1h/3h/6h/12h/24h)"),
     _: str = Depends(verify_auth),
@@ -62,7 +62,7 @@ async def get_user_analysis(
 
 
 @router.get("/ban-records", response_model=BanRecordsResponse)
-async def list_ban_records(
+def list_ban_records(
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=50, ge=1, le=200, description="每页数量"),
     action: Optional[str] = Query(default=None, description="过滤动作 (ban/unban)"),
@@ -92,7 +92,7 @@ class SameIPRegistrationsResponse(BaseModel):
 
 
 @router.get("/token-rotation", response_model=TokenRotationResponse)
-async def get_token_rotation_users(
+def get_token_rotation_users(
     window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
     min_tokens: int = Query(default=5, ge=2, le=50, description="最小 Token 数量阈值"),
     max_requests_per_token: int = Query(default=10, ge=1, le=100, description="每个 Token 最大平均请求数"),
@@ -122,7 +122,7 @@ async def get_token_rotation_users(
 
 
 @router.get("/affiliated-accounts", response_model=AffiliatedAccountsResponse)
-async def get_affiliated_accounts(
+def get_affiliated_accounts(
     min_invited: int = Query(default=3, ge=2, le=50, description="最小被邀请账号数量"),
     include_activity: bool = Query(default=True, description="是否包含账号活跃度信息"),
     limit: int = Query(default=50, ge=1, le=200, description="返回数量"),
@@ -146,7 +146,7 @@ async def get_affiliated_accounts(
 
 
 @router.get("/same-ip-registrations", response_model=SameIPRegistrationsResponse)
-async def get_same_ip_registrations(
+def get_same_ip_registrations(
     window: str = Query(default="7d", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
     min_users: int = Query(default=3, ge=2, le=50, description="最小用户数量"),
     limit: int = Query(default=50, ge=1, le=200, description="返回数量"),

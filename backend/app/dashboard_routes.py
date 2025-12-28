@@ -65,7 +65,7 @@ class CacheControlResponse(BaseModel):
 # API Endpoints
 
 @router.get("/overview", response_model=SystemOverviewResponse)
-async def get_system_overview(
+def get_system_overview(
     period: str = Query(default="7d", description="活跃口径时间周期 (24h/3d/7d/14d)"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -86,7 +86,7 @@ async def get_system_overview(
 
 
 @router.get("/usage", response_model=UsageStatisticsResponse)
-async def get_usage_statistics(
+def get_usage_statistics(
     period: str = Query(default="24h", description="时间周期 (1h/6h/24h/7d/30d)"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -112,7 +112,7 @@ async def get_usage_statistics(
 
 
 @router.get("/models", response_model=ModelUsageResponse)
-async def get_model_usage(
+def get_model_usage(
     period: str = Query(default="7d", description="时间周期 (24h/3d/7d/14d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
@@ -135,7 +135,7 @@ async def get_model_usage(
 
 
 @router.get("/trends/daily", response_model=TrendsResponse)
-async def get_daily_trends(
+def get_daily_trends(
     days: int = Query(default=7, ge=1, le=30, description="天数 (1-30)"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -152,7 +152,7 @@ async def get_daily_trends(
 
 
 @router.get("/trends/hourly", response_model=TrendsResponse)
-async def get_hourly_trends(
+def get_hourly_trends(
     hours: int = Query(default=24, ge=1, le=72, description="小时数 (1-72)"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
@@ -169,7 +169,7 @@ async def get_hourly_trends(
 
 
 @router.get("/top-users", response_model=TopUsersResponse)
-async def get_top_users(
+def get_top_users(
     period: str = Query(default="7d", description="时间周期 (24h/3d/7d/14d)"),
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     no_cache: bool = Query(default=False, description="跳过缓存"),
@@ -192,7 +192,7 @@ async def get_top_users(
 
 
 @router.get("/channels", response_model=ChannelStatusResponse)
-async def get_channel_status(
+def get_channel_status(
     no_cache: bool = Query(default=False, description="跳过缓存"),
     _: str = Depends(verify_auth),
 ):
@@ -206,7 +206,7 @@ async def get_channel_status(
 
 
 @router.post("/cache/invalidate", response_model=CacheControlResponse)
-async def invalidate_dashboard_cache(
+def invalidate_dashboard_cache(
     _: str = Depends(verify_auth),
 ):
     """

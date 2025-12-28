@@ -91,7 +91,9 @@ class IPDistributionService:
         if log_progress:
             logger.system(f"[IP分布] 正在查询 {window} 窗口的 IP 数据...")
         
-        ip_stats = self._query_ip_stats(start_time)
+        # _query_ip_stats 是同步 DB 查询：放到线程池里跑，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        ip_stats = await loop.run_in_executor(None, lambda: self._query_ip_stats(start_time))
         
         if not ip_stats:
             if log_progress:

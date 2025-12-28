@@ -376,6 +376,41 @@ class CacheManager:
         except Exception:
             pass
 
+    def clear_generic_prefix(self, prefix: str) -> int:
+        """
+        清除通用缓存（generic_cache）中以 prefix 开头的 key。
+
+        用途：
+        - Dashboard 缓存失效（dashboard:*）
+        - IP 分布缓存失效（ip_dist:*）
+        """
+        if not prefix:
+            return 0
+
+        deleted = 0
+
+        # L1: Redis
+        if self.redis_available:
+            try:
+                for redis_key in self._redis.scan_iter(f"cache:{prefix}*"):
+                    deleted += int(self._redis.delete(redis_key) or 0)
+            except Exception:
+                pass
+
+        # L2: SQLite
+        try:
+            with self._get_sqlite() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM generic_cache WHERE key LIKE ?",
+                    (f"{prefix}%",),
+                )
+                deleted += int(cursor.rowcount or 0)
+                conn.commit()
+        except Exception:
+            pass
+
+        return deleted
+
     # ==================== 同步状态 ====================
     
     def get_sync_state(self, key: str) -> Optional[str]:

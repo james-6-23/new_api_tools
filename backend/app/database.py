@@ -69,7 +69,7 @@ class DBConfig:
             return f"mysql+pymysql://{self.user}:{self.password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
 
 
-# Recommended indexes for IP monitoring and risk analysis
+# Recommended indexes for performance optimization
 # 优化原则：
 # 1. 最关键的排行榜索引放最前面（影响预热速度）
 # 2. 精简冗余索引，避免重复覆盖
@@ -79,6 +79,14 @@ RECOMMENDED_INDEXES = [
     # Query: WHERE created_at >= x AND type IN (2,5) GROUP BY user_id ORDER BY count DESC
     # 索引顺序：created_at(范围) -> type(等值) -> user_id(分组)
     ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),
+
+    # === 高优先级：大窗口/稳定性补充（避免 3d/7d 走全表扫描）===
+    # 对于部分数据库/数据分布，type 放前面会更容易命中索引（type 等值 -> created_at 范围）
+    ("idx_logs_type_created_user", "logs", ["type", "created_at", "user_id"]),
+
+    # === 高优先级：Dashboard 活跃 Token 统计（JOIN tokens + COUNT(DISTINCT token_id)）===
+    # Query: logs WHERE created_at >= x AND type = 2 GROUP BY token_id / DISTINCT token_id
+    ("idx_logs_type_created_token", "logs", ["type", "created_at", "token_id"]),
     
     # === 高优先级：增量日志处理 ===
     ("idx_logs_id_type", "logs", ["id", "type"]),
@@ -414,6 +422,14 @@ class DatabaseManager:
             # 这是最关键的索引，直接影响预热速度
             ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),
 
+            # === 高优先级：大窗口/稳定性补充（避免 3d/7d 走全表扫描）===
+            # Query: WHERE type IN (2,5) AND created_at >= x GROUP BY user_id
+            ("idx_logs_type_created_user", "logs", ["type", "created_at", "user_id"]),
+
+            # === 高优先级：Dashboard 活跃 Token 统计 ===
+            # Query: logs JOIN tokens WHERE type = 2 AND created_at >= x COUNT(DISTINCT token_id)
+            ("idx_logs_type_created_token", "logs", ["type", "created_at", "token_id"]),
+
             # === 高优先级：增量日志处理 ===
             ("idx_logs_id_type", "logs", ["id", "type"]),
 
@@ -528,6 +544,8 @@ class DatabaseManager:
         indexes = [
             # 最关键：排行榜查询优化
             ("idx_logs_created_type_user", "logs"),
+            ("idx_logs_type_created_user", "logs"),
+            ("idx_logs_type_created_token", "logs"),
             # 增量日志处理
             ("idx_logs_id_type", "logs"),
             # Dashboard 模型统计

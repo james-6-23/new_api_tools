@@ -204,12 +204,24 @@ async def clear_dashboard_cache(
     manager = get_cache_manager()
     deleted = manager.clear_dashboard()
 
-    logger.info(f"Cleared dashboard cache: {deleted} entries")
+    # 同步清理统一缓存管理器（SQLite + Redis）中的 Dashboard 缓存
+    try:
+        from .cache_manager import get_cache_manager as get_new_cache_manager
+        new_cache = get_new_cache_manager()
+        deleted_unified = new_cache.clear_generic_prefix("dashboard:")
+    except Exception:
+        deleted_unified = 0
+
+    logger.info(f"Cleared dashboard cache: local={deleted} unified={deleted_unified}")
 
     return CacheResponse(
         success=True,
-        message=f"Cleared {deleted} dashboard cache entries",
-        data={"deleted": deleted},
+        message=f"Cleared dashboard cache entries",
+        data={
+            "deleted": deleted + deleted_unified,
+            "local_deleted": deleted,
+            "unified_deleted": deleted_unified,
+        },
     )
 
 

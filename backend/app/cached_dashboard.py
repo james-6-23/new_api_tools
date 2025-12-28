@@ -364,7 +364,7 @@ class CachedDashboardService:
     def invalidate_cache(self, pattern: Optional[str] = None) -> int:
         """
         Invalidate dashboard cache.
-        注意：此方法仅清除本地 SQLite 缓存，Redis 缓存会自动过期。
+        清除 unified CacheManager（Redis + SQLite）的通用缓存（generic_cache）。
 
         Args:
             pattern: Optional pattern to match (e.g., 'dashboard:overview')
@@ -372,9 +372,8 @@ class CachedDashboardService:
         Returns:
             Number of entries invalidated
         """
-        if pattern:
-            return self._storage.cache_clear(f"{pattern}%")
-        return self._storage.cache_clear("dashboard:%")
+        prefix = (pattern or "dashboard:").rstrip("%")
+        return self._cache.clear_generic_prefix(prefix)
 
     def get_latest_snapshot(self, snapshot_type: str) -> Optional[Dict[str, Any]]:
         """Get the latest statistics snapshot."""
