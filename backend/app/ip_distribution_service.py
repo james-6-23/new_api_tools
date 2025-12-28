@@ -53,6 +53,7 @@ class IPDistributionService:
         self,
         window: str = "24h",
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         获取 IP 地区分布统计
@@ -60,6 +61,7 @@ class IPDistributionService:
         Args:
             window: 时间窗口 (1h/6h/24h/7d)
             use_cache: 是否使用缓存
+            log_progress: 是否输出进度日志
         
         Returns:
             {
@@ -86,16 +88,31 @@ class IPDistributionService:
         start_time = int(time.time()) - window_seconds
         
         # 查询唯一 IP 及其请求数
+        if log_progress:
+            logger.system(f"[IP分布] 正在查询 {window} 窗口的 IP 数据...")
+        
         ip_stats = self._query_ip_stats(start_time)
         
         if not ip_stats:
+            if log_progress:
+                logger.system("[IP分布] 无 IP 数据")
             result = self._empty_result()
             self._cache.set(cache_key, result, ttl=CACHE_TTL.get(window, 1800))
             return result
         
-        # 批量查询 IP 地理位置
+        total_ips = len(ip_stats)
+        total_requests = sum(s["request_count"] for s in ip_stats.values())
+        
+        if log_progress:
+            logger.system(f"[IP分布] 查询到 {total_ips:,} 个唯一 IP，共 {total_requests:,} 次请求")
+            logger.system(f"[IP分布] 正在查询 IP 地理位置...")
+        
+        # 批量查询 IP 地理位置（带进度）
         ips = list(ip_stats.keys())
-        geo_results = await self._geo.query_batch(ips)
+        geo_results = await self._geo.query_batch(ips, log_progress=log_progress)
+        
+        if log_progress:
+            logger.system(f"[IP分布] 地理位置查询完成，正在聚合统计...")
         
         # 聚合统计
         result = self._aggregate_stats(ip_stats, geo_results)
@@ -103,6 +120,9 @@ class IPDistributionService:
         
         # 缓存结果
         self._cache.set(cache_key, result, ttl=CACHE_TTL.get(window, 1800))
+        
+        if log_progress:
+            logger.system(f"[IP分布] 统计完成: {len(result['by_country'])} 个国家, {len(result['by_province'])} 个省份")
         
         return result
     
@@ -326,6 +346,7 @@ async def warmup_ip_distribution():
     1. 延迟执行，不阻塞系统启动
     2. 只预热 24h 数据，其他窗口按需查询
     3. 失败不影响系统运行
+    4. 输出详细进度日志
     """
     try:
         service = get_ip_distribution_service()
@@ -339,11 +360,21 @@ async def warmup_ip_distribution():
         logger.system("[IP分布] 开始预热 24h 数据...")
         start = time.time()
         
-        # 执行查询（use_cache=False 强制刷新）
-        await service.get_distribution(window="24h", use_cache=False)
+        # 执行查询（use_cache=False 强制刷新，log_progress=True 输出进度）
+        result = await service.get_distribution(window="24h", use_cache=False, log_progress=True)
         
         elapsed = time.time() - start
-        logger.system(f"[IP分布] 预热完成，耗时 {elapsed:.2f}s")
+        
+        # 输出预热结果摘要
+        if result:
+            logger.system(
+                f"[IP分布] 预热完成，耗时 {elapsed:.2f}s | "
+                f"IP数: {result.get('total_ips', 0):,} | "
+                f"请求数: {result.get('total_requests', 0):,} | "
+                f"国内: {result.get('domestic_percentage', 0):.1f}%"
+            )
+        else:
+            logger.system(f"[IP分布] 预热完成，耗时 {elapsed:.2f}s (无数据)")
         
     except Exception as e:
         logger.warning(f"[IP分布] 预热失败: {e}")

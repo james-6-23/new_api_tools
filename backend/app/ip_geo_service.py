@@ -312,11 +312,24 @@ class IPGeoService:
         
         return info
     
-    async def query_batch(self, ips: List[str]) -> Dict[str, IPGeoInfo]:
-        """批量查询 IP 地理位置（本地数据库，无速率限制）"""
-        results: Dict[str, IPGeoInfo] = {}
+    async def query_batch(self, ips: List[str], log_progress: bool = False) -> Dict[str, IPGeoInfo]:
+        """
+        批量查询 IP 地理位置（本地数据库，无速率限制）
         
-        for ip in ips:
+        Args:
+            ips: IP 地址列表
+            log_progress: 是否输出进度日志
+        """
+        results: Dict[str, IPGeoInfo] = {}
+        total = len(ips)
+        cached_count = 0
+        queried_count = 0
+        
+        # 进度日志间隔（每处理 500 个 IP 输出一次）
+        progress_interval = 500
+        last_progress = 0
+        
+        for idx, ip in enumerate(ips):
             if not ip:
                 continue
             
@@ -324,6 +337,7 @@ class IPGeoService:
             cached = self._get_cached(ip)
             if cached:
                 results[ip] = cached
+                cached_count += 1
                 continue
             
             # 私有 IP
@@ -343,6 +357,17 @@ class IPGeoService:
             if info.success:
                 self._set_cached(info)
             results[ip] = info
+            queried_count += 1
+            
+            # 输出进度日志
+            if log_progress and (idx - last_progress) >= progress_interval:
+                progress_pct = (idx + 1) / total * 100
+                logger.system(f"[IP分布] GeoIP 查询进度: {idx + 1:,}/{total:,} ({progress_pct:.1f}%)")
+                last_progress = idx
+        
+        # 最终进度日志
+        if log_progress and total > 0:
+            logger.system(f"[IP分布] GeoIP 查询完成: 缓存命中 {cached_count:,}, 新查询 {queried_count:,}")
         
         return results
     

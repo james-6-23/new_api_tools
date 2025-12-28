@@ -335,6 +335,33 @@ async def background_cache_warmup():
     2. 优先从 SQLite 恢复缓存（秒级恢复）
     3. 仅缺失的窗口才查询 PostgreSQL
     4. 恢复后进入定时刷新循环
+    
+    千万级数据处理策略：
+    ========================
+    本系统不会加载全量数据到内存，而是采用以下优化策略：
+    
+    1. 聚合查询：SQL 使用 GROUP BY user_id 聚合，只返回 Top 50 用户
+       - 即使有 1000 万条日志，也只返回 50 条聚合结果
+       - 数据库在服务端完成聚合，不传输原始数据
+    
+    2. 索引优化：使用复合索引 idx_logs_created_type_user
+       - 索引覆盖 (created_at, type, user_id)
+       - 查询只扫描索引，不回表读取全部字段
+    
+    3. 时间窗口：按时间窗口分别缓存 (1h/3h/6h/12h/24h/3d/7d)
+       - 每个窗口独立缓存，独立刷新
+       - 短窗口数据量小，查询快
+    
+    4. 三层缓存：Redis → SQLite → PostgreSQL
+       - 热数据在 Redis（毫秒级响应）
+       - 持久化到 SQLite（重启后秒级恢复）
+       - 只有缓存失效才查询 PostgreSQL
+    
+    5. 延迟策略：根据系统规模调整查询间隔
+       - 小型系统：无延迟
+       - 中型系统：0.5s 延迟
+       - 大型系统：1s 延迟
+       - 超大型系统：2s 延迟
     """
     from .system_scale_service import get_detected_settings, get_scale_service, SystemScale
     from .database import get_db_manager
@@ -426,49 +453,125 @@ async def background_cache_warmup():
     # 获取预热策略
     strategy = WARMUP_STRATEGY.get(scale.value, WARMUP_STRATEGY["medium"])
     query_delay = strategy['query_delay']
+    
+    # 估算预热时间和数据量
+    total_to_warm = len(missing_windows)
+    logs_24h = metrics.get('logs_24h', 0)
+    total_logs = metrics.get('total_logs', 0)
+    
+    # 根据系统规模估算每个窗口的查询时间
+    if logs_24h > 5000000:  # 500万+
+        estimated_query_time = 5.0  # 大数据量，每个窗口约5秒
+    elif logs_24h > 1000000:  # 100万+
+        estimated_query_time = 3.0
+    elif logs_24h > 100000:  # 10万+
+        estimated_query_time = 1.5
+    else:
+        estimated_query_time = 0.5
+    
+    # 估算每个窗口需要扫描的日志数量
+    # 基于 24h 日志数按比例估算
+    window_logs_estimate = {}
+    window_hours = {"1h": 1, "3h": 3, "6h": 6, "12h": 12, "24h": 24, "3d": 72, "7d": 168}
+    hourly_rate = logs_24h / 24 if logs_24h > 0 else 0
+    
+    total_logs_to_scan = 0
+    for w in missing_windows:
+        hours = window_hours.get(w, 24)
+        if hours <= 24:
+            # 24小时内，按小时比例估算
+            estimated_logs = int(hourly_rate * hours)
+        else:
+            # 超过24小时，假设历史数据量递减（越早的数据越少）
+            # 使用 24h 数据 * 系数估算
+            if w == "3d":
+                estimated_logs = int(logs_24h * 2.5)  # 3天约为24h的2.5倍
+            else:  # 7d
+                estimated_logs = int(logs_24h * 5)  # 7天约为24h的5倍
+        
+        window_logs_estimate[w] = estimated_logs
+        total_logs_to_scan += estimated_logs
+    
+    # 总预计时间 = (查询时间 + 延迟) * 窗口数
+    estimated_total_time = (estimated_query_time + query_delay) * total_to_warm
+    
+    # 预热数据条数说明
+    # 每个窗口返回 Top 50 用户的聚合数据
+    estimated_records = total_to_warm * 50
 
     # === 阶段3：仅预热缺失的窗口 ===
     logger.system("-" * 50)
     logger.system("[阶段3] 预热缺失的窗口")
-    _set_warmup_status("initializing", 30, f"正在预热 {len(missing_windows)} 个窗口...")
+    logger.system(f"[阶段3] 待预热窗口数: {total_to_warm} 个")
+    logger.system(f"[阶段3] 预计扫描日志: {total_logs_to_scan:,} 条 (使用索引聚合，不加载全量数据)")
+    logger.system(f"[阶段3] 预计缓存数据: {estimated_records} 条 (每窗口 Top 50 用户)")
+    logger.system(f"[阶段3] 查询延迟: {query_delay}s/窗口")
+    logger.system(f"[阶段3] 预计耗时: {estimated_total_time:.0f}~{estimated_total_time * 1.5:.0f} 秒")
+    _set_warmup_status("initializing", 30, f"正在预热 {total_to_warm} 个窗口，预计扫描 {total_logs_to_scan:,} 条日志...")
 
     from .risk_monitoring_service import get_risk_monitoring_service
     service = get_risk_monitoring_service()
     
     warmed = []
     failed = []
-    total_to_warm = len(missing_windows)
+    window_times = []  # 记录每个窗口的实际耗时，用于动态估算
     
     for idx, window in enumerate(missing_windows):
         progress = 30 + int((idx / max(total_to_warm, 1)) * 60)
-        _set_warmup_status("initializing", progress, f"正在预热: {window}")
+        
+        # 获取该窗口预计扫描的日志数
+        window_estimated_logs = window_logs_estimate.get(window, 0)
+        
+        # 计算剩余预计时间
+        if window_times:
+            avg_time = sum(window_times) / len(window_times)
+            remaining_windows = total_to_warm - idx
+            remaining_time = (avg_time + query_delay) * remaining_windows
+            _set_warmup_status("initializing", progress, f"正在预热: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s")
+        else:
+            remaining_time = estimated_total_time - (estimated_query_time + query_delay) * idx
+            _set_warmup_status("initializing", progress, f"正在预热: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s")
+        
+        window_start = time.time()
+        logger.system(f"[预热] 开始预热 {window} 窗口 ({idx + 1}/{total_to_warm})，预计扫描 {window_estimated_logs:,} 条日志...")
         
         try:
             # 查询 PostgreSQL（只读）
+            # 注意：这里只查询 Top 50 用户的聚合数据，不是全量数据
+            # 即使有千万级日志，SQL 使用索引聚合，只返回 50 条结果
             data = service.get_leaderboards(
                 windows=[window],
                 limit=50,
                 sort_by="requests",
-                use_cache=False
+                use_cache=False,
+                log_progress=True
             )
             
+            window_elapsed = time.time() - window_start
+            window_times.append(window_elapsed)  # 记录实际耗时
+            
             if data and window in data.get("windows", {}):
+                result_count = len(data["windows"][window])
                 warmed.append(window)
-                logger.system(f"[预热] {window} 完成")
+                logger.system(f"[预热] {window} 完成，返回 {result_count} 条数据，耗时 {window_elapsed:.2f}s")
             else:
                 failed.append(window)
-                logger.warning(f"[预热] {window} 无数据")
+                logger.warning(f"[预热] {window} 无数据，耗时 {window_elapsed:.2f}s")
                 
         except Exception as e:
+            window_elapsed = time.time() - window_start
+            window_times.append(window_elapsed)  # 即使失败也记录耗时
             failed.append(window)
-            logger.warning(f"[预热] {window} 失败: {e}")
+            logger.warning(f"[预热] {window} 失败: {e}，耗时 {window_elapsed:.2f}s")
         
         # 延迟，避免数据库压力
         if query_delay > 0 and idx < total_to_warm - 1:
+            logger.system(f"[预热] 等待 {query_delay}s 后继续下一个窗口...")
             await asyncio.sleep(query_delay)
 
     # 完成
     total_elapsed = time.time() - warmup_start_time
+    total_cached_records = len(warmed) * 50  # 每个窗口 50 条
     
     if failed:
         _set_warmup_status("ready", 100, f"预热完成（部分失败），耗时 {total_elapsed:.1f}s")
@@ -477,6 +580,7 @@ async def background_cache_warmup():
         _set_warmup_status("ready", 100, f"预热完成，耗时 {total_elapsed:.1f}s")
         logger.system(f"[完成] 全部成功: {warmed}")
     
+    logger.system(f"[完成] 已缓存数据: {total_cached_records} 条 ({len(warmed)} 个窗口 × 50 用户)")
     logger.system(f"[完成] 总耗时: {total_elapsed:.1f}s")
     logger.system("=" * 50)
 

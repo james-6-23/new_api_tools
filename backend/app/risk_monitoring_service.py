@@ -104,6 +104,7 @@ class RiskMonitoringService:
         limit: int = 10,
         sort_by: str = "requests",
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         Get leaderboards for multiple time windows.
@@ -112,6 +113,12 @@ class RiskMonitoringService:
         - 三层缓存：Redis → SQLite → PostgreSQL
         - Per-window cache to support independent refresh
         - No JOIN with users table (fetch user info separately for top N only)
+        
+        千万级数据处理策略：
+        - SQL 使用 GROUP BY user_id 聚合，只返回 Top N 用户
+        - 利用索引 idx_logs_created_type_user 加速查询
+        - 不扫描全表，只聚合符合时间条件的数据
+        - 返回结果只有 limit 条（默认 50），内存占用极小
         """
         now = int(time.time())
         cache_ttl = _get_cache_ttl()
@@ -130,6 +137,8 @@ class RiskMonitoringService:
             if use_cache:
                 cached = self.cache.get_leaderboard(w, sort_by, limit)
                 if cached is not None:
+                    if log_progress:
+                        logger.debug(f"[预热] {w} 命中缓存，{len(cached)} 条数据")
                     window_results[w] = cached
                     for item in cached:
                         all_user_ids.add(item.get("user_id"))
@@ -139,16 +148,24 @@ class RiskMonitoringService:
                 window_cache_key = f"leaderboard:{w}:{limit}:{sort_by}"
                 cached = _cache.get(window_cache_key)
                 if cached is not None:
+                    if log_progress:
+                        logger.debug(f"[预热] {w} 命中内存缓存，{len(cached)} 条数据")
                     window_results[w] = cached
                     for item in cached:
                         all_user_ids.add(item["user_id"])
                     continue
 
             # Cache miss - query database (只读)
+            if log_progress:
+                logger.debug(f"[预热] {w} 缓存未命中，查询数据库...")
+            
             raw_data = self._get_leaderboard_raw(
                 window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
             )
             window_results[w] = raw_data
+            
+            if log_progress:
+                logger.debug(f"[预热] {w} 数据库返回 {len(raw_data)} 条数据")
 
             # 保存到新缓存管理器（SQLite + Redis）
             self.cache.set_leaderboard(w, sort_by, raw_data, cache_ttl)
