@@ -624,6 +624,10 @@ do_full_reinstall_interactive() {
   INSTALL_DIR="$install_dir"
   REINSTALL=true
 
+  # 重新检测 NewAPI 环境并显示
+  detect_newapi_location
+  show_initial_env_detection
+
   # 克隆项目
   clone_or_update_project
 
