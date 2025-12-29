@@ -796,17 +796,38 @@ class AIAutoBanService:
     ) -> Optional[AIAssessmentResult]:
         """解析 AI 响应"""
         if not response:
+            self._last_error_message = "AI 响应内容为空"
+            logger.error(f"AI自动封禁: 响应内容为空 (model={model})")
             return None
 
         try:
             # 尝试提取 JSON
             json_str = response
+            extraction_method = "direct"
+
             if "```json" in response:
                 json_str = response.split("```json")[1].split("```")[0]
+                extraction_method = "json_code_block"
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0]
+                extraction_method = "code_block"
+            else:
+                # 尝试查找 JSON 对象 { ... }
+                import re
+                json_match = re.search(r'\{[^{}]*"should_ban"[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    extraction_method = "regex_extract"
+
+            logger.debug(f"AI自动封禁: 解析响应 (method={extraction_method}, model={model}), JSON预览: {json_str[:300]}...")
 
             data = json.loads(json_str.strip())
+
+            # 验证必需字段
+            if "should_ban" not in data:
+                self._last_error_message = f"响应缺少必需字段 'should_ban' (model={model})"
+                logger.error(f"AI自动封禁: {self._last_error_message}, 解析结果: {data}")
+                return None
 
             should_ban = bool(data.get("should_ban", False))
             risk_score = int(data.get("risk_score", 1))
@@ -836,9 +857,19 @@ class AIAutoBanService:
                 total_tokens=total_tokens,
                 api_duration_ms=api_duration_ms,
             )
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            self._last_error_message = f"响应解析失败: {e}"
-            logger.error(f"AI自动封禁: 解析响应失败 - {e}, 原始响应: {response[:200]}")
+        except json.JSONDecodeError as e:
+            self._last_error_message = f"JSON 解析失败 (model={model}): {e}"
+            logger.error(f"AI自动封禁: JSON 解析失败 - {e}")
+            logger.error(f"AI自动封禁: 尝试解析的内容: {json_str[:500] if 'json_str' in dir() else response[:500]}")
+            logger.error(f"AI自动封禁: 完整原始响应: {response}")
+            return None
+        except (KeyError, ValueError, TypeError) as e:
+            self._last_error_message = f"响应数据格式错误 (model={model}): {e}"
+            logger.error(f"AI自动封禁: 响应数据格式错误 - {e}, 原始响应: {response[:500]}")
+            return None
+        except Exception as e:
+            self._last_error_message = f"响应解析异常 (model={model}): {type(e).__name__}: {e}"
+            logger.error(f"AI自动封禁: 响应解析异常 - {type(e).__name__}: {e}, 原始响应: {response[:500]}")
             return None
 
     async def assess_user(self, user_id: int, analysis: Dict[str, Any]) -> Optional[AIAssessmentResult]:
