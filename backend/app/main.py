@@ -723,6 +723,13 @@ async def background_cache_warmup():
             await warmup_ip_distribution()
         except Exception as e:
             logger.warning(f"[IP分布] 预热异常: {e}")
+
+        # 预热模型状态监控数据
+        try:
+            from .model_status_service import warmup_model_status
+            await warmup_model_status(max_models=20)
+        except Exception as e:
+            logger.warning(f"[模型状态] 预热异常: {e}")
         
         # 所有预热完成
         elapsed = time.time() - warmup_start_time
@@ -928,6 +935,13 @@ async def background_cache_warmup():
         await warmup_ip_distribution()
     except Exception as e:
         logger.warning(f"[IP分布] 预热异常: {e}")
+
+    # === 阶段7：预热模型状态监控数据 ===
+    try:
+        from .model_status_service import warmup_model_status
+        await warmup_model_status(max_models=20)
+    except Exception as e:
+        logger.warning(f"[模型状态] 预热异常: {e}")
 
     # 所有预热完成后输出完成日志
     total_warmup_elapsed = time.time() - warmup_start_time

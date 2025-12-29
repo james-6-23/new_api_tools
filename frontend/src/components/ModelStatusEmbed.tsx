@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Settings2, Check, ChevronDown } from 'lucide-react'
+import { Loader2, Timer } from 'lucide-react'
 
 interface HourlyStatus {
   hour: number
@@ -56,65 +56,48 @@ function formatDateTime(timestamp: number): string {
   })
 }
 
-// Storage keys
-const SELECTED_MODELS_KEY = 'model_status_embed_selected_models'
+function formatCountdown(seconds: number): string {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
+}
+
+// 与管理界面共享配置，从后端获取
 
 interface ModelStatusEmbedProps {
   refreshInterval?: number  // in seconds, default 60
-  defaultModels?: string[]  // pre-selected models from URL params
 }
 
 export function ModelStatusEmbed({ 
   refreshInterval = 60,
-  defaultModels = []
 }: ModelStatusEmbedProps) {
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [selectedModels, setSelectedModels] = useState<string[]>(() => {
-    if (defaultModels.length > 0) return defaultModels
-    const saved = localStorage.getItem(SELECTED_MODELS_KEY)
-    return saved ? JSON.parse(saved) : []
-  })
+  const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
-  
-  const [showModelSelector, setShowModelSelector] = useState(false)
-  const modelSelectorRef = useRef<HTMLDivElement>(null)
+  const [countdown, setCountdown] = useState(refreshInterval)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
-  // Click outside handler
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target as Node)) {
-        setShowModelSelector(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  // Save selected models
-  useEffect(() => {
-    localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(selectedModels))
-  }, [selectedModels])
-
-  // Fetch available models
-  const fetchAvailableModels = useCallback(async () => {
+  // 从后端获取管理员配置的模型列表
+  const loadSelectedModels = useCallback(async () => {
     try {
-      const response = await fetch(`${apiUrl}/api/model-status/embed/models`)
+      const response = await fetch(`${apiUrl}/api/model-status/embed/config/selected`)
       const data = await response.json()
-      if (data.success) {
-        setAvailableModels(data.data)
-        if (selectedModels.length === 0 && data.data.length > 0) {
-          setSelectedModels(data.data.slice(0, 5))
-        }
+      if (data.success && data.data.length > 0) {
+        setSelectedModels(data.data)
+        return data.data
       }
     } catch (error) {
-      console.error('Failed to fetch available models:', error)
+      console.error('Failed to load selected models from backend:', error)
     }
-  }, [apiUrl, selectedModels.length])
+    return []
+  }, [apiUrl])
+
+  // Initial load of selected models
+  useEffect(() => {
+    loadSelectedModels()
+  }, [loadSelectedModels])
 
   // Fetch model statuses
   const fetchModelStatuses = useCallback(async () => {
@@ -139,45 +122,32 @@ export function ModelStatusEmbed({
       console.error('Failed to fetch model statuses:', error)
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [apiUrl, selectedModels])
 
-  // Initial load
-  useEffect(() => {
-    fetchAvailableModels()
-  }, [fetchAvailableModels])
-
   // Fetch statuses when selected models change
   useEffect(() => {
-    fetchModelStatuses()
-  }, [fetchModelStatuses])
+    if (selectedModels.length > 0) {
+      fetchModelStatuses()
+    }
+  }, [fetchModelStatuses, selectedModels])
 
-  // Auto refresh
+  // Auto refresh with countdown
   useEffect(() => {
     if (refreshInterval <= 0) return
 
     const timer = setInterval(() => {
-      fetchModelStatuses()
-    }, refreshInterval * 1000)
+      setCountdown(prev => {
+        if (prev <= 1) {
+          fetchModelStatuses()
+          return refreshInterval
+        }
+        return prev - 1
+      })
+    }, 1000)
 
     return () => clearInterval(timer)
   }, [refreshInterval, fetchModelStatuses])
-
-  const handleRefresh = () => {
-    setRefreshing(true)
-    fetchModelStatuses()
-  }
-
-  const toggleModelSelection = (model: string) => {
-    setSelectedModels(prev => {
-      if (prev.includes(model)) {
-        return prev.filter(m => m !== model)
-      } else {
-        return [...prev, model]
-      }
-    })
-  }
 
   if (loading && modelStatuses.length === 0) {
     return (
@@ -202,69 +172,14 @@ export function ModelStatusEmbed({
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Model Selector */}
-          <div className="relative" ref={modelSelectorRef}>
-            <button
-              onClick={() => setShowModelSelector(!showModelSelector)}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-[#161b22] border border-gray-700 rounded-lg hover:border-gray-600 transition-colors"
-            >
-              <Settings2 className="h-4 w-4" />
-              选择模型
-              <ChevronDown className="h-3 w-3" />
-            </button>
-
-            {showModelSelector && (
-              <div className="absolute right-0 mt-1 w-72 bg-[#161b22] border border-gray-700 rounded-lg shadow-xl z-50 max-h-80 overflow-hidden">
-                <div className="p-2 border-b border-gray-700 flex justify-between items-center">
-                  <span className="text-xs text-gray-500">选择要监控的模型</span>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => setSelectedModels(availableModels)}
-                      className="text-xs text-blue-400 hover:text-blue-300"
-                    >
-                      全选
-                    </button>
-                    <span className="text-gray-600">|</span>
-                    <button
-                      onClick={() => setSelectedModels([])}
-                      className="text-xs text-blue-400 hover:text-blue-300"
-                    >
-                      清空
-                    </button>
-                  </div>
-                </div>
-                <div className="max-h-60 overflow-y-auto">
-                  {availableModels.map(model => (
-                    <button
-                      key={model}
-                      onClick={() => toggleModelSelection(model)}
-                      className={cn(
-                        "w-full text-left px-3 py-2 text-sm hover:bg-gray-800 transition-colors flex items-center justify-between",
-                        selectedModels.includes(model) && "bg-gray-800/50"
-                      )}
-                    >
-                      <span className="truncate">{model}</span>
-                      {selectedModels.includes(model) && (
-                        <Check className="h-4 w-4 text-green-400 flex-shrink-0" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* Countdown */}
+        {refreshInterval > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 text-sm bg-[#161b22] border border-gray-700 rounded-lg">
+            <Timer className="h-4 w-4 text-gray-400" />
+            <span className="text-blue-400 font-medium">{formatCountdown(countdown)}</span>
+            <span className="text-gray-500">后刷新</span>
           </div>
-
-          {/* Refresh Button */}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-2 text-sm bg-[#161b22] border border-gray-700 rounded-lg hover:border-gray-600 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-            刷新
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Model Status Cards */}
@@ -276,7 +191,7 @@ export function ModelStatusEmbed({
         </div>
       ) : (
         <div className="text-center py-12 text-gray-500">
-          {selectedModels.length === 0 ? '请选择要监控的模型' : '暂无模型状态数据'}
+          {selectedModels.length === 0 ? '请在管理界面选择要监控的模型' : '暂无模型状态数据'}
         </div>
       )}
 

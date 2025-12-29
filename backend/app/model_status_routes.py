@@ -13,6 +13,9 @@ from .logger import logger
 
 router = APIRouter(prefix="/api/model-status", tags=["Model Status"])
 
+# Redis key for selected models config
+SELECTED_MODELS_CACHE_KEY = "model_status:selected_models"
+
 
 # Response Models
 
@@ -56,6 +59,18 @@ class MultipleModelsStatusResponse(BaseModel):
     success: bool
     data: List[ModelStatusItem]
     cache_ttl: int = 60  # Cache TTL in seconds for frontend
+
+
+class SelectedModelsRequest(BaseModel):
+    """Request for updating selected models."""
+    models: List[str]
+
+
+class SelectedModelsResponse(BaseModel):
+    """Response for selected models endpoint."""
+    success: bool
+    data: List[str]
+    message: Optional[str] = None
 
 
 class EmbedConfigResponse(BaseModel):
@@ -236,3 +251,123 @@ async def get_embed_all_models_status(
         data=[model_status_to_item(s) for s in statuses],
         cache_ttl=60,
     )
+
+
+# ==================== Selected Models Config Endpoints ====================
+
+def _get_selected_models_from_cache() -> List[str]:
+    """Get selected models from Redis/SQLite cache."""
+    import json
+    from .cache_manager import get_cache_manager
+    
+    cache = get_cache_manager()
+    
+    # Try Redis first
+    if cache._redis_available and cache._redis:
+        try:
+            data = cache._redis.get(SELECTED_MODELS_CACHE_KEY)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logger.warn(f"Failed to get selected models from Redis: {e}")
+    
+    # Fallback to SQLite
+    try:
+        with cache._get_sqlite_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT data FROM generic_cache WHERE key = ?",
+                (SELECTED_MODELS_CACHE_KEY,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return json.loads(row[0])
+    except Exception as e:
+        logger.warn(f"Failed to get selected models from SQLite: {e}")
+    
+    return []
+
+
+def _set_selected_models_to_cache(models: List[str]) -> bool:
+    """Save selected models to Redis/SQLite cache."""
+    import json
+    import time
+    from .cache_manager import get_cache_manager
+    
+    cache = get_cache_manager()
+    data = json.dumps(models)
+    now = int(time.time())
+    # No expiration for config data
+    expires_at = now + 86400 * 365  # 1 year
+    
+    success = False
+    
+    # Save to Redis
+    if cache._redis_available and cache._redis:
+        try:
+            cache._redis.set(SELECTED_MODELS_CACHE_KEY, data)
+            success = True
+        except Exception as e:
+            logger.warn(f"Failed to save selected models to Redis: {e}")
+    
+    # Always save to SQLite as backup
+    try:
+        with cache._get_sqlite_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO generic_cache (key, data, snapshot_time, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (SELECTED_MODELS_CACHE_KEY, data, now, expires_at))
+            conn.commit()
+            success = True
+    except Exception as e:
+        logger.warn(f"Failed to save selected models to SQLite: {e}")
+    
+    return success
+
+
+@router.get("/config/selected", response_model=SelectedModelsResponse)
+async def get_selected_models(_: str = Depends(verify_auth)):
+    """
+    Get the list of selected models for monitoring.
+    """
+    models = _get_selected_models_from_cache()
+    return SelectedModelsResponse(success=True, data=models)
+
+
+@router.post("/config/selected", response_model=SelectedModelsResponse)
+async def set_selected_models(
+    request: SelectedModelsRequest,
+    _: str = Depends(verify_auth),
+):
+    """
+    Update the list of selected models for monitoring.
+    This will be used by the embed page.
+    """
+    success = _set_selected_models_to_cache(request.models)
+    
+    if success:
+        logger.info(f"[模型状态] 已更新选中模型列表: {len(request.models)} 个模型")
+        return SelectedModelsResponse(
+            success=True,
+            data=request.models,
+            message=f"已保存 {len(request.models)} 个模型配置",
+        )
+    else:
+        return SelectedModelsResponse(
+            success=False,
+            data=request.models,
+            message="保存配置失败",
+        )
+
+
+# ==================== Public Embed Config Endpoint ====================
+
+@router.get("/embed/config/selected", response_model=SelectedModelsResponse)
+async def get_embed_selected_models():
+    """
+    [Public] Get the list of selected models for embed view.
+    No authentication required for iframe embedding.
+    """
+    models = _get_selected_models_from_cache()
+    return SelectedModelsResponse(success=True, data=models)

@@ -82,10 +82,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const { showToast } = useToast()
 
   const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [selectedModels, setSelectedModels] = useState<string[]>(() => {
-    const saved = localStorage.getItem(SELECTED_MODELS_KEY)
-    return saved ? JSON.parse(saved) : []
-  })
+  const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -132,10 +129,45 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Save selected models to localStorage
-  useEffect(() => {
-    localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(selectedModels))
-  }, [selectedModels])
+  // Save selected models to backend cache
+  const saveSelectedModelsToBackend = useCallback(async (models: string[]) => {
+    try {
+      await fetch(`${apiUrl}/api/model-status/config/selected`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ models }),
+      })
+      // Also save to localStorage for quick access
+      localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(models))
+    } catch (error) {
+      console.error('Failed to save selected models:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // Load selected models from backend on mount
+  const loadSelectedModelsFromBackend = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/model-status/config/selected`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await response.json()
+      if (data.success && data.data.length > 0) {
+        setSelectedModels(data.data)
+        localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(data.data))
+        return data.data
+      }
+    } catch (error) {
+      console.error('Failed to load selected models from backend:', error)
+    }
+    // Fallback to localStorage
+    const saved = localStorage.getItem(SELECTED_MODELS_KEY)
+    if (saved) {
+      const models = JSON.parse(saved)
+      setSelectedModels(models)
+      return models
+    }
+    return []
+  }, [apiUrl, getAuthHeaders])
 
   // Update refresh interval ref
   useEffect(() => {
@@ -143,7 +175,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     localStorage.setItem(REFRESH_INTERVAL_KEY, refreshInterval.toString())
   }, [refreshInterval])
 
-  // Fetch available models
+  // Fetch available models and load selected models
   const fetchAvailableModels = useCallback(async () => {
     try {
       const response = await fetch(`${apiUrl}${getApiPrefix()}/models`, {
@@ -152,15 +184,19 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       const data = await response.json()
       if (data.success) {
         setAvailableModels(data.data)
+        // Load selected models from backend
+        const savedModels = await loadSelectedModelsFromBackend()
         // Auto-select first 5 models if none selected
-        if (selectedModels.length === 0 && data.data.length > 0) {
-          setSelectedModels(data.data.slice(0, 5))
+        if (savedModels.length === 0 && data.data.length > 0) {
+          const defaultModels = data.data.slice(0, 5)
+          setSelectedModels(defaultModels)
+          saveSelectedModelsToBackend(defaultModels)
         }
       }
     } catch (error) {
       console.error('Failed to fetch available models:', error)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels.length])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, loadSelectedModelsFromBackend, saveSelectedModelsToBackend])
 
   // Fetch model statuses
   const fetchModelStatuses = useCallback(async (showLoadingToast = false) => {
@@ -233,21 +269,21 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   }
 
   const toggleModelSelection = (model: string) => {
-    setSelectedModels(prev => {
-      if (prev.includes(model)) {
-        return prev.filter(m => m !== model)
-      } else {
-        return [...prev, model]
-      }
-    })
+    const newModels = selectedModels.includes(model)
+      ? selectedModels.filter(m => m !== model)
+      : [...selectedModels, model]
+    setSelectedModels(newModels)
+    saveSelectedModelsToBackend(newModels)
   }
 
   const selectAllModels = () => {
     setSelectedModels(availableModels)
+    saveSelectedModelsToBackend(availableModels)
   }
 
   const clearAllModels = () => {
     setSelectedModels([])
+    saveSelectedModelsToBackend([])
   }
 
   if (loading && modelStatuses.length === 0) {

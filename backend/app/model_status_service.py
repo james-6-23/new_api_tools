@@ -350,3 +350,62 @@ def get_model_status_service() -> ModelStatusService:
     if _model_status_service is None:
         _model_status_service = ModelStatusService()
     return _model_status_service
+
+
+async def warmup_model_status(max_models: int = 20) -> Dict[str, Any]:
+    """
+    Warmup model status data for faster frontend loading.
+    
+    Args:
+        max_models: Maximum number of models to warmup (default 20).
+        
+    Returns:
+        Warmup result with success count and timing.
+    """
+    import asyncio
+    
+    service = get_model_status_service()
+    start_time = time.time()
+    
+    # Get available models
+    models = service.get_available_models()
+    models_to_warmup = models[:max_models]
+    
+    if not models_to_warmup:
+        logger.info("[模型状态] 无可用模型，跳过预热")
+        return {
+            "success": True,
+            "models_warmed": 0,
+            "elapsed": 0,
+        }
+    
+    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型状态...")
+    
+    success_count = 0
+    failed_models = []
+    
+    for model_name in models_to_warmup:
+        try:
+            # Force refresh cache
+            service.get_model_status(model_name, use_cache=False)
+            success_count += 1
+            # Small delay to avoid overwhelming the database
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.warn(f"[模型状态] 预热 {model_name} 失败: {e}")
+            failed_models.append(model_name)
+    
+    elapsed = time.time() - start_time
+    
+    if failed_models:
+        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{len(models_to_warmup)}，失败: {', '.join(failed_models[:5])}")
+    else:
+        logger.info(f"[模型状态] 预热完成，{success_count} 个模型，耗时 {elapsed:.1f}s")
+    
+    return {
+        "success": True,
+        "models_warmed": success_count,
+        "total_models": len(models_to_warmup),
+        "failed": failed_models,
+        "elapsed": round(elapsed, 2),
+    }
