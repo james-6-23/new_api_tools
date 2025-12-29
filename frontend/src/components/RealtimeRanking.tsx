@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search, Timer } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, ShieldX, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search, Timer } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -50,7 +50,7 @@ interface IPSwitchAnalysis {
 
 interface UserAnalysis {
   range: { start_time: number; end_time: number; window_seconds: number }
-  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null }
+  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null; in_whitelist?: boolean }
   summary: {
     total_requests: number
     success_requests: number
@@ -872,9 +872,11 @@ export function RealtimeRanking() {
         fetchWhitelist()
         fetchAiConfig()  // 更新白名单计数
         // 更新搜索结果中的状态
-        setWhitelistSearchResults(prev => prev.map(u => 
+        setWhitelistSearchResults(prev => prev.map(u =>
           u.user_id === userId ? { ...u, in_whitelist: true } : u
         ))
+        // 更新用户分析弹窗中的白名单状态
+        setAnalysis(prev => prev && prev.user.id === userId ? { ...prev, user: { ...prev.user, in_whitelist: true } } : prev)
       } else {
         showToast('error', res.message || '添加失败')
       }
@@ -897,9 +899,11 @@ export function RealtimeRanking() {
         fetchWhitelist()
         fetchAiConfig()  // 更新白名单计数
         // 更新搜索结果中的状态
-        setWhitelistSearchResults(prev => prev.map(u => 
+        setWhitelistSearchResults(prev => prev.map(u =>
           u.user_id === userId ? { ...u, in_whitelist: false } : u
         ))
+        // 更新用户分析弹窗中的白名单状态
+        setAnalysis(prev => prev && prev.user.id === userId ? { ...prev, user: { ...prev.user, in_whitelist: false } } : prev)
       } else {
         showToast('error', res.message || '移除失败')
       }
@@ -4502,18 +4506,33 @@ export function RealtimeRanking() {
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!analysis) return
-                    addToWhitelist(analysis.user.id)
-                  }}
-                  disabled={mutating || analysisLoading}
-                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
-                >
-                  <ShieldCheck className="h-4 w-4 mr-2" />
-                  加入白名单
-                </Button>
+                {analysis?.user.in_whitelist ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (!analysis) return
+                      removeFromWhitelist(analysis.user.id)
+                    }}
+                    disabled={mutating || analysisLoading}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200"
+                  >
+                    <ShieldX className="h-4 w-4 mr-2" />
+                    移除白名单
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (!analysis) return
+                      addToWhitelist(analysis.user.id)
+                    }}
+                    disabled={mutating || analysisLoading}
+                    className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2" />
+                    加入白名单
+                  </Button>
+                )}
                 {analysis?.user.status === 2 ? (
                   <Button
                     onClick={() => {

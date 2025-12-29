@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from .database import DatabaseManager, DatabaseEngine, get_db_manager
 from .logger import logger
+from .ai_auto_ban_service import get_ai_auto_ban_service
 
 
 WINDOW_SECONDS: dict[str, int] = {
@@ -586,6 +587,13 @@ class RiskMonitoringService:
         if ip_switch_analysis.get("avg_ip_duration", float('inf')) < 30 and real_switch_count >= 3:
             risk_flags.append("IP_HOPPING")
 
+        # 检查用户是否在白名单中
+        try:
+            ai_ban_service = get_ai_auto_ban_service()
+            in_whitelist = user_id in ai_ban_service._whitelist_ids
+        except Exception:
+            in_whitelist = False
+
         return {
             "range": {"start_time": start_time, "end_time": now, "window_seconds": window_seconds},
             "user": {
@@ -596,6 +604,7 @@ class RiskMonitoringService:
                 "status": int(user.get("status")) if user and user.get("status") is not None else 0,
                 "group": (user.get("group") if user else None),
                 "remark": (user.get("remark") if user else None),
+                "in_whitelist": in_whitelist,
             },
             "summary": {
                 "total_requests": total_requests,
