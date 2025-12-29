@@ -4,10 +4,9 @@ Provides IP usage analysis and management for risk monitoring.
 
 Optimizations:
 - Batch queries to avoid N+1 problem
-- In-memory cache with TTL based on system scale
+- Unified cache with CacheManager (SQLite + Redis)
 """
 import time
-import threading
 from typing import Any, Dict, List, Optional
 
 from .database import DatabaseManager, DatabaseEngine, get_db_manager
@@ -32,37 +31,6 @@ def _get_cache_ttl() -> int:
         return get_ip_cache_ttl()
     except Exception:
         return 300  # Default fallback: 5 minutes
-
-
-class SimpleCache:
-    """Thread-safe in-memory cache with TTL."""
-    
-    def __init__(self):
-        self._cache: Dict[str, tuple] = {}  # key -> (data, expires_at)
-        self._lock = threading.Lock()
-    
-    def get(self, key: str) -> Optional[Any]:
-        with self._lock:
-            entry = self._cache.get(key)
-            if entry is None:
-                return None
-            data, expires_at = entry
-            if time.time() > expires_at:
-                del self._cache[key]
-                return None
-            return data
-    
-    def set(self, key: str, value: Any, ttl: float):
-        with self._lock:
-            self._cache[key] = (value, time.time() + ttl)
-    
-    def clear(self):
-        with self._lock:
-            self._cache.clear()
-
-
-# Global cache instance
-_ip_cache = SimpleCache()
 
 
 class IPMonitoringService:
@@ -93,25 +61,37 @@ class IPMonitoringService:
                 return name
         return f"{window_seconds}s"
 
-    def get_ip_recording_stats(self) -> Dict[str, Any]:
+    def get_ip_recording_stats(self, use_cache: bool = True) -> Dict[str, Any]:
         """
         Get statistics about IP recording settings across all users.
         Returns count of users with IP recording enabled/disabled.
+
+        Args:
+            use_cache: Whether to use cached data (default True)
         """
+        cache_key = "ip_stats"
+
+        # 检查缓存
+        if use_cache:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                logger.debug("[IP Stats] 命中缓存", category="缓存")
+                return cached
+
         self.db.connect()
-        
+
         # Check database type for JSON syntax
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
-        
+
         if is_pg:
             # PostgreSQL: use jsonb operators
             sql = """
                 SELECT
                     COUNT(*) as total_users,
-                    SUM(CASE 
-                        WHEN setting IS NOT NULL AND setting <> '' 
-                             AND setting::jsonb->>'record_ip_log' = 'true' THEN 1 
-                        ELSE 0 
+                    SUM(CASE
+                        WHEN setting IS NOT NULL AND setting <> ''
+                             AND setting::jsonb->>'record_ip_log' = 'true' THEN 1
+                        ELSE 0
                     END) as enabled_count
                 FROM users
                 WHERE deleted_at IS NULL
@@ -121,24 +101,24 @@ class IPMonitoringService:
             sql = """
                 SELECT
                     COUNT(*) as total_users,
-                    SUM(CASE 
-                        WHEN setting IS NOT NULL AND setting <> '' 
-                             AND JSON_EXTRACT(setting, '$.record_ip_log') = true THEN 1 
-                        ELSE 0 
+                    SUM(CASE
+                        WHEN setting IS NOT NULL AND setting <> ''
+                             AND JSON_EXTRACT(setting, '$.record_ip_log') = true THEN 1
+                        ELSE 0
                     END) as enabled_count
                 FROM users
                 WHERE deleted_at IS NULL
             """
-        
+
         try:
             rows = self.db.execute(sql, {})
             row = rows[0] if rows else {}
-            
+
             total_users = int(row.get("total_users") or 0)
             enabled_count = int(row.get("enabled_count") or 0)
             disabled_count = total_users - enabled_count
             enabled_percentage = (enabled_count / total_users * 100) if total_users > 0 else 0.0
-            
+
             # Get unique IPs in last 24h
             now = int(time.time())
             start_time = now - 24 * 3600
@@ -150,14 +130,27 @@ class IPMonitoringService:
             """
             ip_rows = self.db.execute(ip_sql, {"start_time": start_time, "end_time": now})
             unique_ips_24h = int((ip_rows[0] if ip_rows else {}).get("unique_ips") or 0)
-            
-            return {
+
+            result = {
                 "total_users": total_users,
                 "enabled_count": enabled_count,
                 "disabled_count": disabled_count,
                 "enabled_percentage": round(enabled_percentage, 2),
                 "unique_ips_24h": unique_ips_24h,
             }
+
+            # 保存到缓存（TTL 60秒，IP Stats 数据变化不频繁）
+            ttl = 60
+            self.cache.set(cache_key, result, ttl=ttl)
+            logger.success(
+                f"IP Stats 缓存更新",
+                users=total_users,
+                enabled=enabled_count,
+                ips_24h=unique_ips_24h,
+                TTL=f"{ttl}s"
+            )
+
+            return result
         except Exception as e:
             logger.db_error(f"获取 IP 记录统计失败: {e}")
             return {
@@ -186,19 +179,12 @@ class IPMonitoringService:
             now = int(time.time())
         start_time = now - window_seconds
 
-        # 检查缓存 - 优先使用新缓存管理器
+        # 检查缓存 - 使用统一的缓存管理器（key不包含limit，支持截断）
         window_name = self._get_window_name(window_seconds)
-        cache_key = f"shared_ips:{window_seconds}:{min_tokens}:{limit}"
         if use_cache:
-            # 尝试新缓存管理器（SQLite + Redis）
             cached = self.cache.get_ip_monitoring("shared_ips", window_name, limit)
             if cached is not None:
                 return {"items": cached, "total": len(cached)}
-            
-            # 降级到内存缓存
-            cached = _ip_cache.get(cache_key)
-            if cached is not None:
-                return cached
         
         self.db.connect()
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
@@ -364,7 +350,7 @@ class IPMonitoringService:
 
             result = {"items": items, "total": len(items)}
 
-            # 保存到新缓存管理器（SQLite + Redis）
+            # 保存到缓存管理器（SQLite + Redis）
             ttl = _get_cache_ttl()
             self.cache.set_ip_monitoring("shared_ips", window_name, items, ttl)
             logger.success(
@@ -374,8 +360,6 @@ class IPMonitoringService:
                 TTL=f"{ttl}s"
             )
 
-            # 同时更新内存缓存（兼容）
-            _ip_cache.set(cache_key, result, ttl)
             return result
         except Exception as e:
             logger.db_error(f"获取共享 IP 失败: {e}")
@@ -398,12 +382,12 @@ class IPMonitoringService:
             now = int(time.time())
         start_time = now - window_seconds
 
-        # 检查缓存
-        cache_key = f"multi_ip_tokens:{window_seconds}:{min_ips}:{limit}"
+        # 检查缓存 - 使用统一的缓存管理器（key不包含limit，支持截断）
+        window_name = self._get_window_name(window_seconds)
         if use_cache:
-            cached = _ip_cache.get(cache_key)
+            cached = self.cache.get_ip_monitoring("multi_ip_tokens", window_name, limit)
             if cached is not None:
-                return cached
+                return {"items": cached, "total": len(cached)}
 
         self.db.connect()
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
@@ -484,14 +468,17 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
+
+            # 保存到缓存管理器（SQLite + Redis）
             ttl = _get_cache_ttl()
-            _ip_cache.set(cache_key, result, ttl)
+            self.cache.set_ip_monitoring("multi_ip_tokens", window_name, items, ttl)
             logger.success(
                 f"IP监控 缓存更新: multi_ip_tokens",
+                window=window_name,
                 items=len(items),
-                min_ips=min_ips,
                 TTL=f"{ttl}s"
             )
+
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 令牌失败: {e}")
@@ -515,12 +502,12 @@ class IPMonitoringService:
             now = int(time.time())
         start_time = now - window_seconds
 
-        # 检查缓存
-        cache_key = f"multi_ip_users:{window_seconds}:{min_ips}:{limit}"
+        # 检查缓存 - 使用统一的缓存管理器（key不包含limit，支持截断）
+        window_name = self._get_window_name(window_seconds)
         if use_cache:
-            cached = _ip_cache.get(cache_key)
+            cached = self.cache.get_ip_monitoring("multi_ip_users", window_name, limit)
             if cached is not None:
-                return cached
+                return {"items": cached, "total": len(cached)}
 
         self.db.connect()
 
@@ -596,14 +583,17 @@ class IPMonitoringService:
                 })
 
             result = {"items": items, "total": len(items)}
+
+            # 保存到缓存管理器（SQLite + Redis）
             ttl = _get_cache_ttl()
-            _ip_cache.set(cache_key, result, ttl)
+            self.cache.set_ip_monitoring("multi_ip_users", window_name, items, ttl)
             logger.success(
                 f"IP监控 缓存更新: multi_ip_users",
+                window=window_name,
                 items=len(items),
-                min_ips=min_ips,
                 TTL=f"{ttl}s"
             )
+
             return result
         except Exception as e:
             logger.db_error(f"获取多 IP 用户失败: {e}")

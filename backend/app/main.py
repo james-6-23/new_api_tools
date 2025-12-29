@@ -1205,63 +1205,82 @@ def _warmup_complete_sync(
         failed.append("排行榜(服务异常)")
         errors_detail.append(f"排行榜服务: {e}")
 
-    # === Step 2: 预热 IP 监控数据 ===
-    logger.system(f"[预热] IP监控: 窗口={ip_window}")
+    # === Step 2: 预热 IP 监控数据（多窗口 + 大 limit）===
+    # 预热多个时间窗口，匹配前端请求的 limit=200
+    IP_WARMUP_LIMIT = 200  # 前端请求的最大 limit
+    IP_WARMUP_WINDOWS = ["1h", "24h", "7d"]  # 预热的时间窗口
+
+    logger.system(f"[预热] IP监控: 窗口={IP_WARMUP_WINDOWS}, limit={IP_WARMUP_LIMIT}")
     ip_start = time.time()
     ip_success = 0
     ip_failed = 0
+    ip_total = len(IP_WARMUP_WINDOWS) * 3  # 3种查询 × N个窗口
 
     try:
         ip_service = get_ip_monitoring_service()
-        window_seconds = WINDOW_SECONDS.get(ip_window, 86400)
 
-        ip_queries = [
-            ("共享IP", lambda: ip_service.get_shared_ips(
-                window_seconds=window_seconds, min_tokens=2, limit=50, use_cache=False
-            )),
-            ("多IP令牌", lambda: ip_service.get_multi_ip_tokens(
-                window_seconds=window_seconds, min_ips=2, limit=50, use_cache=False
-            )),
-            ("多IP用户", lambda: ip_service.get_multi_ip_users(
-                window_seconds=window_seconds, min_ips=3, limit=50, use_cache=False
-            )),
-        ]
+        for window_key in IP_WARMUP_WINDOWS:
+            window_seconds = WINDOW_SECONDS.get(window_key, 86400)
 
-        for query_name, query_func in ip_queries:
-            update_progress(f"正在加载{query_name}数据...")
+            ip_queries = [
+                (f"共享IP({window_key})", lambda ws=window_seconds: ip_service.get_shared_ips(
+                    window_seconds=ws, min_tokens=2, limit=IP_WARMUP_LIMIT, use_cache=False
+                )),
+                (f"多IP令牌({window_key})", lambda ws=window_seconds: ip_service.get_multi_ip_tokens(
+                    window_seconds=ws, min_ips=2, limit=IP_WARMUP_LIMIT, use_cache=False
+                )),
+                (f"多IP用户({window_key})", lambda ws=window_seconds: ip_service.get_multi_ip_users(
+                    window_seconds=ws, min_ips=3, limit=IP_WARMUP_LIMIT, use_cache=False
+                )),
+            ]
 
-            success, elapsed, error = execute_with_timeout_and_retry(
-                query_func,
-                query_name,
-                timeout=QUERY_TIMEOUT
-            )
+            for query_name, query_func in ip_queries:
+                update_progress(f"正在加载{query_name}数据...")
 
-            if success:
-                ip_success += 1
-                logger.system(f"[预热] {query_name}: {elapsed:.2f}s ✓")
-            else:
-                ip_failed += 1
-                errors_detail.append(f"{query_name}: {error}")
-                logger.warning(f"[预热] {query_name}: 失败 ✗ ({error})", category="缓存")
+                success, elapsed, error = execute_with_timeout_and_retry(
+                    query_func,
+                    query_name,
+                    timeout=QUERY_TIMEOUT
+                )
 
-            if query_delay > 0:
-                time.sleep(query_delay)
+                if success:
+                    ip_success += 1
+                    logger.system(f"[预热] {query_name}: {elapsed:.2f}s ✓")
+                else:
+                    ip_failed += 1
+                    errors_detail.append(f"{query_name}: {error}")
+                    logger.warning(f"[预热] {query_name}: 失败 ✗ ({error})", category="缓存")
+
+                if query_delay > 0:
+                    time.sleep(query_delay)
 
         ip_elapsed = time.time() - ip_start
-        step_times.append(f"IP监控={ip_elapsed:.1f}s({ip_success}/3)")
+        step_times.append(f"IP监控={ip_elapsed:.1f}s({ip_success}/{ip_total})")
 
         if ip_failed == 0:
-            warmed.append(f"IP监控({ip_window})")
+            warmed.append(f"IP监控({len(IP_WARMUP_WINDOWS)}窗口)")
             steps.append({"name": "IP监控", "status": "done"})
         elif ip_success > 0:
-            warmed.append(f"IP监控({ip_success}/3)")
+            warmed.append(f"IP监控({ip_success}/{ip_total})")
             failed.append(f"IP监控({ip_failed}失败)")
             steps.append({"name": "IP监控", "status": "partial"})
         else:
             failed.append("IP监控(全部失败)")
             steps.append({"name": "IP监控", "status": "error"})
 
-        logger.system(f"[预热] IP监控完成: {ip_success}/3 成功, 耗时 {ip_elapsed:.1f}s")
+        # 预热 IP Stats（IP记录状态统计）
+        update_progress("正在加载IP记录状态...")
+        success, elapsed, error = execute_with_timeout_and_retry(
+            lambda: ip_service.get_ip_recording_stats(use_cache=False),
+            "IP Stats",
+            timeout=QUERY_TIMEOUT
+        )
+        if success:
+            logger.system(f"[预热] IP Stats: {elapsed:.2f}s ✓")
+        else:
+            logger.warning(f"[预热] IP Stats: 失败 ✗ ({error})", category="缓存")
+
+        logger.system(f"[预热] IP监控完成: {ip_success}/{ip_total} 成功, 耗时 {ip_elapsed:.1f}s")
 
     except Exception as e:
         logger.error(f"[预热] IP监控服务异常: {e}", category="缓存")
@@ -1438,69 +1457,87 @@ def _warmup_sync(is_initial: bool = False):
     if query_delay > 0:
         time.sleep(query_delay)
 
-    # Step 2: 预热 IP 监控数据（温和方式）
+    # Step 2: 预热 IP 监控数据（多窗口 + 大 limit）
+    IP_REFRESH_LIMIT = 200  # 匹配前端请求的 limit
+    IP_REFRESH_WINDOWS = ["1h", "24h", "7d"]  # 刷新的时间窗口
+
     ip_success = 0
     ip_failed = 0
+    ip_total = len(IP_REFRESH_WINDOWS) * 3
 
     try:
         ip_service = get_ip_monitoring_service()
-        window_seconds = WINDOW_SECONDS.get(ip_window, 86400)
 
-        # 共享 IP
-        if execute_with_timeout(
-            lambda: ip_service.get_shared_ips(
-                window_seconds=window_seconds,
-                min_tokens=2,
-                limit=30,
-                use_cache=False
-            ),
-            "共享IP"
-        ):
-            ip_success += 1
-        else:
-            ip_failed += 1
+        for window_key in IP_REFRESH_WINDOWS:
+            window_seconds = WINDOW_SECONDS.get(window_key, 86400)
 
-        if query_delay > 0:
-            time.sleep(query_delay)
+            # 共享 IP
+            if execute_with_timeout(
+                lambda ws=window_seconds: ip_service.get_shared_ips(
+                    window_seconds=ws,
+                    min_tokens=2,
+                    limit=IP_REFRESH_LIMIT,
+                    use_cache=False
+                ),
+                f"共享IP({window_key})"
+            ):
+                ip_success += 1
+            else:
+                ip_failed += 1
 
-        # 多 IP 令牌
-        if execute_with_timeout(
-            lambda: ip_service.get_multi_ip_tokens(
-                window_seconds=window_seconds,
-                min_ips=2,
-                limit=30,
-                use_cache=False
-            ),
-            "多IP令牌"
-        ):
-            ip_success += 1
-        else:
-            ip_failed += 1
+            if query_delay > 0:
+                time.sleep(query_delay)
 
-        if query_delay > 0:
-            time.sleep(query_delay)
+            # 多 IP 令牌
+            if execute_with_timeout(
+                lambda ws=window_seconds: ip_service.get_multi_ip_tokens(
+                    window_seconds=ws,
+                    min_ips=2,
+                    limit=IP_REFRESH_LIMIT,
+                    use_cache=False
+                ),
+                f"多IP令牌({window_key})"
+            ):
+                ip_success += 1
+            else:
+                ip_failed += 1
 
-        # 多 IP 用户
-        if execute_with_timeout(
-            lambda: ip_service.get_multi_ip_users(
-                window_seconds=window_seconds,
-                min_ips=3,
-                limit=30,
-                use_cache=False
-            ),
-            "多IP用户"
-        ):
-            ip_success += 1
-        else:
-            ip_failed += 1
+            if query_delay > 0:
+                time.sleep(query_delay)
+
+            # 多 IP 用户
+            if execute_with_timeout(
+                lambda ws=window_seconds: ip_service.get_multi_ip_users(
+                    window_seconds=ws,
+                    min_ips=3,
+                    limit=IP_REFRESH_LIMIT,
+                    use_cache=False
+                ),
+                f"多IP用户({window_key})"
+            ):
+                ip_success += 1
+            else:
+                ip_failed += 1
+
+            if query_delay > 0:
+                time.sleep(query_delay)
 
         if ip_failed == 0:
-            warmed.append("IP监控")
+            warmed.append(f"IP监控({len(IP_REFRESH_WINDOWS)}窗口)")
         elif ip_success > 0:
-            warmed.append(f"IP监控({ip_success}/3)")
+            warmed.append(f"IP监控({ip_success}/{ip_total})")
             failed.append(f"IP监控({ip_failed}失败)")
         else:
             failed.append("IP监控")
+
+        # 刷新 IP Stats（IP记录状态统计）
+        if execute_with_timeout(
+            lambda: ip_service.get_ip_recording_stats(use_cache=False),
+            "IP Stats"
+        ):
+            pass  # IP Stats 不单独计入 warmed，包含在 IP监控 中
+        # IP Stats 失败不单独报告
+
     except Exception as e:
         logger.warning(f"IP监控服务异常: {e}", category="缓存")
         failed.append("IP监控(服务异常)")
