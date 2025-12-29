@@ -1061,7 +1061,7 @@ export function RealtimeRanking() {
   }
 
   // AI 配置相关函数
-  const handleFetchModels = async () => {
+  const handleFetchModels = async (forceRefresh: boolean = false) => {
     // 如果没有填写新的 api_key，但已经保存过配置，则允许获取模型列表
     const hasApiKey = aiConfigEdit.api_key || aiConfig?.has_api_key
     if (!aiConfigEdit.base_url || !hasApiKey) {
@@ -1069,7 +1069,9 @@ export function RealtimeRanking() {
       return
     }
     setAiModelLoading(true)
-    setAiModels([])
+    if (forceRefresh) {
+      setAiModels([])  // 强制刷新时清空列表
+    }
     try {
       const response = await fetch(`${apiUrl}/api/ai-ban/models`, {
         method: 'POST',
@@ -1077,12 +1079,13 @@ export function RealtimeRanking() {
         body: JSON.stringify({
           base_url: aiConfigEdit.base_url,
           api_key: aiConfigEdit.api_key || undefined,  // 不传则使用已保存的
+          force_refresh: forceRefresh,  // 是否强制刷新缓存
         }),
       })
       const res = await response.json()
       if (res.success) {
         setAiModels(res.models || [])
-        showToast('success', res.message || '获取模型列表成功')
+        showToast('success', res.message)
       } else {
         showToast('error', res.message || '获取模型列表失败')
       }
@@ -3200,10 +3203,10 @@ export function RealtimeRanking() {
                         <Button
                           variant="outline"
                           size="icon"
-                          onClick={handleFetchModels}
+                          onClick={() => handleFetchModels(true)}
                           disabled={aiModelLoading || !aiConfigEdit.base_url || (!aiConfigEdit.api_key && !aiConfig?.has_api_key)}
                           className="h-10 w-10 shrink-0"
-                          title="刷新模型列表"
+                          title="刷新模型列表（强制刷新缓存）"
                         >
                           {aiModelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                         </Button>

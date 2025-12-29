@@ -37,6 +37,7 @@ class FetchModelsRequest(BaseModel):
     """获取模型列表请求"""
     base_url: str
     api_key: Optional[str] = None  # 可选，不传则使用已保存的配置
+    force_refresh: bool = False    # 是否强制刷新缓存
 
 
 class TestModelRequest(BaseModel):
@@ -154,11 +155,12 @@ async def fetch_models(
     request: FetchModelsRequest,
     _: str = Depends(verify_auth),
 ):
-    """获取可用模型列表 (OpenAI Compatible /v1/models)"""
+    """获取可用模型列表 (OpenAI Compatible /v1/models)，支持缓存"""
     service = get_ai_auto_ban_service()
     result = await service.fetch_models(
         base_url=request.base_url,
         api_key=request.api_key,
+        force_refresh=request.force_refresh,
     )
     return result
 

@@ -138,6 +138,10 @@ class AIAutoBanService:
         self._last_failure_time = 0         # 上次失败时间
         self._api_suspended = False         # API 是否暂停
         self._last_error_message = ""       # 最后一次错误信息
+
+        # 模型列表缓存 key（用于检测 API 地址变化）
+        self._models_cache_key = "ai_models_list"
+        self._models_cache_url_key = "ai_models_base_url"
         
         self._reload_config()
         self._ensure_default_whitelist()
@@ -633,32 +637,62 @@ class AIAutoBanService:
 
         return None
 
-    async def fetch_models(self, base_url: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
+    async def fetch_models(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
         """
         获取可用模型列表 (OpenAI Compatible /v1/models)
-        
+
+        永久缓存策略：
+        - 缓存永久有效，除非 API 地址变化或手动刷新
+        - API 地址变化时自动清除旧缓存并重新获取
+
         Args:
             base_url: API地址，不传则使用当前配置
             api_key: API Key，不传则使用当前配置
+            force_refresh: 是否强制刷新缓存
         """
         base = (base_url or self._openai_base_url).rstrip("/")
         key = api_key or self._openai_api_key
-        
+
         if not key:
             return {"success": False, "message": "API Key 未配置", "models": []}
-        
+
+        # 检查 API 地址是否变化
+        cached_url = self._storage.cache_get(self._models_cache_url_key)
+        url_changed = cached_url != base
+
+        if url_changed:
+            logger.info(f"AI配置: API 地址已变化 ({cached_url} -> {base})，将重新获取模型列表")
+            force_refresh = True
+
+        # 检查缓存（永久有效，TTL 设为 30 天）
+        if not force_refresh:
+            cached = self._storage.cache_get(self._models_cache_key)
+            if cached and isinstance(cached, list) and len(cached) > 0:
+                logger.debug(f"AI配置: 使用缓存的模型列表 (共 {len(cached)} 个)")
+                return {
+                    "success": True,
+                    "message": f"获取到 {len(cached)} 个模型",
+                    "models": cached,
+                }
+
         headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
-        
+
         try:
+            logger.info(f"AI配置: 从 API 获取模型列表 (base_url={base})")
             async with httpx.AsyncClient(timeout=15.0) as client:
                 url = self._get_endpoint_url(base, "/models")
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # 解析模型列表
                 models = []
                 raw_models = data.get("data", [])
@@ -670,10 +704,16 @@ class AIAutoBanService:
                             "owned_by": m.get("owned_by", ""),
                             "created": m.get("created", 0),
                         })
-                
+
                 # 按模型名排序
                 models.sort(key=lambda x: x["id"])
-                
+
+                # 永久缓存（TTL 设为 30 天，实际上相当于永久）
+                cache_ttl = 30 * 24 * 3600  # 30 天
+                self._storage.cache_set(self._models_cache_key, models, ttl=cache_ttl)
+                self._storage.cache_set(self._models_cache_url_key, base, ttl=cache_ttl)
+                logger.info(f"AI配置: 获取到 {len(models)} 个模型，已永久缓存")
+
                 return {
                     "success": True,
                     "message": f"获取到 {len(models)} 个模型",
