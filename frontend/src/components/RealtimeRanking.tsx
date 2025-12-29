@@ -1229,6 +1229,32 @@ export function RealtimeRanking() {
     }
   }, [aiConfig, aiConfigExpanded])
 
+  // 配置加载后自动获取模型列表（使用缓存）
+  useEffect(() => {
+    if (aiConfig?.base_url && aiConfig?.has_api_key && aiModels.length === 0) {
+      // 使用缓存获取模型列表，不强制刷新
+      const fetchModelsFromCache = async () => {
+        try {
+          const response = await fetch(`${apiUrl}/api/ai-ban/models`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              base_url: aiConfig.base_url,
+              force_refresh: false,
+            }),
+          })
+          const res = await response.json()
+          if (res.success) {
+            setAiModels(res.models || [])
+          }
+        } catch (e) {
+          console.error('Failed to fetch models from cache:', e)
+        }
+      }
+      fetchModelsFromCache()
+    }
+  }, [aiConfig?.base_url, aiConfig?.has_api_key, apiUrl, getAuthHeaders])
+
   const openUserIpsDialog = (userId: number, username: string) => {
     setSelectedUserForIps({ id: userId, username })
     setUserIpsDialogOpen(true)
