@@ -511,6 +511,101 @@ async def _warmup_user_activity_list():
         })
 
 
+async def _warmup_ip_monitoring_data():
+    """
+    预热 IP 监控数据（共享IP、多IP令牌、多IP用户、IP Stats）
+
+    特点：
+    1. 预热多个时间窗口（1h, 24h, 7d）
+    2. 使用 limit=200 匹配前端请求
+    3. 支持缓存复用（key不包含limit）
+    """
+    from .ip_monitoring_service import get_ip_monitoring_service, WINDOW_SECONDS
+
+    logger.phase(5, "预热 IP 监控数据")
+
+    ip_service = get_ip_monitoring_service()
+    IP_WARMUP_LIMIT = 200
+    IP_WARMUP_WINDOWS = ["1h", "24h", "7d"]
+
+    warmup_start = time.time()
+    success_count = 0
+    failed_items = []
+
+    for window_key in IP_WARMUP_WINDOWS:
+        window_seconds = WINDOW_SECONDS.get(window_key, 86400)
+
+        # 共享IP
+        try:
+            start = time.time()
+            ip_service.get_shared_ips(
+                window_seconds=window_seconds,
+                min_tokens=2,
+                limit=IP_WARMUP_LIMIT,
+                use_cache=False
+            )
+            logger.success(f"IP监控 shared_ips({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            success_count += 1
+        except Exception as e:
+            failed_items.append(f"shared_ips({window_key})")
+            logger.warn(f"IP监控 shared_ips({window_key}) 预热失败: {e}")
+
+        # 多IP令牌
+        try:
+            start = time.time()
+            ip_service.get_multi_ip_tokens(
+                window_seconds=window_seconds,
+                min_ips=2,
+                limit=IP_WARMUP_LIMIT,
+                use_cache=False
+            )
+            logger.success(f"IP监控 multi_ip_tokens({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            success_count += 1
+        except Exception as e:
+            failed_items.append(f"multi_ip_tokens({window_key})")
+            logger.warn(f"IP监控 multi_ip_tokens({window_key}) 预热失败: {e}")
+
+        # 多IP用户
+        try:
+            start = time.time()
+            ip_service.get_multi_ip_users(
+                window_seconds=window_seconds,
+                min_ips=3,
+                limit=IP_WARMUP_LIMIT,
+                use_cache=False
+            )
+            logger.success(f"IP监控 multi_ip_users({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            success_count += 1
+        except Exception as e:
+            failed_items.append(f"multi_ip_users({window_key})")
+            logger.warn(f"IP监控 multi_ip_users({window_key}) 预热失败: {e}")
+
+    # IP Stats
+    try:
+        start = time.time()
+        ip_service.get_ip_recording_stats(use_cache=False)
+        logger.success(f"IP监控 ip_stats 预热完成", 耗时=f"{time.time()-start:.2f}s")
+        success_count += 1
+    except Exception as e:
+        failed_items.append("ip_stats")
+        logger.warn(f"IP监控 ip_stats 预热失败: {e}")
+
+    total_elapsed = time.time() - warmup_start
+    total_items = len(IP_WARMUP_WINDOWS) * 3 + 1  # 3种查询 × N窗口 + IP Stats
+
+    if failed_items:
+        logger.kvs({
+            "成功项目": f"{success_count}/{total_items}",
+            "失败项目": ", ".join(failed_items),
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+    else:
+        logger.kvs({
+            "成功项目": f"{success_count}/{total_items}",
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+
+
 async def background_cache_warmup():
     """
     后台缓存预热任务 - 智能恢复模式
@@ -601,7 +696,7 @@ async def background_cache_warmup():
     missing_windows = [w for w in windows if w not in cached_windows]
 
     if not missing_windows:
-        # 所有缓存都有效，但仍需预热 Dashboard 和 IP 分布
+        # 所有缓存都有效，但仍需预热 Dashboard、IP监控 和 IP 分布
         logger.success("所有缓存有效，无需预热排行榜")
 
         # 预热 Dashboard 数据
@@ -615,6 +710,12 @@ async def background_cache_warmup():
             await _warmup_user_activity_list()
         except Exception as e:
             logger.warn(f"用户活跃度列表预热异常: {e}")
+
+        # 预热 IP 监控数据（共享IP、多IP令牌、多IP用户、IP Stats）
+        try:
+            await _warmup_ip_monitoring_data()
+        except Exception as e:
+            logger.warn(f"IP监控预热异常: {e}")
 
         # 预热 IP 地区分布
         try:
@@ -1689,6 +1790,7 @@ def include_routes(app: FastAPI):
     from .ip_monitoring_routes import router as ip_monitoring_router
     from .ai_auto_ban_routes import router as ai_auto_ban_router
     from .system_routes import router as system_router
+    from .model_status_routes import router as model_status_router
     app.include_router(router)
     app.include_router(auth_router)
     app.include_router(top_up_router)
@@ -1700,6 +1802,7 @@ def include_routes(app: FastAPI):
     app.include_router(ip_monitoring_router)
     app.include_router(ai_auto_ban_router)
     app.include_router(system_router)
+    app.include_router(model_status_router)
 
 
 # Create FastAPI application
