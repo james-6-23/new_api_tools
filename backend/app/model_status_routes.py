@@ -273,7 +273,7 @@ def _get_selected_models_from_cache() -> List[str]:
     
     # Fallback to SQLite
     try:
-        with cache._get_sqlite_connection() as conn:
+        with cache._get_sqlite() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT data FROM generic_cache WHERE key = ?",
@@ -312,7 +312,7 @@ def _set_selected_models_to_cache(models: List[str]) -> bool:
     
     # Always save to SQLite as backup
     try:
-        with cache._get_sqlite_connection() as conn:
+        with cache._get_sqlite() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO generic_cache (key, data, snapshot_time, expires_at)
