@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search, Timer } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -164,6 +164,25 @@ function formatTime(ts: number) {
 
 function formatQuota(quota: number) {
   return `$${(quota / 500000).toFixed(2)}`
+}
+
+function formatCountdown(seconds: number) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
+}
+
+const getIntervalLabel = (interval: number) => {
+  switch (interval) {
+    case 0: return '关闭'
+    case 10: return '10秒'
+    case 30: return '30秒'
+    case 60: return '1分钟'
+    case 120: return '2分钟'
+    case 300: return '5分钟'
+    case 600: return '10分钟'
+    default: return '关闭'
+  }
 }
 
 function rankBadgeClass(rank: number) {
@@ -355,6 +374,19 @@ export function RealtimeRanking() {
   const [bannedTotalPages, setBannedTotalPages] = useState(1)
   const [bannedTotal, setBannedTotal] = useState(0)
   const [bannedSearch, setBannedSearch] = useState('')
+  const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowIntervalDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // 审计日志状态
   const [records, setRecords] = useState<BanRecordItem[]>([])
@@ -1536,24 +1568,47 @@ export function RealtimeRanking() {
         <div className="flex flex-wrap items-center gap-3">
           {view === 'leaderboards' && (
             <>
-              <div className="flex items-center gap-2">
-                <Select 
-                  value={refreshInterval.toString()} 
-                  onChange={(e) => handleRefreshIntervalChange(parseInt(e.target.value))}
-                  className="w-24 h-8 text-xs"
+              <div className="relative" ref={dropdownRef}>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
+                  className="h-9 min-w-[100px]"
                 >
-                  <option value="0">关闭</option>
-                  <option value="10">10秒</option>
-                  <option value="30">30秒</option>
-                  <option value="60">1分钟</option>
-                  <option value="120">2分钟</option>
-                  <option value="300">5分钟</option>
-                  <option value="600">10分钟</option>
-                </Select>
-                {refreshInterval > 0 && (
-                  <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                    {countdown}s
-                  </span>
+                  <Timer className="h-4 w-4 mr-2" />
+                  {refreshInterval > 0 ? (
+                    <span className="flex items-center gap-1">
+                      <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
+                    </span>
+                  ) : (
+                    '自动刷新'
+                  )}
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+                
+                {showIntervalDropdown && (
+                  <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
+                    <div className="p-2 border-b">
+                      <p className="text-xs text-muted-foreground">刷新间隔</p>
+                    </div>
+                    <div className="p-1">
+                      {([0, 10, 30, 60, 120, 300, 600]).map((interval) => (
+                        <button
+                          key={interval}
+                          onClick={() => {
+                            handleRefreshIntervalChange(interval)
+                            setShowIntervalDropdown(false)
+                          }}
+                          className={cn(
+                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
+                            refreshInterval === interval && "bg-accent text-accent-foreground"
+                          )}
+                        >
+                          {getIntervalLabel(interval)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
               <div className="w-40">
@@ -2414,23 +2469,47 @@ export function RealtimeRanking() {
                 </Select>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Select 
-                    value={ipRefreshInterval.toString()} 
-                    onChange={(e) => handleIpRefreshIntervalChange(parseInt(e.target.value))}
-                    className="w-24 h-9 text-xs"
+                <div className="relative" ref={dropdownRef}>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
+                    className="h-9 min-w-[100px]"
                   >
-                    <option value="0">关闭</option>
-                    <option value="30">30秒</option>
-                    <option value="60">1分钟</option>
-                    <option value="120">2分钟</option>
-                    <option value="300">5分钟</option>
-                    <option value="600">10分钟</option>
-                  </Select>
-                  {ipRefreshInterval > 0 && (
-                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                      {ipCountdown}s
-                    </span>
+                    <Timer className="h-4 w-4 mr-2" />
+                    {ipRefreshInterval > 0 ? (
+                      <span className="flex items-center gap-1">
+                        <span className="text-primary font-medium">{formatCountdown(ipCountdown)}</span>
+                      </span>
+                    ) : (
+                      '自动刷新'
+                    )}
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                  
+                  {showIntervalDropdown && (
+                    <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
+                      <div className="p-2 border-b">
+                        <p className="text-xs text-muted-foreground">刷新间隔</p>
+                      </div>
+                      <div className="p-1">
+                        {([0, 30, 60, 120, 300, 600]).map((interval) => (
+                          <button
+                            key={interval}
+                            onClick={() => {
+                              handleIpRefreshIntervalChange(interval)
+                              setShowIntervalDropdown(false)
+                            }}
+                            className={cn(
+                              "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
+                              ipRefreshInterval === interval && "bg-accent text-accent-foreground"
+                            )}
+                          >
+                            {getIntervalLabel(interval)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
                 <Button variant="outline" size="sm" onClick={handleRefreshIP} disabled={ipRefreshing.all} className="h-9">
@@ -3841,12 +3920,12 @@ export function RealtimeRanking() {
                     {/* Stats */}
                     <div className="grid grid-cols-4 gap-4">
                       {[
-                        { label: '扫描总数', value: selectedAuditLog.total_scanned, color: 'text-blue-600 dark:text-blue-400' },
-                        { label: '封禁人数', value: selectedAuditLog.banned_count, color: 'text-red-600 dark:text-red-400' },
-                        { label: '告警人数', value: selectedAuditLog.warned_count, color: 'text-orange-600 dark:text-orange-400' },
-                        { label: '跳过/正常', value: selectedAuditLog.skipped_count, color: 'text-slate-600 dark:text-slate-400' },
+                        { label: '扫描总数', value: selectedAuditLog.total_scanned, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800' },
+                        { label: '封禁人数', value: selectedAuditLog.banned_count, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-800' },
+                        { label: '告警人数', value: selectedAuditLog.warned_count, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-900/10 border-orange-100 dark:border-orange-800' },
+                        { label: '跳过/正常', value: selectedAuditLog.skipped_count, color: 'text-slate-600 dark:text-slate-400', bg: 'bg-slate-50 dark:bg-slate-900/10 border-slate-100 dark:border-slate-800' },
                       ].map((stat, i) => (
-                        <div key={i} className="p-4 rounded-xl border shadow-sm bg-card flex flex-col items-center justify-center gap-1">
+                        <div key={i} className={cn("p-4 rounded-xl border shadow-sm flex flex-col items-center justify-center gap-1 transition-all hover:shadow-md", stat.bg)}>
                           <div className={cn("text-2xl font-bold tabular-nums", stat.color)}>{stat.value}</div>
                           <div className="text-xs font-medium text-muted-foreground">{stat.label}</div>
                         </div>
@@ -3873,86 +3952,107 @@ export function RealtimeRanking() {
 
                       <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-muted-foreground/20">
                         {selectedAuditLog.details?.map((detail: any, idx: number) => (
-                          <Card key={idx} className="overflow-hidden shadow-sm hover:shadow-md transition-shadow bg-card">
+                          <Card key={idx} className="overflow-hidden shadow-sm hover:shadow-md transition-shadow bg-card border-border/60">
                             <div className="p-4">
-                              <div className="flex items-start justify-between mb-4">
+                              <div className="flex items-start justify-between mb-3">
                                 <div className="flex items-center gap-3">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 px-2 pl-1 rounded-full text-xs font-medium bg-muted/50 hover:bg-muted text-foreground border border-border/50 transition-all duration-200"
-                                    onClick={() => {
-                                      setSelectedAuditLog(null)
-                                      openUserAnalysisFromIP(detail.user_id, detail.username || `用户${detail.user_id}`)
-                                    }}
-                                  >
-                                    <div className="w-6 h-6 rounded-full bg-background flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-border/50 mr-2">
-                                      {(detail.username || 'U')[0]?.toUpperCase()}
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-200 dark:border-slate-700">
+                                    {(detail.username || 'U')[0]?.toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className="text-sm font-bold hover:underline cursor-pointer"
+                                        onClick={() => {
+                                          setSelectedAuditLog(null)
+                                          openUserAnalysisFromIP(detail.user_id, detail.username || `用户${detail.user_id}`)
+                                        }}
+                                      >
+                                        {detail.username}
+                                      </span>
+                                      <span className="text-[10px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                                        #{detail.user_id}
+                                      </span>
                                     </div>
-                                    <span className="mr-1">{detail.username}</span>
-                                    <span className="text-[10px] text-muted-foreground font-mono opacity-70">#{detail.user_id}</span>
-                                  </Button>
+                                  </div>
                                 </div>
                                 <Badge variant={
                                   detail.action === 'ban' ? 'destructive' :
                                     detail.action === 'warn' ? 'default' :
                                       detail.action === 'monitor' ? 'secondary' : 'outline'
-                                }>
-                                  {detail.action === 'ban' ? '封禁' : detail.action === 'warn' ? '告警' : detail.action === 'monitor' ? '观察' : detail.action}
+                                } className="uppercase text-[10px] tracking-wider px-2">
+                                  {detail.action === 'ban' ? '已封禁' : detail.action === 'warn' ? '已告警' : detail.action === 'monitor' ? '观察中' : detail.action}
                                 </Badge>
                               </div>
 
                               {/* AI Assessment Section */}
                               {detail.assessment ? (
-                                <div className="bg-muted/50 rounded-lg p-3 space-y-3 text-sm border border-border/50">
-                                  <div className="flex flex-wrap items-center justify-between border-b border-border/50 pb-2 gap-2">
-                                    <div className="flex items-center gap-4">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-xs text-muted-foreground">风险分</span>
-                                        <span className={cn(
-                                          "font-mono font-bold",
-                                          detail.assessment.risk_score >= 7 ? "text-red-600 dark:text-red-400" :
-                                            detail.assessment.risk_score >= 4 ? "text-orange-600 dark:text-orange-400" : "text-green-600 dark:text-green-400"
-                                        )}>{detail.assessment.risk_score}</span>
+                                <div className="bg-muted/30 rounded-lg p-3 space-y-3 text-sm border border-border/40">
+                                  <div className="flex flex-wrap items-center justify-between gap-4">
+                                    <div className="flex items-center gap-6">
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">风险评分</span>
+                                        <div className="flex items-baseline gap-1">
+                                          <span className={cn(
+                                            "text-lg font-bold tabular-nums",
+                                            detail.assessment.risk_score >= 8 ? "text-red-600" :
+                                              detail.assessment.risk_score >= 5 ? "text-amber-600" : "text-green-600"
+                                          )}>{detail.assessment.risk_score}</span>
+                                          <span className="text-xs text-muted-foreground">/10</span>
+                                        </div>
                                       </div>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-xs text-muted-foreground">置信度</span>
-                                        <span className="font-mono font-bold">{(detail.assessment.confidence * 100).toFixed(0)}%</span>
+                                      
+                                      <div className="w-px h-8 bg-border/60"></div>
+                                      
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">置信度</span>
+                                        <div className="text-lg font-bold tabular-nums">
+                                          {(detail.assessment.confidence * 100).toFixed(0)}<span className="text-xs text-muted-foreground ml-0.5">%</span>
+                                        </div>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-3 text-xs text-muted-foreground ml-auto">
+
+                                    <div className="flex items-center gap-3 text-xs text-muted-foreground bg-background/50 px-3 py-1.5 rounded-full border border-border/30">
                                       <div className="flex items-center gap-1" title="输入 Token">
-                                        <span>In:</span>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
                                         <span className="font-mono text-foreground">{detail.assessment.prompt_tokens}</span>
+                                        <span className="text-[9px]">in</span>
                                       </div>
+                                      <div className="w-px h-3 bg-border/60"></div>
                                       <div className="flex items-center gap-1" title="输出 Token">
-                                        <span>Out:</span>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
                                         <span className="font-mono text-foreground">{detail.assessment.completion_tokens}</span>
+                                        <span className="text-[9px]">out</span>
                                       </div>
+                                      <div className="w-px h-3 bg-border/60"></div>
                                       <div className="flex items-center gap-1" title="API 耗时">
-                                        <span>Time:</span>
-                                        <span className="font-mono text-foreground">{detail.assessment.api_duration_ms || detail.assessment.cost_time || '-'}ms</span>
+                                        <Clock className="w-3 h-3" />
+                                        <span className="font-mono text-foreground">{detail.assessment.api_duration_ms || detail.assessment.cost_time || '-'}</span>
+                                        <span className="text-[9px]">ms</span>
                                       </div>
                                     </div>
                                   </div>
 
                                   {/* Analysis Content */}
                                   {detail.assessment.reason && (
-                                    <div className="text-slate-700 dark:text-slate-300 leading-relaxed text-xs">
-                                      <span className="font-semibold text-foreground">分析: </span>
-                                      {detail.assessment.reason}
+                                    <div className="relative pl-3 border-l-2 border-primary/20">
+                                      <div className="text-xs font-semibold text-foreground mb-0.5">AI 分析结论</div>
+                                      <div className="text-xs text-muted-foreground leading-relaxed">
+                                        {detail.assessment.reason}
+                                      </div>
                                     </div>
                                   )}
                                 </div>
                               ) : (
-                                <div className="text-xs text-muted-foreground italic px-2 py-2 bg-muted/30 rounded">
+                                <div className="text-xs text-muted-foreground italic px-3 py-2 bg-muted/30 rounded border border-dashed">
                                   {detail.message || '暂无 AI 分析详情'}
                                 </div>
                               )}
 
                               {/* Error Message if any */}
                               {detail.message && detail.action === 'error' && (
-                                <div className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 p-2 rounded border border-red-100 dark:border-red-900/30">
+                                <div className="mt-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 p-2 rounded border border-red-100 dark:border-red-900/30 flex items-center gap-2">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
                                   {detail.message}
                                 </div>
                               )}

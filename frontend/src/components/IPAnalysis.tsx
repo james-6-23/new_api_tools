@@ -5,7 +5,7 @@ import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
 import { 
   Globe, MapPin, RefreshCw, Loader2, TrendingUp, 
-  AlertTriangle, Activity, ChevronRight, ChevronDown
+  AlertTriangle, Activity, ChevronRight, ChevronDown, Timer
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
@@ -172,6 +172,24 @@ const countryCodeToName: Record<string, string> = {
   'PK': 'Pakistan',
 }
 
+function formatCountdown(seconds: number) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
+}
+
+const getIntervalLabel = (interval: number) => {
+  switch (interval) {
+    case 0: return '关闭'
+    case 30: return '30秒'
+    case 60: return '1分钟'
+    case 120: return '2分钟'
+    case 300: return '5分钟'
+    case 600: return '10分钟'
+    default: return '关闭'
+  }
+}
+
 export function IPAnalysis() {
   const { token } = useAuth()
   const { showToast } = useToast()
@@ -185,6 +203,20 @@ export function IPAnalysis() {
   const [mapDropdownOpen, setMapDropdownOpen] = useState(false)
   const mapLoadedRef = useRef(false)
   const chinaMapLoadedRef = useRef(false)
+  
+  const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowIntervalDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // 自动刷新相关状态
   const IP_REFRESH_KEY = 'ip_analysis_refresh_interval'
@@ -742,18 +774,50 @@ export function IPAnalysis() {
               refreshInterval > 0 ? `刷新 (${countdown}s)` : '刷新'
             )}
           </Button>
-          <select
-            value={refreshInterval}
-            onChange={(e) => handleRefreshIntervalChange(Number(e.target.value))}
-            className="h-9 px-2 text-xs rounded-md border bg-background hover:bg-accent cursor-pointer"
-            title={systemScale ? `当前系统规模: ${systemScale}` : ''}
-          >
-            <option value={0}>自动刷新: 关闭</option>
-            <option value={30}>30秒</option>
-            <option value={60}>1分钟</option>
-            <option value={300}>5分钟</option>
-            <option value={600}>10分钟</option>
-          </select>
+          <div className="relative" ref={dropdownRef}>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
+              className="h-9 min-w-[100px]"
+              title={systemScale ? `当前系统规模: ${systemScale}` : ''}
+            >
+              <Timer className="h-4 w-4 mr-2" />
+              {refreshInterval > 0 ? (
+                <span className="flex items-center gap-1">
+                  <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
+                </span>
+              ) : (
+                '自动刷新'
+              )}
+              <ChevronDown className="h-3 w-3 ml-1" />
+            </Button>
+            
+            {showIntervalDropdown && (
+              <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
+                <div className="p-2 border-b">
+                  <p className="text-xs text-muted-foreground">刷新间隔</p>
+                </div>
+                <div className="p-1">
+                  {([0, 30, 60, 300, 600]).map((interval) => (
+                    <button
+                      key={interval}
+                      onClick={() => {
+                        handleRefreshIntervalChange(interval)
+                        setShowIntervalDropdown(false)
+                      }}
+                      className={cn(
+                        "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
+                        refreshInterval === interval && "bg-accent text-accent-foreground"
+                      )}
+                    >
+                      {getIntervalLabel(interval)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           {systemScale && (
             <span className="text-xs text-muted-foreground hidden sm:inline" title="根据系统规模自动检测">
               {systemScale}

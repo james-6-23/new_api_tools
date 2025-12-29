@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { RefreshCw, Trash2, AlertTriangle, Loader2, Timer, ChevronDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Progress } from './ui/progress'
 import { Badge } from './ui/badge'
-import { Select } from './ui/select'
 import {
   Table,
   TableBody,
@@ -62,6 +62,25 @@ interface SyncStatus {
   needs_reset: boolean
 }
 
+function formatCountdown(seconds: number) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
+}
+
+const getIntervalLabel = (interval: number) => {
+  switch (interval) {
+    case 0: return '关闭'
+    case 10: return '10秒'
+    case 30: return '30秒'
+    case 60: return '1分钟'
+    case 120: return '2分钟'
+    case 300: return '5分钟'
+    case 600: return '10分钟'
+    default: return '关闭'
+  }
+}
+
 export function Analytics() {
   const { token } = useAuth()
   const { showToast } = useToast()
@@ -77,6 +96,20 @@ export function Analytics() {
     return saved ? parseInt(saved, 10) : DEFAULT_REFRESH_INTERVAL
   })
   const refreshIntervalRef = useRef(refreshInterval)
+  
+  const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowIntervalDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const [state, setState] = useState<AnalyticsState | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
@@ -570,24 +603,47 @@ export function Analytics() {
             <div className="flex items-center gap-3">
               {/* 刷新间隔选择和倒计时 - 只有初始化完成后才显示 */}
               {syncStatus && !syncStatus.needs_initial_sync && !syncStatus.is_initializing && (
-                <div className="flex items-center gap-2">
-                  <Select 
-                    value={refreshInterval.toString()} 
-                    onChange={(e) => handleRefreshIntervalChange(parseInt(e.target.value))}
-                    className="w-24 h-8 text-xs"
+                <div className="relative" ref={dropdownRef}>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
+                    className="h-9 min-w-[100px]"
                   >
-                    <option value="0">关闭</option>
-                    <option value="10">10秒</option>
-                    <option value="30">30秒</option>
-                    <option value="60">1分钟</option>
-                    <option value="120">2分钟</option>
-                    <option value="300">5分钟</option>
-                    <option value="600">10分钟</option>
-                  </Select>
-                  {refreshInterval > 0 && countdown > 0 && (
-                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                      {countdown}s
-                    </span>
+                    <Timer className="h-4 w-4 mr-2" />
+                    {refreshInterval > 0 && countdown > 0 ? (
+                      <span className="flex items-center gap-1">
+                        <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
+                      </span>
+                    ) : (
+                      '自动刷新'
+                    )}
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                  
+                  {showIntervalDropdown && (
+                    <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
+                      <div className="p-2 border-b">
+                        <p className="text-xs text-muted-foreground">刷新间隔</p>
+                      </div>
+                      <div className="p-1">
+                        {([0, 10, 30, 60, 120, 300, 600]).map((interval) => (
+                          <button
+                            key={interval}
+                            onClick={() => {
+                              handleRefreshIntervalChange(interval)
+                              setShowIntervalDropdown(false)
+                            }}
+                            className={cn(
+                              "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
+                              refreshInterval === interval && "bg-accent text-accent-foreground"
+                            )}
+                          >
+                            {getIntervalLabel(interval)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}

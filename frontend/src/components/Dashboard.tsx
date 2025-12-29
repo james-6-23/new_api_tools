@@ -65,8 +65,17 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState<PeriodType>('24h')
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(0)
-  const [countdown, setCountdown] = useState<number>(0)
+  
+  const DASHBOARD_REFRESH_KEY = 'dashboard_refresh_interval'
+  const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(() => {
+    const saved = localStorage.getItem(DASHBOARD_REFRESH_KEY)
+    return saved ? (parseInt(saved, 10) as RefreshInterval) : 0
+  })
+  const [countdown, setCountdown] = useState<number>(() => {
+    const saved = localStorage.getItem(DASHBOARD_REFRESH_KEY)
+    return saved ? parseInt(saved, 10) : 0
+  })
+  
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -309,6 +318,11 @@ export function Dashboard() {
     setRefreshInterval(interval)
     if (interval > 0) {
       setCountdown(interval)
+      localStorage.setItem(DASHBOARD_REFRESH_KEY, interval.toString())
+      showToast('success', `自动刷新已设置为 ${getIntervalLabel(interval)}`)
+    } else {
+      localStorage.removeItem(DASHBOARD_REFRESH_KEY)
+      showToast('info', '自动刷新已关闭')
     }
     setShowIntervalDropdown(false)
   }
