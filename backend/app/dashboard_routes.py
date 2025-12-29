@@ -62,6 +62,12 @@ class CacheControlResponse(BaseModel):
     data: Optional[dict] = None
 
 
+class RefreshEstimateResponse(BaseModel):
+    """Response model for refresh estimate."""
+    success: bool
+    data: dict
+
+
 # API Endpoints
 
 @router.get("/overview", response_model=SystemOverviewResponse)
@@ -222,6 +228,92 @@ def invalidate_dashboard_cache(
         message=f"Invalidated {deleted} cache entries",
         data={"deleted": deleted},
     )
+
+
+@router.get("/refresh-estimate", response_model=RefreshEstimateResponse)
+def get_refresh_estimate(
+    period: str = Query(default="7d", description="时间周期 (24h/3d/7d/14d)"),
+    _: str = Depends(verify_auth),
+):
+    """
+    获取刷新预估信息（仅大型系统显示）。
+
+    返回预估的日志数量、查询时间等信息，
+    帮助用户了解刷新操作的影响。
+
+    对于中小型系统，返回 show_estimate=False，前端无需显示额外提示。
+    """
+    valid_periods = ["24h", "3d", "7d", "14d"]
+    if period not in valid_periods:
+        raise InvalidParamsError(message=f"Invalid period: {period}")
+
+    service = get_cached_dashboard_service()
+    data = service.get_refresh_estimate(period=period)
+
+    return RefreshEstimateResponse(success=True, data=data)
+
+
+@router.get("/system-info")
+def get_dashboard_system_info(
+    _: str = Depends(verify_auth),
+):
+    """
+    获取仪表盘相关的系统信息。
+
+    返回系统规模、缓存 TTL 配置等信息，
+    前端可根据这些信息调整显示策略。
+    """
+    from .system_scale_service import get_scale_service
+
+    scale_service = get_scale_service()
+    result = scale_service.detect_scale()
+
+    scale = result.get("scale", "medium")
+    metrics = result.get("metrics", {})
+    settings = result.get("settings", {})
+
+    # 判断是否需要显示大型系统提示
+    is_large_system = scale in ("large", "xlarge")
+
+    return {
+        "success": True,
+        "data": {
+            "scale": scale,
+            "scale_description": settings.get("description", ""),
+            "is_large_system": is_large_system,
+            "metrics": {
+                "total_users": metrics.get("total_users", 0),
+                "active_users_24h": metrics.get("active_users_24h", 0),
+                "logs_24h": metrics.get("logs_24h", 0),
+                "total_logs": metrics.get("total_logs", 0),
+                "rpm_avg": metrics.get("rpm_avg", 0),
+            },
+            "cache_settings": {
+                "frontend_refresh_interval": settings.get("frontend_refresh_interval", 60),
+                "leaderboard_cache_ttl": settings.get("leaderboard_cache_ttl", 60),
+            },
+            "tips": _get_system_tips(scale, metrics) if is_large_system else None,
+        },
+    }
+
+
+def _get_system_tips(scale: str, metrics: dict) -> dict:
+    """生成大型系统提示信息"""
+    logs_24h = metrics.get("logs_24h", 0)
+    total_logs = metrics.get("total_logs", 0)
+
+    if logs_24h >= 1_000_000:
+        logs_formatted = f"{logs_24h / 1_000_000:.1f}M"
+    elif logs_24h >= 1_000:
+        logs_formatted = f"{logs_24h / 1_000:.0f}K"
+    else:
+        logs_formatted = str(logs_24h)
+
+    return {
+        "refresh_warning": True,
+        "logs_24h_formatted": logs_formatted,
+        "message": f"当前系统日均 {logs_formatted} 条日志，强制刷新可能需要较长时间",
+    }
 
 
 class IPDistributionResponse(BaseModel):

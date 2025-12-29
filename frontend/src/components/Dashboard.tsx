@@ -51,6 +51,31 @@ interface AnalyticsSummary {
   quota_king: { user_id: number; username: string; quota_used: number } | null
 }
 
+interface SystemInfo {
+  scale: string
+  is_large_system: boolean
+  metrics: {
+    total_users: number
+    logs_24h: number
+    total_logs: number
+  }
+  tips?: {
+    refresh_warning: boolean
+    logs_24h_formatted: string
+    message: string
+  }
+}
+
+interface RefreshEstimate {
+  show_estimate: boolean
+  scale?: string
+  estimated_logs?: number
+  estimated_logs_formatted?: string
+  estimated_seconds?: number
+  estimated_time_formatted?: string
+  warning?: string
+}
+
 type PeriodType = '24h' | '3d' | '7d' | '14d'
 
 export function Dashboard() {
@@ -79,6 +104,12 @@ export function Dashboard() {
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // 大型系统刷新提示相关状态
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
+  const [refreshEstimate, setRefreshEstimate] = useState<RefreshEstimate | null>(null)
+  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false)
+  const [refreshProgress, setRefreshProgress] = useState<string | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const requestTimeoutMs = 20_000
@@ -207,6 +238,43 @@ export function Dashboard() {
     return results.every(Boolean)
   }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
 
+  // 获取系统规模信息（仅首次加载）
+  const fetchSystemInfo = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/system-info`,
+        { headers: getAuthHeaders() },
+      )
+      const data = await response.json()
+      if (data.success) {
+        setSystemInfo(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch system info:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // 获取刷新预估信息
+  const fetchRefreshEstimate = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/dashboard/refresh-estimate?period=${period}`,
+        { headers: getAuthHeaders() },
+      )
+      const data = await response.json()
+      if (data.success) {
+        setRefreshEstimate(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch refresh estimate:', error)
+    }
+  }, [apiUrl, getAuthHeaders, period])
+
+  // 首次加载时获取系统信息
+  useEffect(() => {
+    fetchSystemInfo()
+  }, [fetchSystemInfo])
+
   useEffect(() => {
     const controller = new AbortController()
     let mounted = true
@@ -256,11 +324,27 @@ export function Dashboard() {
   }
 
   const handleRefresh = async () => {
+    // 大型系统：先获取预估信息并显示确认
+    if (systemInfo?.is_large_system && !showRefreshConfirm) {
+      await fetchRefreshEstimate()
+      setShowRefreshConfirm(true)
+      return
+    }
+
+    // 关闭确认对话框
+    setShowRefreshConfirm(false)
     setRefreshing(true)
     setLoadError(null)
 
+    // 大型系统显示进度
+    if (systemInfo?.is_large_system) {
+      setRefreshProgress('正在刷新数据...')
+    }
+
     const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort(), requestTimeoutMs)
+    // 大型系统给更长的超时时间
+    const timeout = systemInfo?.is_large_system ? 60_000 : requestTimeoutMs
+    const timeoutId = window.setTimeout(() => controller.abort(), timeout)
 
     try {
       const ok = await refreshAll(controller.signal)
@@ -277,8 +361,15 @@ export function Dashboard() {
     } finally {
       window.clearTimeout(timeoutId)
       setRefreshing(false)
+      setRefreshProgress(null)
       controller.abort()
     }
+  }
+
+  // 取消刷新确认
+  const handleCancelRefresh = () => {
+    setShowRefreshConfirm(false)
+    setRefreshEstimate(null)
   }
 
   // 点击外部关闭下拉菜单
@@ -380,6 +471,79 @@ export function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
+      {/* 大型系统刷新确认对话框 */}
+      {showRefreshConfirm && refreshEstimate?.show_estimate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background border rounded-lg shadow-lg p-6 max-w-md mx-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
+                <Database className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold">确认刷新数据</h3>
+                <p className="text-sm text-muted-foreground">{refreshEstimate.scale === 'large' ? '大型系统' : '超大型系统'}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">预计扫描日志</span>
+                  <span className="font-medium">{refreshEstimate.estimated_logs_formatted} 条</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">预计耗时</span>
+                  <span className="font-medium">{refreshEstimate.estimated_time_formatted}</span>
+                </div>
+              </div>
+
+              {refreshEstimate.warning && (
+                <p className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                  <Activity className="h-3 w-3" />
+                  {refreshEstimate.warning}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleCancelRefresh}
+              >
+                取消
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleRefresh}
+              >
+                确认刷新
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 大型系统刷新进度覆盖层 */}
+      {refreshing && refreshProgress && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background border rounded-lg shadow-lg p-8 max-w-sm mx-4 animate-in zoom-in-95 duration-200">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <div className="text-center">
+                <p className="font-medium">{refreshProgress}</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  正在查询 {refreshEstimate?.estimated_logs_formatted || '大量'} 条日志数据
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  预计需要 {refreshEstimate?.estimated_time_formatted || '较长时间'}，请耐心等待
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>

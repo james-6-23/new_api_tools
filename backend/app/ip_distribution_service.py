@@ -373,8 +373,8 @@ async def warmup_ip_distribution():
         
         # 需要预热的窗口列表
         windows_to_warmup = ["1h", "6h", "24h", "7d"]
-        
-        logger.system(f"[IP分布] 开始预热 {len(windows_to_warmup)} 个窗口数据...")
+
+        logger.phase(6, "预热 IP 地区分布")
         total_start = time.time()
         
         warmed = []

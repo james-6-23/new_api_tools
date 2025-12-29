@@ -107,23 +107,23 @@ async def ensure_indexes(
 ):
     """
     手动触发索引创建。
-    
+
     安全操作，不会影响 NewAPI 正常运行。
     索引创建可能需要几分钟，取决于数据量。
-    
+
     关键索引 idx_logs_created_type_user 可将 3d 查询从 858s 降到 <10s。
     """
     import asyncio
     from .database import get_db_manager
     from .logger import logger
-    
+
     db = get_db_manager()
     db.connect()
-    
+
     # 先检查状态
     before_status = db.get_index_status()
     missing_before = before_status.get("missing", 0)
-    
+
     if missing_before == 0:
         return IndexStatusResponse(
             success=True,
@@ -132,19 +132,19 @@ async def ensure_indexes(
                 "status": before_status
             }
         )
-    
+
     logger.system(f"手动触发索引创建，缺失 {missing_before} 个索引...")
-    
+
     # 在线程池中执行索引创建（避免阻塞）
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, db.ensure_indexes_async_safe)
-    
+
     # 检查创建后状态
     after_status = db.get_index_status()
     created_count = missing_before - after_status.get("missing", 0)
-    
+
     logger.success(f"索引创建完成，新建 {created_count} 个")
-    
+
     return IndexStatusResponse(
         success=True,
         data={
@@ -153,3 +153,5 @@ async def ensure_indexes(
             "status": after_status
         }
     )
+
+

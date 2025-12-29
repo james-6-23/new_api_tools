@@ -27,27 +27,60 @@ from .local_storage import get_local_storage
 from .logger import logger
 
 
-def _get_ttl_multiplier() -> float:
-    """
-    根据系统规模获取缓存TTL倍数。
-    大型系统使用更长的缓存时间以减少数据库压力。
-    """
+def _get_system_scale() -> str:
+    """获取当前系统规模"""
     try:
         from .system_scale_service import get_detected_settings
         settings = get_detected_settings()
-        scale = settings.scale if hasattr(settings, 'scale') else 'medium'
-
-        # 大型/超大型系统使用更长的缓存
-        multipliers = {
-            'tiny': 0.5,      # 小型系统可以更频繁刷新
-            'small': 1.0,
-            'medium': 1.5,
-            'large': 3.0,     # 大型系统缓存时间x3
-            'xlarge': 5.0,    # 超大型系统缓存时间x5
-        }
-        return multipliers.get(scale, 1.5)
+        return settings.scale.value if hasattr(settings, 'scale') else 'medium'
     except Exception:
-        return 1.5  # 默认使用1.5倍
+        return 'medium'
+
+
+def _get_ttl_config(period: str) -> int:
+    """
+    获取差异化缓存 TTL 配置。
+
+    策略：
+    - 短周期（24h）：数据变化快，使用较短 TTL
+    - 长周期（3d/7d/14d）：数据相对稳定，使用更长 TTL
+    - 大型系统：进一步延长 TTL 减少数据库压力
+
+    针对 2w+ 用户、100w+ 日志的公益站场景优化。
+    """
+    scale = _get_system_scale()
+
+    # 差异化 TTL 配置（秒）
+    # 格式: {period: {scale: ttl}}
+    TTL_CONFIG = {
+        # 24h 数据变化快，保持较短 TTL
+        "1h": {"small": 30, "medium": 60, "large": 120, "xlarge": 180},
+        "6h": {"small": 60, "medium": 120, "large": 180, "xlarge": 300},
+        "24h": {"small": 60, "medium": 120, "large": 180, "xlarge": 300},
+        # 3d+ 数据相对稳定，使用更长 TTL
+        "3d": {"small": 300, "medium": 600, "large": 1800, "xlarge": 3600},      # large: 30分钟
+        "7d": {"small": 300, "medium": 900, "large": 2700, "xlarge": 5400},      # large: 45分钟
+        "14d": {"small": 600, "medium": 1200, "large": 3600, "xlarge": 7200},    # large: 60分钟
+    }
+
+    period_config = TTL_CONFIG.get(period, TTL_CONFIG["7d"])
+    return period_config.get(scale, period_config.get("medium", 300))
+
+
+def _get_ttl_multiplier() -> float:
+    """
+    获取 TTL 倍数（用于没有明确 period 的场景）。
+    保留向后兼容。
+    """
+    scale = _get_system_scale()
+    multipliers = {
+        'tiny': 0.5,
+        'small': 1.0,
+        'medium': 2.0,
+        'large': 5.0,
+        'xlarge': 10.0,
+    }
+    return multipliers.get(scale, 2.0)
 
 
 class CachedDashboardService:
@@ -102,13 +135,8 @@ class CachedDashboardService:
         data = asdict(overview)
         data["period"] = period
 
-        ttl_map = {
-            "24h": 60,
-            "3d": 300,
-            "7d": 300,
-            "14d": 600,
-        }
-        ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
+        # 使用差异化 TTL 配置
+        ttl = _get_ttl_config(period)
 
         # 使用统一缓存管理器保存
         self._cache.set(cache_key, data, ttl=ttl)
@@ -166,16 +194,8 @@ class CachedDashboardService:
             **asdict(stats),
         }
 
-        # Cache based on period (大型系统自动延长TTL)
-        ttl_map = {
-            "1h": 60,      # 1 minute for hourly
-            "6h": 120,     # 2 minutes
-            "24h": 300,    # 5 minutes
-            "3d": 600,     # 10 minutes
-            "7d": 600,     # 10 minutes
-            "14d": 900,    # 15 minutes
-        }
-        ttl = int(ttl_map.get(period, 300) * _get_ttl_multiplier())
+        # 使用差异化 TTL 配置
+        ttl = _get_ttl_config(period)
         self._cache.set(cache_key, data, ttl=ttl)
         logger.success(
             f"Dashboard 缓存更新: usage",
@@ -405,6 +425,95 @@ class CachedDashboardService:
         )
 
         return data
+
+    def get_refresh_estimate(self, period: str = "7d") -> Dict[str, Any]:
+        """
+        获取强制刷新的预估信息（仅大型系统显示）。
+
+        返回预估的日志数量、查询时间等信息，
+        帮助用户了解刷新操作的影响。
+
+        Args:
+            period: 时间周期
+
+        Returns:
+            预估信息，包含日志数量、预计时间等
+        """
+        scale = _get_system_scale()
+
+        # 只有大型/超大型系统才返回详细预估
+        if scale not in ("large", "xlarge"):
+            return {
+                "show_estimate": False,
+                "scale": scale,
+            }
+
+        # 获取系统指标
+        try:
+            from .system_scale_service import get_scale_service
+            service = get_scale_service()
+            result = service.detect_scale()
+            metrics = result.get("metrics", {})
+
+            logs_24h = metrics.get("logs_24h", 0)
+            total_logs = metrics.get("total_logs", 0)
+
+            # 根据周期估算日志数量
+            period_hours = {
+                "1h": 1, "6h": 6, "24h": 24,
+                "3d": 72, "7d": 168, "14d": 336,
+            }
+            hours = period_hours.get(period, 168)
+            hourly_rate = logs_24h / 24 if logs_24h > 0 else 0
+
+            if hours <= 24:
+                estimated_logs = int(hourly_rate * hours)
+            elif period == "3d":
+                estimated_logs = int(logs_24h * 2.5)
+            elif period == "7d":
+                estimated_logs = int(logs_24h * 5)
+            else:  # 14d
+                estimated_logs = int(logs_24h * 10)
+
+            # 根据日志数量估算查询时间（秒）
+            # 有索引的情况下，大约每 100 万条日志需要 3-5 秒
+            if estimated_logs > 5_000_000:
+                estimated_seconds = int(estimated_logs / 1_000_000 * 5)
+            elif estimated_logs > 1_000_000:
+                estimated_seconds = int(estimated_logs / 1_000_000 * 4)
+            elif estimated_logs > 100_000:
+                estimated_seconds = max(3, int(estimated_logs / 100_000 * 1.5))
+            else:
+                estimated_seconds = 2
+
+            # 格式化日志数量
+            if estimated_logs >= 1_000_000:
+                logs_formatted = f"{estimated_logs / 1_000_000:.1f}M"
+            elif estimated_logs >= 1_000:
+                logs_formatted = f"{estimated_logs / 1_000:.1f}K"
+            else:
+                logs_formatted = str(estimated_logs)
+
+            return {
+                "show_estimate": True,
+                "scale": scale,
+                "scale_description": "大型系统" if scale == "large" else "超大型系统",
+                "period": period,
+                "estimated_logs": estimated_logs,
+                "estimated_logs_formatted": logs_formatted,
+                "estimated_seconds": estimated_seconds,
+                "estimated_time_formatted": f"{estimated_seconds}~{int(estimated_seconds * 1.5)} 秒",
+                "warning": "刷新过程中数据库负载会升高，请在低峰期执行" if estimated_logs > 1_000_000 else None,
+                "total_logs": total_logs,
+                "logs_24h": logs_24h,
+            }
+        except Exception as e:
+            logger.warning(f"获取刷新预估失败: {e}")
+            return {
+                "show_estimate": True,
+                "scale": scale,
+                "error": str(e),
+            }
 
     def invalidate_cache(self, pattern: Optional[str] = None) -> int:
         """

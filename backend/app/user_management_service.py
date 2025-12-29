@@ -6,6 +6,7 @@
 - 统计数据使用缓存（5分钟）
 - 用户列表默认不 JOIN logs 表
 - 只有筛选活跃/不活跃用户时才 JOIN logs
+- 活跃度筛选查询使用缓存（2分钟），避免频繁 JOIN logs 导致高负载
 """
 import time
 from dataclasses import dataclass
@@ -32,6 +33,10 @@ INACTIVE_THRESHOLD = 30 * 24 * 3600   # 30 天
 # 缓存配置
 STATS_CACHE_KEY = "user_activity_stats"
 STATS_CACHE_TTL = 300  # 5 分钟
+
+# 活跃度筛选缓存配置
+ACTIVITY_LIST_CACHE_PREFIX = "user_activity_list"
+ACTIVITY_LIST_CACHE_TTL = 120  # 2 分钟（活跃度筛选查询较慢，缓存时间适中）
 
 
 @dataclass
@@ -67,6 +72,45 @@ class UserManagementService:
     def __init__(self):
         self._db = get_db_manager()
         self._storage = get_local_storage()
+        self._cache = None  # 延迟初始化，避免循环导入
+
+    def _get_cache(self):
+        """获取缓存管理器（延迟初始化）"""
+        if self._cache is None:
+            from .cache_manager import get_cache_manager
+            self._cache = get_cache_manager()
+        return self._cache
+
+    def _get_activity_list_cache_key(
+        self,
+        activity_filter: ActivityLevel,
+        page: int,
+        page_size: int,
+        search: Optional[str],
+        order_by: str,
+        order_dir: str,
+    ) -> str:
+        """生成活跃度筛选缓存 key"""
+        # 搜索词规范化（空字符串统一处理）
+        search_key = search.strip().lower() if search else ""
+        return f"{ACTIVITY_LIST_CACHE_PREFIX}:{activity_filter.value}:{page}:{page_size}:{search_key}:{order_by}:{order_dir}"
+
+    def invalidate_activity_list_cache(self):
+        """
+        失效所有活跃度筛选缓存。
+
+        在以下操作后调用：
+        - 封禁/解封用户
+        - 删除用户
+        - 批量删除用户
+        """
+        try:
+            cache = self._get_cache()
+            deleted = cache.clear_generic_prefix(ACTIVITY_LIST_CACHE_PREFIX)
+            if deleted > 0:
+                logger.debug(f"[缓存] 清除活跃度列表缓存: {deleted} 条")
+        except Exception as e:
+            logger.warning(f"[缓存] 清除活跃度列表缓存失败: {e}")
 
     def get_activity_stats(self) -> ActivityStats:
         """
@@ -396,7 +440,48 @@ class UserManagementService:
         获取用户列表（带精确活跃度，JOIN logs 表）
 
         用于：筛选活跃/不活跃/非常不活跃的情况
+
+        性能优化：
+        - 使用缓存减少 JOIN logs 表的查询次数
+        - 缓存 TTL 2 分钟，平衡数据实时性和性能
         """
+        # 尝试从缓存获取
+        if activity_filter:
+            cache_key = self._get_activity_list_cache_key(
+                activity_filter, page, page_size, search, order_by, order_dir
+            )
+            try:
+                cache = self._get_cache()
+                cached_data = cache.get(cache_key)
+                if cached_data:
+                    # 从缓存恢复 UserInfo 对象
+                    items = []
+                    for item in cached_data.get("items", []):
+                        items.append(UserInfo(
+                            id=item["id"],
+                            username=item["username"],
+                            display_name=item.get("display_name"),
+                            email=item.get("email"),
+                            role=item.get("role", 0),
+                            status=item.get("status", 0),
+                            quota=item.get("quota", 0),
+                            used_quota=item.get("used_quota", 0),
+                            request_count=item.get("request_count", 0),
+                            group=item.get("group"),
+                            last_request_time=item.get("last_request_time"),
+                            activity_level=ActivityLevel(item.get("activity_level", "never")),
+                        ))
+                    logger.debug(f"[缓存命中] 用户活跃度列表 filter={activity_filter.value} page={page}")
+                    return {
+                        "items": items,
+                        "total": cached_data.get("total", 0),
+                        "page": cached_data.get("page", page),
+                        "page_size": cached_data.get("page_size", page_size),
+                        "total_pages": cached_data.get("total_pages", 0),
+                    }
+            except Exception as e:
+                logger.warning(f"[缓存] 读取活跃度列表缓存失败: {e}")
+
         now = int(time.time())
         active_cutoff = now - ACTIVE_THRESHOLD
         inactive_cutoff = now - INACTIVE_THRESHOLD
@@ -504,13 +589,51 @@ class UserManagementService:
                     activity_level=activity,
                 ))
 
-            return {
+            result_data = {
                 "items": users,
                 "total": total,
                 "page": page,
                 "page_size": page_size,
                 "total_pages": (total + page_size - 1) // page_size,
             }
+
+            # 保存到缓存
+            if activity_filter:
+                try:
+                    cache = self._get_cache()
+                    # 序列化 UserInfo 为可 JSON 化的字典
+                    cache_data = {
+                        "items": [
+                            {
+                                "id": u.id,
+                                "username": u.username,
+                                "display_name": u.display_name,
+                                "email": u.email,
+                                "role": u.role,
+                                "status": u.status,
+                                "quota": u.quota,
+                                "used_quota": u.used_quota,
+                                "request_count": u.request_count,
+                                "group": u.group,
+                                "last_request_time": u.last_request_time,
+                                "activity_level": u.activity_level.value,
+                            }
+                            for u in users
+                        ],
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size,
+                        "total_pages": result_data["total_pages"],
+                    }
+                    cache_key = self._get_activity_list_cache_key(
+                        activity_filter, page, page_size, search, order_by, order_dir
+                    )
+                    cache.set(cache_key, cache_data, ttl=ACTIVITY_LIST_CACHE_TTL)
+                    logger.debug(f"[缓存] 保存用户活跃度列表 filter={activity_filter.value} page={page} count={len(users)}")
+                except Exception as e:
+                    logger.warning(f"[缓存] 保存活跃度列表缓存失败: {e}")
+
+            return result_data
 
         except Exception as e:
             logger.db_error(f"获取用户列表失败: {e}")
@@ -561,8 +684,9 @@ class UserManagementService:
             token_sql = "UPDATE tokens SET deleted_at = CURRENT_TIMESTAMP WHERE user_id = :user_id AND deleted_at IS NULL"
             self._db.execute(token_sql, {"user_id": user_id})
 
-            # 清除统计缓存
+            # 清除统计缓存和活跃度列表缓存
             self._storage.cache_delete(STATS_CACHE_KEY)
+            self.invalidate_activity_list_cache()
 
             logger.business("删除用户", user_id=user_id, username=username)
             return {"success": True, "message": f"用户 {username} 已删除"}
@@ -632,8 +756,9 @@ class UserManagementService:
             for user_id in user_ids:
                 self.delete_user(user_id)
 
-            # 清除缓存
+            # 清除缓存（delete_user 已清除，但再次确保）
             self._storage.cache_delete(STATS_CACHE_KEY)
+            self.invalidate_activity_list_cache()
 
             logger.business("批量删除不活跃用户", count=len(user_ids), activity=activity_level.value)
 
@@ -772,6 +897,9 @@ class UserManagementService:
                 )
                 tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
 
+            # 清除活跃度列表缓存（用户状态变更）
+            self.invalidate_activity_list_cache()
+
             logger.security("封禁用户", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
             self._storage.add_security_audit(
                 action="ban",
@@ -831,6 +959,9 @@ class UserManagementService:
                     {"user_id": user_id},
                 )
                 tokens_affected = int((token_update[0] or {}).get("affected_rows", 0) or 0)
+
+            # 清除活跃度列表缓存（用户状态变更）
+            self.invalidate_activity_list_cache()
 
             logger.security("解除封禁", user_id=user_id, username=username, reason=reason or "", tokens=tokens_affected)
             self._storage.add_security_audit(

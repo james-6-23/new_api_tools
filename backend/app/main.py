@@ -427,6 +427,90 @@ async def _warmup_dashboard_data():
         })
 
 
+async def _warmup_user_activity_list():
+    """
+    预热用户管理活跃度筛选数据（仅大型/超大型系统）。
+
+    对于大型系统，活跃度筛选需要 JOIN logs 表，首次查询可能需要 10-30 秒。
+    预热可以确保用户首次访问用户管理页面时数据已经缓存。
+
+    预热内容：
+    - active（活跃用户）第1页
+    - inactive（不活跃用户）第1页
+    - very_inactive（非常不活跃用户）第1页
+
+    小型/中型系统跳过此预热（查询本身较快）。
+    """
+    from .system_scale_service import get_scale_service
+    from .user_management_service import get_user_management_service, ActivityLevel
+
+    # 检查系统规模
+    try:
+        scale_service = get_scale_service()
+        scale_result = scale_service.detect_scale()
+        scale = scale_result.get("scale", "medium")
+    except Exception:
+        scale = "medium"
+
+    # 只有大型/超大型系统才预热
+    if scale not in ("large", "xlarge"):
+        logger.bullet(f"用户活跃度列表：跳过预热（系统规模={scale}，无需预热）")
+        return
+
+    logger.phase(5, "预热用户活跃度列表（大型系统）")
+    warmup_start = time.time()
+
+    user_service = get_user_management_service()
+
+    # 预热项目：3种活跃度筛选的第1页
+    warmup_items = [
+        ("active", ActivityLevel.ACTIVE),
+        ("inactive", ActivityLevel.INACTIVE),
+        ("very_inactive", ActivityLevel.VERY_INACTIVE),
+    ]
+
+    success_count = 0
+    failed_items = []
+
+    for name, activity_filter in warmup_items:
+        try:
+            item_start = time.time()
+            # 在线程池中执行，避免阻塞事件循环
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda af=activity_filter: user_service.get_users(
+                    page=1,
+                    page_size=20,
+                    activity_filter=af,
+                    order_by="last_request_time",
+                    order_dir="DESC",
+                )
+            )
+            item_elapsed = time.time() - item_start
+            logger.success(f"用户活跃度 {name} 预热完成", 耗时=f"{item_elapsed:.2f}s")
+            success_count += 1
+        except Exception as e:
+            failed_items.append(name)
+            logger.warn(f"用户活跃度 {name} 预热失败: {e}")
+
+        # 每个查询之间延迟 1 秒，避免数据库压力
+        await asyncio.sleep(1)
+
+    total_elapsed = time.time() - warmup_start
+
+    if failed_items:
+        logger.kvs({
+            "成功项目": f"{success_count}/{len(warmup_items)}",
+            "失败项目": ", ".join(failed_items),
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+    else:
+        logger.kvs({
+            "成功项目": f"{success_count}/{len(warmup_items)}",
+            "总耗时": f"{total_elapsed:.1f}s",
+        })
+
+
 async def background_cache_warmup():
     """
     后台缓存预热任务 - 智能恢复模式
@@ -519,13 +603,19 @@ async def background_cache_warmup():
     if not missing_windows:
         # 所有缓存都有效，但仍需预热 Dashboard 和 IP 分布
         logger.success("所有缓存有效，无需预热排行榜")
-        
+
         # 预热 Dashboard 数据
         try:
             await _warmup_dashboard_data()
         except Exception as e:
             logger.warn(f"Dashboard 预热异常: {e}")
-        
+
+        # 预热用户活跃度列表（仅大型系统）
+        try:
+            await _warmup_user_activity_list()
+        except Exception as e:
+            logger.warn(f"用户活跃度列表预热异常: {e}")
+
         # 预热 IP 地区分布
         try:
             from .ip_distribution_service import warmup_ip_distribution
@@ -721,9 +811,17 @@ async def background_cache_warmup():
     except Exception as e:
         logger.warn(f"Dashboard 预热异常: {e}")
     else:
-        _set_warmup_status("initializing", 92, "Dashboard 预热完成，正在预热 IP 地区分布...")
+        _set_warmup_status("initializing", 90, "Dashboard 预热完成，正在预热用户活跃度列表...")
 
-    # === 阶段5：预热 IP 地区分布 ===
+    # === 阶段5：预热用户活跃度列表（仅大型系统）===
+    try:
+        await _warmup_user_activity_list()
+    except Exception as e:
+        logger.warn(f"用户活跃度列表预热异常: {e}")
+    else:
+        _set_warmup_status("initializing", 94, "用户活跃度列表预热完成，正在预热 IP 地区分布...")
+
+    # === 阶段6：预热 IP 地区分布 ===
     try:
         from .ip_distribution_service import warmup_ip_distribution
         await warmup_ip_distribution()
@@ -752,38 +850,89 @@ async def background_cache_warmup():
 
 
 async def _background_refresh_loop(cache):
-    """后台定时刷新缓存"""
+    """
+    后台定时刷新缓存
+
+    刷新内容：
+    1. 排行榜数据（所有时间窗口）
+    2. 仪表盘核心数据（避免用户访问时触发慢查询）
+
+    针对大型系统优化：
+    - 根据系统规模调整刷新间隔
+    - 分批刷新避免瞬间高负载
+    - 仪表盘数据每 N 个周期刷新一次
+    """
     from .system_scale_service import get_detected_settings
     from .risk_monitoring_service import get_risk_monitoring_service
-    
+    from .cached_dashboard import get_cached_dashboard_service
+
     windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
-    
+    dashboard_refresh_counter = 0  # 仪表盘刷新计数器
+
     while True:
         try:
             settings = get_detected_settings()
             interval = settings.leaderboard_cache_ttl
-            
+
             logger.debug(f"[定时刷新] 下次刷新在 {interval}s 后")
             await asyncio.sleep(interval)
-            
-            # 刷新所有窗口
-            service = get_risk_monitoring_service()
+
             refresh_start = time.time()
-            
+
+            # === 刷新排行榜数据 ===
+            service = get_risk_monitoring_service()
             for window in windows:
                 try:
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(
                         None,
-                        lambda: service.get_leaderboards(
-                            windows=[window],
+                        lambda w=window: service.get_leaderboards(
+                            windows=[w],
                             limit=50,
                             use_cache=False,
                         ),
                     )
+                    # 短暂延迟，避免瞬间高负载
+                    await asyncio.sleep(0.5)
                 except Exception:
                     pass
-            
+
+            # === 刷新仪表盘数据（每 3 个周期刷新一次）===
+            dashboard_refresh_counter += 1
+            if dashboard_refresh_counter >= 3:
+                dashboard_refresh_counter = 0
+                try:
+                    dashboard_service = get_cached_dashboard_service()
+                    loop = asyncio.get_event_loop()
+
+                    # 刷新核心仪表盘数据
+                    await loop.run_in_executor(
+                        None,
+                        lambda: dashboard_service.get_system_overview(period="7d", use_cache=False)
+                    )
+                    await asyncio.sleep(0.5)
+
+                    await loop.run_in_executor(
+                        None,
+                        lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False)
+                    )
+                    await asyncio.sleep(0.5)
+
+                    await loop.run_in_executor(
+                        None,
+                        lambda: dashboard_service.get_daily_trends(days=7, use_cache=False)
+                    )
+                    await asyncio.sleep(0.5)
+
+                    await loop.run_in_executor(
+                        None,
+                        lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False)
+                    )
+
+                    logger.debug("[定时刷新] 仪表盘数据已刷新")
+                except Exception as e:
+                    logger.warning(f"[定时刷新] 仪表盘刷新失败: {e}")
+
             refresh_elapsed = time.time() - refresh_start
             logger.debug(f"[定时刷新] 完成，耗时 {refresh_elapsed:.1f}s")
 
