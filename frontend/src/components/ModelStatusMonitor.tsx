@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Activity, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 
-interface HourlyStatus {
-  hour: number
+interface SlotStatus {
+  slot: number
   start_time: number
   end_time: number
   total_requests: number
@@ -20,11 +20,12 @@ interface HourlyStatus {
 interface ModelStatus {
   model_name: string
   display_name: string
-  total_requests_24h: number
-  success_count_24h: number
-  success_rate_24h: number
+  time_window: string
+  total_requests: number
+  success_count: number
+  success_rate: number
   current_status: 'green' | 'yellow' | 'red'
-  hourly_data: HourlyStatus[]
+  slot_data: SlotStatus[]
 }
 
 interface ModelStatusMonitorProps {
@@ -32,9 +33,9 @@ interface ModelStatusMonitorProps {
 }
 
 const STATUS_COLORS = {
-  green: 'bg-green-500',
-  yellow: 'bg-yellow-500',
-  red: 'bg-red-500',
+  green: 'bg-emerald-500 hover:bg-emerald-400',
+  yellow: 'bg-amber-500 hover:bg-amber-400',
+  red: 'bg-rose-500 hover:bg-rose-400',
 }
 
 const STATUS_LABELS = {
@@ -42,6 +43,20 @@ const STATUS_LABELS = {
   yellow: '警告',
   red: '异常',
 }
+
+const STATUS_BADGE_STYLES = {
+  green: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  yellow: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  red: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+}
+
+// Time window options
+const TIME_WINDOWS = [
+  { value: '1h', label: '1小时', slots: 60 },
+  { value: '6h', label: '6小时', slots: 24 },
+  { value: '12h', label: '12小时', slots: 24 },
+  { value: '24h', label: '24小时', slots: 24 },
+]
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', {
@@ -76,6 +91,7 @@ const REFRESH_INTERVALS = [
 // Storage keys
 const SELECTED_MODELS_KEY = 'model_status_selected_models'
 const REFRESH_INTERVAL_KEY = 'model_status_refresh_interval'
+const TIME_WINDOW_KEY = 'model_status_time_window'
 
 export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps) {
   const { token } = useAuth()
@@ -87,6 +103,11 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   
+  const [timeWindow, setTimeWindow] = useState(() => {
+    const saved = localStorage.getItem(TIME_WINDOW_KEY)
+    return saved || '24h'
+  })
+  
   const [refreshInterval, setRefreshInterval] = useState(() => {
     const saved = localStorage.getItem(REFRESH_INTERVAL_KEY)
     return saved ? parseInt(saved, 10) : 60
@@ -96,8 +117,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
+  const [showWindowDropdown, setShowWindowDropdown] = useState(false)
   const modelSelectorRef = useRef<HTMLDivElement>(null)
   const intervalDropdownRef = useRef<HTMLDivElement>(null)
+  const windowDropdownRef = useRef<HTMLDivElement>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
@@ -124,10 +147,27 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       if (intervalDropdownRef.current && !intervalDropdownRef.current.contains(event.target as Node)) {
         setShowIntervalDropdown(false)
       }
+      if (windowDropdownRef.current && !windowDropdownRef.current.contains(event.target as Node)) {
+        setShowWindowDropdown(false)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Save time window to backend cache
+  const saveTimeWindowToBackend = useCallback(async (window: string) => {
+    try {
+      await fetch(`${apiUrl}/api/model-status/config/window`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ time_window: window }),
+      })
+      localStorage.setItem(TIME_WINDOW_KEY, window)
+    } catch (error) {
+      console.error('Failed to save time window:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
 
   // Save selected models to backend cache
   const saveSelectedModelsToBackend = useCallback(async (models: string[]) => {
@@ -144,20 +184,26 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     }
   }, [apiUrl, getAuthHeaders])
 
-  // Load selected models from backend on mount
-  const loadSelectedModelsFromBackend = useCallback(async () => {
+  // Load config from backend on mount
+  const loadConfigFromBackend = useCallback(async () => {
     try {
       const response = await fetch(`${apiUrl}/api/model-status/config/selected`, {
         headers: getAuthHeaders(),
       })
       const data = await response.json()
-      if (data.success && data.data.length > 0) {
-        setSelectedModels(data.data)
-        localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(data.data))
-        return data.data
+      if (data.success) {
+        if (data.data.length > 0) {
+          setSelectedModels(data.data)
+          localStorage.setItem(SELECTED_MODELS_KEY, JSON.stringify(data.data))
+        }
+        if (data.time_window) {
+          setTimeWindow(data.time_window)
+          localStorage.setItem(TIME_WINDOW_KEY, data.time_window)
+        }
+        return data.data || []
       }
     } catch (error) {
-      console.error('Failed to load selected models from backend:', error)
+      console.error('Failed to load config from backend:', error)
     }
     // Fallback to localStorage
     const saved = localStorage.getItem(SELECTED_MODELS_KEY)
@@ -175,7 +221,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     localStorage.setItem(REFRESH_INTERVAL_KEY, refreshInterval.toString())
   }, [refreshInterval])
 
-  // Fetch available models and load selected models
+  // Fetch available models and load config
   const fetchAvailableModels = useCallback(async () => {
     try {
       const response = await fetch(`${apiUrl}${getApiPrefix()}/models`, {
@@ -184,8 +230,8 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       const data = await response.json()
       if (data.success) {
         setAvailableModels(data.data)
-        // Load selected models from backend
-        const savedModels = await loadSelectedModelsFromBackend()
+        // Load config from backend
+        const savedModels = await loadConfigFromBackend()
         // Auto-select first 5 models if none selected
         if (savedModels.length === 0 && data.data.length > 0) {
           const defaultModels = data.data.slice(0, 5)
@@ -196,7 +242,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     } catch (error) {
       console.error('Failed to fetch available models:', error)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, loadSelectedModelsFromBackend, saveSelectedModelsToBackend])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, loadConfigFromBackend, saveSelectedModelsToBackend])
 
   // Fetch model statuses
   const fetchModelStatuses = useCallback(async (showLoadingToast = false) => {
@@ -211,7 +257,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     }
 
     try {
-      const response = await fetch(`${apiUrl}${getApiPrefix()}/status/batch`, {
+      const response = await fetch(`${apiUrl}${getApiPrefix()}/status/batch?window=${timeWindow}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(selectedModels),
@@ -229,14 +275,14 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       setLoading(false)
       setRefreshing(false)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, isEmbed, showToast])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, timeWindow, isEmbed, showToast])
 
   // Initial load
   useEffect(() => {
     fetchAvailableModels()
   }, [fetchAvailableModels])
 
-  // Fetch statuses when selected models change
+  // Fetch statuses when selected models or time window change
   useEffect(() => {
     fetchModelStatuses()
   }, [fetchModelStatuses])
@@ -289,7 +335,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   if (loading && modelStatuses.length === 0) {
     return (
       <div className="flex justify-center items-center py-20">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <Loader2 className="h-12 w-12 animate-spin text-zinc-400" />
       </div>
     )
   }
@@ -297,46 +343,93 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   return (
     <div className={cn("space-y-6", isEmbed && "p-4")}>
       {/* Header */}
-      <Card>
+      <Card className="border-zinc-800 bg-zinc-900/40 backdrop-blur-sm">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-medium">模型状态监控</h2>
-                <Badge variant="outline">24小时</Badge>
+                <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <h2 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                  模型状态监控
+                </h2>
+                <Badge variant="outline" className="border-zinc-700 text-zinc-400">
+                  {TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'}
+                </Badge>
               </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                监控 <span className="font-medium text-primary">{selectedModels.length}</span> 个模型
+              <p className="text-sm text-zinc-500 mt-1 ml-1">
+                监控 <span className="font-medium text-zinc-300">{selectedModels.length}</span> 个模型
                 {modelStatuses.length > 0 && (
                   <span className="ml-2">
-                    · 总请求: {modelStatuses.reduce((sum, m) => sum + m.total_requests_24h, 0).toLocaleString()}
+                    · 总请求: {modelStatuses.reduce((sum, m) => sum + m.total_requests, 0).toLocaleString()}
                   </span>
                 )}
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Time Window Selector */}
+              <div className="relative" ref={windowDropdownRef}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowWindowDropdown(!showWindowDropdown)}
+                  className="h-9 border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:text-white"
+                >
+                  <Clock className="h-4 w-4 mr-2 text-zinc-400" />
+                  {TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'}
+                  <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
+                </Button>
+
+                {showWindowDropdown && (
+                  <div className="absolute right-0 mt-1 w-36 bg-zinc-900 border border-zinc-700 rounded-md shadow-xl z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-2 border-b border-zinc-800">
+                      <p className="text-xs text-zinc-500 font-medium">时间窗口</p>
+                    </div>
+                    <div className="p-1">
+                      {TIME_WINDOWS.map(({ value, label }) => (
+                        <button
+                          key={value}
+                          onClick={() => {
+                            setTimeWindow(value)
+                            saveTimeWindowToBackend(value)
+                            setShowWindowDropdown(false)
+                          }}
+                          className={cn(
+                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-zinc-800 transition-colors text-zinc-300",
+                            timeWindow === value && "bg-zinc-800 text-white font-medium"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Model Selector */}
               <div className="relative" ref={modelSelectorRef}>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setShowModelSelector(!showModelSelector)}
-                  className="h-9"
+                  className="h-9 border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:text-white"
                 >
-                  <Settings2 className="h-4 w-4 mr-2" />
+                  <Settings2 className="h-4 w-4 mr-2 text-zinc-400" />
                   选择模型
-                  <ChevronDown className="h-3 w-3 ml-1" />
+                  <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
                 </Button>
 
                 {showModelSelector && (
-                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-50 max-h-96 overflow-hidden">
-                    <div className="p-2 border-b flex justify-between items-center">
-                      <p className="text-xs text-muted-foreground">选择要监控的模型</p>
+                  <div className="absolute right-0 mt-1 w-72 bg-zinc-900 border border-zinc-700 rounded-md shadow-xl z-50 max-h-96 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-2 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
+                      <p className="text-xs text-zinc-500 font-medium">选择要监控的模型</p>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={selectAllModels}>
+                        <Button variant="ghost" size="sm" className="h-6 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800" onClick={selectAllModels}>
                           全选
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearAllModels}>
+                        <Button variant="ghost" size="sm" className="h-6 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800" onClick={clearAllModels}>
                           清空
                         </Button>
                       </div>
@@ -347,18 +440,18 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                           key={model}
                           onClick={() => toggleModelSelection(model)}
                           className={cn(
-                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors flex items-center justify-between",
-                            selectedModels.includes(model) && "bg-accent"
+                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-zinc-800 transition-colors flex items-center justify-between group",
+                            selectedModels.includes(model) ? "bg-zinc-800/50 text-white" : "text-zinc-400"
                           )}
                         >
-                          <span className="truncate">{model}</span>
+                          <span className="truncate group-hover:text-zinc-200">{model}</span>
                           {selectedModels.includes(model) && (
-                            <Check className="h-4 w-4 text-primary flex-shrink-0" />
+                            <Check className="h-4 w-4 text-indigo-400 flex-shrink-0" />
                           )}
                         </button>
                       ))}
                       {availableModels.length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-4">
+                        <p className="text-sm text-zinc-500 text-center py-4">
                           暂无可用模型
                         </p>
                       )}
@@ -373,21 +466,21 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                   variant="outline"
                   size="sm"
                   onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
-                  className="h-9 min-w-[100px]"
+                  className="h-9 min-w-[100px] border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:text-white"
                 >
-                  <Timer className="h-4 w-4 mr-2" />
+                  <Timer className="h-4 w-4 mr-2 text-zinc-400" />
                   {refreshInterval > 0 && countdown > 0 ? (
-                    <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
+                    <span className="text-indigo-400 font-medium tabular-nums">{formatCountdown(countdown)}</span>
                   ) : (
                     '自动刷新'
                   )}
-                  <ChevronDown className="h-3 w-3 ml-1" />
+                  <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
                 </Button>
 
                 {showIntervalDropdown && (
-                  <div className="absolute right-0 mt-1 w-36 bg-popover border rounded-md shadow-lg z-50">
-                    <div className="p-2 border-b">
-                      <p className="text-xs text-muted-foreground">刷新间隔</p>
+                  <div className="absolute right-0 mt-1 w-36 bg-zinc-900 border border-zinc-700 rounded-md shadow-xl z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="p-2 border-b border-zinc-800">
+                      <p className="text-xs text-zinc-500 font-medium">刷新间隔</p>
                     </div>
                     <div className="p-1">
                       {REFRESH_INTERVALS.map(({ value, label }) => (
@@ -398,8 +491,8 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                             setShowIntervalDropdown(false)
                           }}
                           className={cn(
-                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
-                            refreshInterval === value && "bg-accent text-accent-foreground"
+                            "w-full text-left px-3 py-2 text-sm rounded hover:bg-zinc-800 transition-colors text-zinc-300",
+                            refreshInterval === value && "bg-zinc-800 text-white font-medium"
                           )}
                         >
                           {label}
@@ -411,11 +504,16 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
               </div>
 
               {/* Manual Refresh */}
-              <Button onClick={handleRefresh} disabled={refreshing}>
+              <Button 
+                onClick={handleRefresh} 
+                disabled={refreshing}
+                variant="outline"
+                className="h-9 border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:text-white"
+              >
                 {refreshing ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin text-zinc-400" />
                 ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                  <RefreshCw className="h-4 w-4 mr-2 text-zinc-400" />
                 )}
                 刷新
               </Button>
@@ -432,8 +530,8 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           ))}
         </div>
       ) : (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
+        <Card className="border-dashed border-zinc-800 bg-zinc-900/20">
+          <CardContent className="py-20 text-center text-zinc-500">
             {selectedModels.length === 0 ? (
               <p>请选择要监控的模型</p>
             ) : (
@@ -444,19 +542,19 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       )}
 
       {/* Legend */}
-      <Card className="bg-muted/50">
+      <Card className="border-zinc-800 bg-zinc-900/40 backdrop-blur-sm">
         <CardContent className="p-4">
-          <div className="flex flex-wrap gap-6 text-sm">
+          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-zinc-500">
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-green-500" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
               <span>成功率 ≥ 95%</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-yellow-500" />
+              <span className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
               <span>成功率 80-95%</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-red-500" />
+              <span className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" />
               <span>成功率 &lt; 80%</span>
             </div>
           </div>
@@ -471,93 +569,144 @@ interface ModelStatusCardProps {
 }
 
 function ModelStatusCard({ model }: ModelStatusCardProps) {
-  const [hoveredHour, setHoveredHour] = useState<HourlyStatus | null>(null)
+  const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
-  const handleMouseEnter = (hour: HourlyStatus, event: React.MouseEvent) => {
+  const handleMouseEnter = (slot: SlotStatus, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect()
     setTooltipPosition({
       x: rect.left + rect.width / 2,
-      y: rect.top - 10,
+      y: rect.top - 12,
     })
-    setHoveredHour(hour)
+    setHoveredSlot(slot)
   }
 
+  // Get time labels based on time window
+  const getTimeLabels = () => {
+    switch (model.time_window) {
+      case '1h': return ['1小时前', '30分钟前', '现在']
+      case '6h': return ['6小时前', '3小时前', '现在']
+      case '12h': return ['12小时前', '6小时前', '现在']
+      default: return ['24小时前', '12小时前', '现在']
+    }
+  }
+
+  const timeLabels = getTimeLabels()
+  const StatusIcon = model.current_status === 'green' ? CheckCircle2 : AlertCircle
+
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <CardTitle className="text-base font-medium truncate max-w-md" title={model.model_name}>
-              {model.model_name}
-            </CardTitle>
-            <Badge
-              variant={model.current_status === 'green' ? 'success' : model.current_status === 'yellow' ? 'warning' : 'destructive'}
-            >
-              {STATUS_LABELS[model.current_status]}
-            </Badge>
+    <Card className="group border-zinc-800 bg-zinc-900/40 backdrop-blur-md hover:border-zinc-700 transition-all duration-300 hover:shadow-lg hover:shadow-zinc-900/20">
+      <CardContent className="p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={cn(
+              "flex items-center justify-center w-8 h-8 rounded-lg shrink-0 transition-colors duration-300",
+              model.current_status === 'green' ? "bg-emerald-500/10 text-emerald-500" :
+              model.current_status === 'yellow' ? "bg-amber-500/10 text-amber-500" :
+              "bg-rose-500/10 text-rose-500"
+            )}>
+              <StatusIcon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="font-medium text-zinc-200 truncate" title={model.model_name}>
+                  {model.model_name}
+                </h3>
+                <span className={cn(
+                  "px-2 py-0.5 text-[10px] uppercase tracking-wider font-semibold rounded-full border shadow-sm backdrop-blur-sm",
+                  STATUS_BADGE_STYLES[model.current_status]
+                )}>
+                  {STATUS_LABELS[model.current_status]}
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{model.success_rate_24h}%</span> 成功率
-            <span className="mx-2">·</span>
-            <span>{model.total_requests_24h.toLocaleString()}</span> 请求
+          
+          <div className="flex items-center gap-4 text-sm text-zinc-500 pl-11 sm:pl-0">
+            <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4">
+              <div className="flex items-baseline gap-1.5">
+                <span className={cn(
+                  "text-lg font-bold font-mono",
+                  model.current_status === 'green' ? "text-emerald-400" :
+                  model.current_status === 'yellow' ? "text-amber-400" : "text-rose-400"
+                )}>
+                  {model.success_rate}%
+                </span>
+                <span className="text-xs text-zinc-600">成功率</span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold font-mono text-zinc-300">
+                  {model.total_requests.toLocaleString()}
+                </span>
+                <span className="text-xs text-zinc-600">请求</span>
+              </div>
+            </div>
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        {/* 24-hour status grid */}
-        <div className="relative">
-          <div className="flex gap-1">
-            {model.hourly_data.map((hour, index) => (
+
+        {/* Status grid */}
+        <div className="relative pl-11 sm:pl-0">
+          <div className="flex gap-[2px] h-8 sm:h-6 items-end">
+            {model.slot_data.map((slot, index) => (
               <div
                 key={index}
                 className={cn(
-                  "flex-1 h-8 rounded cursor-pointer transition-all hover:ring-2 hover:ring-primary hover:ring-offset-1",
-                  STATUS_COLORS[hour.status]
+                  "flex-1 rounded-[1px] cursor-pointer transition-all duration-200 hover:opacity-100",
+                  "first:rounded-l-sm last:rounded-r-sm",
+                  STATUS_COLORS[slot.status],
+                  slot.total_requests === 0 ? "h-1/3 opacity-30 bg-zinc-700 hover:bg-zinc-600" : "h-full opacity-80"
                 )}
-                onMouseEnter={(e) => handleMouseEnter(hour, e)}
-                onMouseLeave={() => setHoveredHour(null)}
+                onMouseEnter={(e) => handleMouseEnter(slot, e)}
+                onMouseLeave={() => setHoveredSlot(null)}
               />
             ))}
           </div>
           
           {/* Time labels */}
-          <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-            <span>24小时前</span>
-            <span>12小时前</span>
-            <span>现在</span>
+          <div className="flex justify-between mt-2 text-[10px] text-zinc-600 font-medium uppercase tracking-wider">
+            <span>{timeLabels[0]}</span>
+            <span>{timeLabels[1]}</span>
+            <span>{timeLabels[2]}</span>
           </div>
 
           {/* Tooltip */}
-          {hoveredHour && (
+          {hoveredSlot && (
             <div
-              className="fixed z-50 bg-popover border rounded-lg shadow-lg p-3 text-sm pointer-events-none"
+              className="fixed z-50 min-w-[200px] bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-xl shadow-2xl p-3 text-sm pointer-events-none transform transition-all duration-200"
               style={{
                 left: tooltipPosition.x,
                 top: tooltipPosition.y,
                 transform: 'translate(-50%, -100%)',
               }}
             >
-              <div className="font-medium mb-2">
-                {formatDateTime(hoveredHour.start_time)} - {formatTime(hoveredHour.end_time)}
+              <div className="flex items-center gap-2 mb-2 pb-2 border-b border-zinc-800/50">
+                <div className={cn("w-1.5 h-1.5 rounded-full", 
+                  hoveredSlot.status === 'green' ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" :
+                  hoveredSlot.status === 'yellow' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" :
+                  "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"
+                )} />
+                <span className="font-medium text-zinc-200 text-xs">
+                  {formatDateTime(hoveredSlot.start_time)} - {formatTime(hoveredSlot.end_time)}
+                </span>
               </div>
-              <div className="space-y-1 text-muted-foreground">
-                <div className="flex justify-between gap-4">
-                  <span>总请求:</span>
-                  <span className="font-medium text-foreground">{hoveredHour.total_requests}</span>
+              
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500">总请求</span>
+                  <span className="font-mono text-zinc-300">{hoveredSlot.total_requests}</span>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <span>成功数:</span>
-                  <span className="font-medium text-green-600">{hoveredHour.success_count}</span>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500">成功数</span>
+                  <span className="font-mono text-emerald-400">{hoveredSlot.success_count}</span>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <span>成功率:</span>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500">成功率</span>
                   <span className={cn(
-                    "font-medium",
-                    hoveredHour.status === 'green' ? 'text-green-600' :
-                    hoveredHour.status === 'yellow' ? 'text-yellow-600' : 'text-red-600'
+                    "font-mono font-bold",
+                    hoveredSlot.status === 'green' ? 'text-emerald-400' :
+                    hoveredSlot.status === 'yellow' ? 'text-amber-400' : 'text-rose-400'
                   )}>
-                    {hoveredHour.success_rate}%
+                    {hoveredSlot.success_rate}%
                   </span>
                 </div>
               </div>

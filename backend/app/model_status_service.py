@@ -1,10 +1,10 @@
 """
 Model Status Monitoring Service for NewAPI Middleware Tool.
-Provides 24-hour sliding window status monitoring based on log data.
+Provides sliding window status monitoring based on log data.
 """
 import time
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
 from .database import get_db_manager
@@ -18,11 +18,21 @@ LOG_TYPE_FAILURE = 5  # type=5 is failure log (request failed)
 # Cache TTL in seconds
 CACHE_TTL = 60  # 1 minute cache
 
+# Time window configurations: (total_seconds, num_slots, slot_seconds)
+TIME_WINDOWS = {
+    "1h": (3600, 60, 60),        # 1 hour, 60 slots, 1 minute each
+    "6h": (21600, 24, 900),      # 6 hours, 24 slots, 15 minutes each
+    "12h": (43200, 24, 1800),    # 12 hours, 24 slots, 30 minutes each
+    "24h": (86400, 24, 3600),    # 24 hours, 24 slots, 1 hour each
+}
+
+DEFAULT_TIME_WINDOW = "24h"
+
 
 @dataclass
-class HourlyStatus:
-    """Hourly status data for a model."""
-    hour: int  # 0-23, hours ago from now
+class SlotStatus:
+    """Status data for a time slot."""
+    slot: int  # slot index (0 = oldest, N-1 = newest)
     start_time: int  # Unix timestamp
     end_time: int  # Unix timestamp
     total_requests: int
@@ -33,14 +43,15 @@ class HourlyStatus:
 
 @dataclass
 class ModelStatus:
-    """Model status with 24-hour history."""
+    """Model status with time window history."""
     model_name: str
     display_name: str
-    total_requests_24h: int
-    success_count_24h: int
-    success_rate_24h: float
+    time_window: str  # '1h', '6h', '12h', '24h'
+    total_requests: int
+    success_count: int
+    success_rate: float
     current_status: str  # 'green', 'yellow', 'red'
-    hourly_data: List[HourlyStatus]
+    slot_data: List[SlotStatus]
 
 
 def get_status_color(success_rate: float, total_requests: int) -> str:
@@ -64,10 +75,15 @@ def get_status_color(success_rate: float, total_requests: int) -> str:
         return 'red'
 
 
+def get_time_window_config(window: str) -> Tuple[int, int, int]:
+    """Get time window configuration."""
+    return TIME_WINDOWS.get(window, TIME_WINDOWS[DEFAULT_TIME_WINDOW])
+
+
 class ModelStatusService:
     """
     Service for model status monitoring.
-    Provides 24-hour sliding window status based on log data.
+    Provides sliding window status based on log data.
     """
 
     def __init__(self):
@@ -168,32 +184,44 @@ class ModelStatusService:
             logger.db_error(f"获取可用模型列表失败: {e}")
             return []
 
-    def get_model_status(self, model_name: str, use_cache: bool = True) -> Optional[ModelStatus]:
+    def get_model_status(
+        self, 
+        model_name: str, 
+        time_window: str = DEFAULT_TIME_WINDOW,
+        use_cache: bool = True
+    ) -> Optional[ModelStatus]:
         """
-        Get 24-hour status for a specific model.
+        Get status for a specific model within a time window.
         
         Args:
             model_name: Name of the model to query.
+            time_window: Time window ('1h', '6h', '12h', '24h').
             use_cache: Whether to use cached data.
             
         Returns:
-            ModelStatus with hourly breakdown.
+            ModelStatus with slot breakdown.
         """
-        cache_key = f"model_status:{model_name}"
+        # Validate time window
+        if time_window not in TIME_WINDOWS:
+            time_window = DEFAULT_TIME_WINDOW
+        
+        cache_key = f"model_status:{model_name}:{time_window}"
         if use_cache:
             cached = self._get_cache(cache_key)
             if cached:
                 return self._dict_to_model_status(cached)
 
         now = int(time.time())
-        hourly_data = []
+        total_seconds, num_slots, slot_seconds = get_time_window_config(time_window)
+        
+        slot_data = []
         total_requests = 0
         total_success = 0
 
-        # Query each hour separately for the 24-hour window
-        for hour_offset in range(24):
-            end_time = now - (hour_offset * 3600)
-            start_time = end_time - 3600
+        # Query each slot separately
+        for slot_offset in range(num_slots):
+            end_time = now - (slot_offset * slot_seconds)
+            start_time = end_time - slot_seconds
 
             sql = """
                 SELECT 
@@ -217,32 +245,32 @@ class ModelStatusService:
                 })
 
                 if result:
-                    hour_total = int(result[0].get("total") or 0)
-                    hour_success = int(result[0].get("success") or 0)
+                    slot_total = int(result[0].get("total") or 0)
+                    slot_success = int(result[0].get("success") or 0)
                 else:
-                    hour_total = 0
-                    hour_success = 0
+                    slot_total = 0
+                    slot_success = 0
 
-                success_rate = (hour_success / hour_total * 100) if hour_total > 0 else 100.0
-                status = get_status_color(success_rate, hour_total)
+                success_rate = (slot_success / slot_total * 100) if slot_total > 0 else 100.0
+                status = get_status_color(success_rate, slot_total)
 
-                hourly_data.append(HourlyStatus(
-                    hour=hour_offset,
+                slot_data.append(SlotStatus(
+                    slot=slot_offset,
                     start_time=start_time,
                     end_time=end_time,
-                    total_requests=hour_total,
-                    success_count=hour_success,
+                    total_requests=slot_total,
+                    success_count=slot_success,
                     success_rate=round(success_rate, 2),
                     status=status,
                 ))
 
-                total_requests += hour_total
-                total_success += hour_success
+                total_requests += slot_total
+                total_success += slot_success
 
             except Exception as e:
-                logger.db_error(f"获取模型 {model_name} 第 {hour_offset} 小时状态失败: {e}")
-                hourly_data.append(HourlyStatus(
-                    hour=hour_offset,
+                logger.db_error(f"获取模型 {model_name} 第 {slot_offset} 个时间段状态失败: {e}")
+                slot_data.append(SlotStatus(
+                    slot=slot_offset,
                     start_time=start_time,
                     end_time=end_time,
                     total_requests=0,
@@ -252,7 +280,7 @@ class ModelStatusService:
                 ))
 
         # Reverse to show oldest first (left to right)
-        hourly_data.reverse()
+        slot_data.reverse()
 
         overall_rate = (total_success / total_requests * 100) if total_requests > 0 else 100.0
         current_status = get_status_color(overall_rate, total_requests)
@@ -260,11 +288,12 @@ class ModelStatusService:
         model_status = ModelStatus(
             model_name=model_name,
             display_name=self._get_display_name(model_name),
-            total_requests_24h=total_requests,
-            success_count_24h=total_success,
-            success_rate_24h=round(overall_rate, 2),
+            time_window=time_window,
+            total_requests=total_requests,
+            success_count=total_success,
+            success_rate=round(overall_rate, 2),
             current_status=current_status,
-            hourly_data=hourly_data,
+            slot_data=slot_data,
         )
 
         # Cache the result
@@ -274,7 +303,8 @@ class ModelStatusService:
 
     def get_multiple_models_status(
         self, 
-        model_names: List[str], 
+        model_names: List[str],
+        time_window: str = DEFAULT_TIME_WINDOW,
         use_cache: bool = True
     ) -> List[ModelStatus]:
         """
@@ -282,6 +312,7 @@ class ModelStatusService:
         
         Args:
             model_names: List of model names to query.
+            time_window: Time window ('1h', '6h', '12h', '24h').
             use_cache: Whether to use cached data.
             
         Returns:
@@ -289,23 +320,24 @@ class ModelStatusService:
         """
         results = []
         for model_name in model_names:
-            status = self.get_model_status(model_name, use_cache)
+            status = self.get_model_status(model_name, time_window, use_cache)
             if status:
                 results.append(status)
         return results
 
-    def get_all_models_status(self, use_cache: bool = True) -> List[ModelStatus]:
+    def get_all_models_status(self, time_window: str = DEFAULT_TIME_WINDOW, use_cache: bool = True) -> List[ModelStatus]:
         """
         Get status for all available models.
         
         Args:
+            time_window: Time window ('1h', '6h', '12h', '24h').
             use_cache: Whether to use cached data.
             
         Returns:
             List of ModelStatus objects for all models.
         """
         models = self.get_available_models()
-        return self.get_multiple_models_status(models, use_cache)
+        return self.get_multiple_models_status(models, time_window, use_cache)
 
     def _get_display_name(self, model_name: str) -> str:
         """Get a display-friendly name for the model."""
@@ -317,26 +349,28 @@ class ModelStatusService:
         return {
             "model_name": status.model_name,
             "display_name": status.display_name,
-            "total_requests_24h": status.total_requests_24h,
-            "success_count_24h": status.success_count_24h,
-            "success_rate_24h": status.success_rate_24h,
+            "time_window": status.time_window,
+            "total_requests": status.total_requests,
+            "success_count": status.success_count,
+            "success_rate": status.success_rate,
             "current_status": status.current_status,
-            "hourly_data": [asdict(h) for h in status.hourly_data],
+            "slot_data": [asdict(h) for h in status.slot_data],
         }
 
     def _dict_to_model_status(self, data: Dict) -> ModelStatus:
         """Convert dictionary to ModelStatus."""
-        hourly_data = [
-            HourlyStatus(**h) for h in data.get("hourly_data", [])
+        slot_data = [
+            SlotStatus(**h) for h in data.get("slot_data", [])
         ]
         return ModelStatus(
             model_name=data["model_name"],
             display_name=data["display_name"],
-            total_requests_24h=data["total_requests_24h"],
-            success_count_24h=data["success_count_24h"],
-            success_rate_24h=data["success_rate_24h"],
+            time_window=data.get("time_window", DEFAULT_TIME_WINDOW),
+            total_requests=data.get("total_requests", data.get("total_requests_24h", 0)),
+            success_count=data.get("success_count", data.get("success_count_24h", 0)),
+            success_rate=data.get("success_rate", data.get("success_rate_24h", 0)),
             current_status=data["current_status"],
-            hourly_data=hourly_data,
+            slot_data=slot_data,
         )
 
 
@@ -352,12 +386,12 @@ def get_model_status_service() -> ModelStatusService:
     return _model_status_service
 
 
-async def warmup_model_status(max_models: int = 20) -> Dict[str, Any]:
+async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
     
     Args:
-        max_models: Maximum number of models to warmup (default 20).
+        max_models: Maximum number of models to warmup (default 50).
         
     Returns:
         Warmup result with success count and timing.
