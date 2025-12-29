@@ -528,6 +528,7 @@ class AIAutoBanService:
             成功时返回包含 content、usage、model、duration_ms 的字典，失败返回 None
         """
         if not self._openai_api_key:
+            self._last_error_message = "OpenAI API Key 未配置"
             logger.warning("AI自动封禁: OpenAI API Key 未配置")
             return None
 
@@ -536,7 +537,8 @@ class AIAutoBanService:
             # 检查冷却期是否已过
             if time.time() - self._last_failure_time < API_FAILURE_COOLDOWN:
                 remaining = int(API_FAILURE_COOLDOWN - (time.time() - self._last_failure_time))
-                logger.warning(f"AI自动封禁: API 服务暂停中，剩余冷却时间 {remaining} 秒")
+                self._last_error_message = f"API 服务暂停中，剩余冷却时间 {remaining} 秒"
+                logger.warning(f"AI自动封禁: {self._last_error_message}")
                 return None
             else:
                 # 冷却期已过，重置状态尝试恢复
@@ -835,6 +837,7 @@ class AIAutoBanService:
                 api_duration_ms=api_duration_ms,
             )
         except (json.JSONDecodeError, KeyError, ValueError) as e:
+            self._last_error_message = f"响应解析失败: {e}"
             logger.error(f"AI自动封禁: 解析响应失败 - {e}, 原始响应: {response[:200]}")
             return None
 
@@ -870,8 +873,11 @@ class AIAutoBanService:
             return None
 
         # 解析响应并传入 API 调用信息
+        # 记录 AI 原始响应（用于调试）
+        content = api_result.get("content", "")
+        logger.info(f"AI自动封禁: 收到AI响应 (tokens: {api_result.get('total_tokens', 0)}, 耗时: {api_result.get('duration_ms', 0)}ms), 内容预览: {content[:300]}...")
         return self._parse_ai_response(
-            response=api_result.get("content", ""),
+            response=content,
             model=api_result.get("model"),
             prompt_tokens=api_result.get("prompt_tokens", 0),
             completion_tokens=api_result.get("completion_tokens", 0),
