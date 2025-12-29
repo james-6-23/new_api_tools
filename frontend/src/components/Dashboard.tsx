@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { TrendChart } from './TrendChart'
-import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database } from 'lucide-react'
+import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database, Timer, ChevronDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
 import { cn } from '../lib/utils'
+
+type RefreshInterval = 0 | 30 | 60 | 120 | 300 // 秒，0表示关闭
 
 interface SystemOverview {
   total_users: number
@@ -61,8 +63,13 @@ export function Dashboard() {
   const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [period, setPeriod] = useState<PeriodType>('7d')
+  const [period, setPeriod] = useState<PeriodType>('24h')
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(0)
+  const [countdown, setCountdown] = useState<number>(0)
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
+  const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const requestTimeoutMs = 20_000
@@ -250,6 +257,10 @@ export function Dashboard() {
       const ok = await refreshAll(controller.signal)
       if (ok && !controller.signal.aborted) {
         showToast('success', '数据已刷新')
+        setLastRefreshTime(new Date())
+        if (refreshInterval > 0) {
+          setCountdown(refreshInterval)
+        }
       } else {
         showToast('error', '刷新失败，请稍后再试')
         setLoadError('刷新失败，请稍后再试（可能是数据库负载过高）')
@@ -258,6 +269,69 @@ export function Dashboard() {
       window.clearTimeout(timeoutId)
       setRefreshing(false)
       controller.abort()
+    }
+  }
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowIntervalDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // 自动刷新倒计时
+  useEffect(() => {
+    if (refreshInterval === 0) {
+      setCountdown(0)
+      return
+    }
+
+    const timer = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          // 触发刷新
+          handleRefresh()
+          return refreshInterval
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [refreshInterval])
+
+  // 设置刷新间隔时初始化倒计时
+  const handleSetRefreshInterval = (interval: RefreshInterval) => {
+    setRefreshInterval(interval)
+    if (interval > 0) {
+      setCountdown(interval)
+    }
+    setShowIntervalDropdown(false)
+  }
+
+  const formatCountdown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
+  }
+
+  const formatLastRefreshTime = (date: Date | null) => {
+    if (!date) return '从未'
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  const getIntervalLabel = (interval: RefreshInterval) => {
+    switch (interval) {
+      case 0: return '关闭'
+      case 30: return '30秒'
+      case 60: return '1分钟'
+      case 120: return '2分钟'
+      case 300: return '5分钟'
+      default: return '关闭'
     }
   }
 
@@ -298,11 +372,65 @@ export function Dashboard() {
           <h2 className="text-3xl font-bold tracking-tight">仪表盘</h2>
           <p className="text-muted-foreground mt-1">系统运行状态与实时数据概览</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
-            <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
-            {refreshing ? '正在获取最新数据...' : '刷新'}
-          </Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* 刷新按钮和自动刷新控制 */}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-9">
+              <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
+              {refreshing ? '刷新中...' : '刷新'}
+            </Button>
+            
+            {/* 自动刷新下拉菜单 */}
+            <div className="relative" ref={dropdownRef}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
+                className="h-9 min-w-[100px]"
+              >
+                <Timer className="h-4 w-4 mr-2" />
+                {refreshInterval > 0 ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
+                  </span>
+                ) : (
+                  '自动刷新'
+                )}
+                <ChevronDown className="h-3 w-3 ml-1" />
+              </Button>
+              
+              {showIntervalDropdown && (
+                <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
+                  <div className="p-2 border-b">
+                    <p className="text-xs text-muted-foreground">刷新间隔</p>
+                  </div>
+                  <div className="p-1">
+                    {([0, 30, 60, 120, 300] as RefreshInterval[]).map((interval) => (
+                      <button
+                        key={interval}
+                        onClick={() => handleSetRefreshInterval(interval)}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors",
+                          refreshInterval === interval && "bg-accent text-accent-foreground"
+                        )}
+                      >
+                        {getIntervalLabel(interval)}
+                      </button>
+                    ))}
+                  </div>
+                  {lastRefreshTime && (
+                    <div className="p-2 border-t">
+                      <p className="text-xs text-muted-foreground">
+                        上次刷新: {formatLastRefreshTime(lastRefreshTime)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 时间范围选择 */}
           <div className="inline-flex rounded-lg border bg-muted/50 p-1">
             {(['24h', '3d', '7d', '14d'] as PeriodType[]).map((p) => (
               <Button 
