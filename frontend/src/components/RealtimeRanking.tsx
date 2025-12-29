@@ -3843,15 +3843,21 @@ export function RealtimeRanking() {
                             <div className="p-4">
                               <div className="flex items-start justify-between mb-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-400">
-                                    {(detail.username || 'U')[0]?.toUpperCase()}
-                                  </div>
-                                  <div>
-                                    <div className="font-medium text-sm flex items-center gap-2">
-                                      {detail.username}
-                                      <span className="text-xs text-muted-foreground font-normal">#{detail.user_id}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 pl-1 rounded-full text-xs font-medium bg-muted/50 hover:bg-muted text-foreground border border-border/50 transition-all duration-200"
+                                    onClick={() => {
+                                      setSelectedAuditLog(null)
+                                      openUserAnalysisFromIP(detail.user_id, detail.username || `用户${detail.user_id}`)
+                                    }}
+                                  >
+                                    <div className="w-6 h-6 rounded-full bg-background flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-border/50 mr-2">
+                                      {(detail.username || 'U')[0]?.toUpperCase()}
                                     </div>
-                                  </div>
+                                    <span className="mr-1">{detail.username}</span>
+                                    <span className="text-[10px] text-muted-foreground font-mono opacity-70">#{detail.user_id}</span>
+                                  </Button>
                                 </div>
                                 <Badge variant={
                                   detail.action === 'ban' ? 'destructive' :
@@ -3905,7 +3911,9 @@ export function RealtimeRanking() {
                                   )}
                                 </div>
                               ) : (
-                                <div className="text-xs text-muted-foreground italic px-2">暂无 AI 分析详情</div>
+                                <div className="text-xs text-muted-foreground italic px-2 py-2 bg-muted/30 rounded">
+                                  {detail.message || '暂无 AI 分析详情'}
+                                </div>
                               )}
 
                               {/* Error Message if any */}
@@ -4360,6 +4368,18 @@ export function RealtimeRanking() {
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={mutating}>取消</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (!analysis) return
+                    addToWhitelist(analysis.user.id)
+                  }}
+                  disabled={mutating || analysisLoading}
+                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200"
+                >
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                  加入白名单
+                </Button>
                 {analysis?.user.status === 2 ? (
                   <Button
                     onClick={() => {

@@ -903,7 +903,8 @@ class AIAutoBanService:
         # AI 评估
         assessment = await self.assess_user(user_id, analysis)
         if not assessment:
-            result["message"] = "AI 评估失败"
+            result["action"] = "error"
+            result["message"] = f"AI 评估失败: {self._last_error_message or 'API 调用失败或响应解析错误'}"
             return result
         
         result["assessment"] = {
