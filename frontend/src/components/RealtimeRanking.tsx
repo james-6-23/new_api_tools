@@ -530,6 +530,10 @@ export function RealtimeRanking() {
     success: boolean
     message: string
     latency_ms?: number
+    model?: string
+    test_message?: string
+    response?: string
+    usage?: { prompt_tokens: number; completion_tokens: number }
   } | null>(null)
   const [aiTesting, setAiTesting] = useState(false)
   const [aiSaving, setAiSaving] = useState(false)
@@ -1117,10 +1121,10 @@ export function RealtimeRanking() {
         showToast('error', res.message || '测试失败')
       }
 
-      // 3秒后自动清除测试结果
+      // 8秒后自动清除测试结果（显示发送和回复内容需要更多阅读时间）
       setTimeout(() => {
         setAiTestResult(null)
-      }, 3000)
+      }, 8000)
     } catch (e) {
       console.error('Failed to test model:', e)
       showToast('error', '测试失败')
@@ -3216,12 +3220,31 @@ export function RealtimeRanking() {
                       {/* Test Result Message - Positioned here for better UX */}
                       {aiTestResult && (
                         <div className={cn(
-                          "mt-2 rounded-lg border px-3 py-2 text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-300",
+                          "mt-2 rounded-lg border px-3 py-2.5 text-xs animate-in fade-in slide-in-from-top-1 duration-300 space-y-2",
                           aiTestResult.success ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"
                         )}>
-                          {aiTestResult.success ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
-                          <span className="font-medium">{aiTestResult.message}</span>
-                          {aiTestResult.latency_ms && <span className="opacity-70 ml-auto tabular-nums">{aiTestResult.latency_ms}ms</span>}
+                          <div className="flex items-center gap-2">
+                            {aiTestResult.success ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+                            <span className="font-medium">{aiTestResult.message}</span>
+                            {aiTestResult.latency_ms && <span className="opacity-70 ml-auto tabular-nums">{aiTestResult.latency_ms}ms</span>}
+                          </div>
+                          {aiTestResult.success && aiTestResult.test_message && (
+                            <div className="space-y-1.5 pt-1 border-t border-emerald-200/50">
+                              <div className="flex gap-2">
+                                <span className="text-emerald-600 font-medium shrink-0">发送:</span>
+                                <span className="text-emerald-700/80">{aiTestResult.test_message}</span>
+                              </div>
+                              <div className="flex gap-2">
+                                <span className="text-emerald-600 font-medium shrink-0">回复:</span>
+                                <span className="text-emerald-700/80">{aiTestResult.response || '(无回复)'}</span>
+                              </div>
+                              {aiTestResult.usage && (
+                                <div className="text-emerald-600/70 text-[10px]">
+                                  Token: {aiTestResult.usage.prompt_tokens} + {aiTestResult.usage.completion_tokens} = {aiTestResult.usage.prompt_tokens + aiTestResult.usage.completion_tokens}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

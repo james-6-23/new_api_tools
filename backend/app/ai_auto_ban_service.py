@@ -722,15 +722,21 @@ class AIAutoBanService:
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         }
-        
+
+        test_message = "你好，这是一条 API 连接测试消息，请简短回复确认连接正常。"
+
         payload = {
             "model": model,
             "messages": [
-                {"role": "user", "content": "请回复 OK"},
+                {"role": "user", "content": test_message},
             ],
-            "max_tokens": 10,
+            "max_tokens": 100,
         }
-        
+
+        # 记录发送的测试请求
+        logger.info(f"AI配置测试: 发送测试请求 (model={model}, base_url={base})")
+        logger.info(f"AI配置测试: 发送消息: {test_message}")
+
         try:
             start_time = time.time()
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -743,15 +749,22 @@ class AIAutoBanService:
                 response.raise_for_status()
                 data = response.json()
                 elapsed = time.time() - start_time
-                
+
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 usage = data.get("usage", {})
-                
+                actual_model = data.get("model", model)
+
+                # 记录成功响应
+                logger.info(f"AI配置测试: 连接成功 (延迟={int(elapsed * 1000)}ms, 实际模型={actual_model})")
+                logger.info(f"AI配置测试: AI回复: {content}")
+                logger.info(f"AI配置测试: Token用量: prompt={usage.get('prompt_tokens', 0)}, completion={usage.get('completion_tokens', 0)}")
+
                 return {
                     "success": True,
                     "message": "连接成功",
-                    "model": model,
-                    "response": content[:100],
+                    "model": actual_model,
+                    "test_message": test_message,
+                    "response": content,
                     "latency_ms": int(elapsed * 1000),
                     "usage": {
                         "prompt_tokens": usage.get("prompt_tokens", 0),
@@ -765,21 +778,26 @@ class AIAutoBanService:
                 error_detail = error_data.get("error", {}).get("message", "")
             except:
                 error_detail = e.response.text[:200]
+            error_msg = f"请求失败 ({e.response.status_code}): {error_detail}"
+            logger.error(f"AI配置测试: {error_msg}")
             return {
                 "success": False,
-                "message": f"请求失败 ({e.response.status_code}): {error_detail}",
+                "message": error_msg,
             }
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            logger.error(f"AI配置测试: 连接失败 - {e}")
             return {
                 "success": False,
                 "message": "连接失败，请检查 API 地址",
             }
         except httpx.TimeoutException:
+            logger.error("AI配置测试: 请求超时")
             return {
                 "success": False,
                 "message": "请求超时",
             }
         except Exception as e:
+            logger.error(f"AI配置测试: 测试失败 - {type(e).__name__}: {e}")
             return {
                 "success": False,
                 "message": f"测试失败: {str(e)}",
