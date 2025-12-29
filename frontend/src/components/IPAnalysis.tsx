@@ -3,9 +3,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import ReactECharts from 'echarts-for-react'
 import * as echarts from 'echarts'
-import { 
-  Globe, MapPin, RefreshCw, Loader2, TrendingUp, 
-  AlertTriangle, Activity, ChevronRight, ChevronDown, Timer
+import {
+  Globe, MapPin, RefreshCw, Loader2, TrendingUp,
+  AlertTriangle, Activity, ChevronRight, ChevronDown, Timer, Map as MapIcon
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
@@ -885,10 +885,14 @@ export function IPAnalysis() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 px-3 gap-1"
+                className="h-8 px-3 gap-1.5"
                 onClick={() => setMapDropdownOpen(!mapDropdownOpen)}
               >
-                {mapType === 'world' ? '🌍 世界地图' : '🇨🇳 中国地图'}
+                {mapType === 'world' ? (
+                  <><Globe className="h-4 w-4" /> 世界地图</>
+                ) : (
+                  <><MapIcon className="h-4 w-4" /> 中国地图</>
+                )}
                 <ChevronDown className={cn("h-4 w-4 transition-transform", mapDropdownOpen && "rotate-180")} />
               </Button>
               {mapDropdownOpen && (
@@ -908,7 +912,7 @@ export function IPAnalysis() {
                         setMapDropdownOpen(false)
                       }}
                     >
-                      🌍 世界地图
+                      <Globe className="h-4 w-4" /> 世界地图
                     </button>
                     <button
                       className={cn(
@@ -920,7 +924,7 @@ export function IPAnalysis() {
                         setMapDropdownOpen(false)
                       }}
                     >
-                      🇨🇳 中国地图
+                      <MapIcon className="h-4 w-4" /> 中国地图
                     </button>
                   </div>
                 </>
