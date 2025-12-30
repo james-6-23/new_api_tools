@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -27,7 +27,7 @@ interface ModelStatus {
   slot_data: SlotStatus[]
 }
 
-type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean' | 'terminal'
+type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean' | 'terminal' | 'cupertino' | 'material' | 'openai' | 'anthropic' | 'vercel' | 'linear' | 'stripe' | 'github' | 'discord' | 'tesla'
 
 interface ThemeConfig {
   id: ThemeId
@@ -49,6 +49,16 @@ export const THEMES: ThemeConfig[] = [
   { id: 'forest', name: '森林', nameEn: 'Forest', icon: Leaf, description: '深邃自然的森林色调' },
   { id: 'ocean', name: '海洋', nameEn: 'Ocean', icon: Droplets, description: '宁静深邃的海洋蓝' },
   { id: 'terminal', name: '终端', nameEn: 'Terminal', icon: Terminal, description: '复古极客风格' },
+  { id: 'cupertino', name: 'Apple', nameEn: 'Apple', icon: Command, description: '致敬 Apple 设计风格，通透精致' },
+  { id: 'material', name: 'Google', nameEn: 'Google', icon: LayoutGrid, description: '致敬 Google Material Design' },
+  { id: 'openai', name: 'OpenAI', nameEn: 'OpenAI', icon: Bot, description: '致敬 OpenAI 设计风格，理性极简' },
+  { id: 'anthropic', name: 'Claude', nameEn: 'Claude', icon: MessageSquareQuote, description: '致敬 Claude 设计风格，温暖衬线' },
+  { id: 'vercel', name: 'Vercel', nameEn: 'Vercel', icon: Triangle, description: 'Geist 风格，极致黑白与高对比度' },
+  { id: 'linear', name: 'Linear', nameEn: 'Linear', icon: Sparkles, description: '流光风格，深色质感与细腻渐变' },
+  { id: 'stripe', name: 'Stripe', nameEn: 'Stripe', icon: CreditCard, description: '现代支付美学，精致渐变与投影' },
+  { id: 'github', name: 'GitHub', nameEn: 'GitHub', icon: GitBranch, description: '开发者之魂，熟悉的深色代码风格' },
+  { id: 'discord', name: 'Discord', nameEn: 'Discord', icon: Gamepad2, description: '游戏社区风格，Blurple 品牌色' },
+  { id: 'tesla', name: 'Tesla', nameEn: 'Tesla', icon: Rocket, description: '工业未来风，极简黑红配色' },
 ]
 
 // Theme-specific styles
@@ -322,6 +332,335 @@ const themeStyles: Record<ThemeId, {
     legendDot: 'w-2 h-2 rounded-none',
     emptyText: 'text-green-500/40',
     loader: 'text-green-500',
+  },
+
+  // ========== CUPERTINO (Apple Style) ==========
+  cupertino: {
+    container: 'min-h-screen bg-[#f5f5f7] text-gray-900 p-6 font-sans',
+    headerTitle: 'text-2xl font-semibold text-gray-900 tracking-tight',
+    headerSubtitle: 'text-sm text-gray-500 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-white/50 backdrop-blur-md border border-gray-200/50 rounded-full shadow-sm',
+    countdownText: 'text-blue-500 font-medium',
+    countdownLabel: 'text-gray-400',
+    card: 'bg-white rounded-2xl p-5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-all duration-300',
+    cardHover: 'hover:shadow-[0_4px_20px_rgba(0,0,0,0.08)] hover:-translate-y-0.5',
+    modelName: 'font-semibold text-gray-900 truncate max-w-md tracking-tight',
+    statsText: 'text-sm text-gray-400',
+    statsValue: 'text-gray-900 font-medium',
+    statusGreen: 'bg-[#34c759]',
+    statusYellow: 'bg-[#ffcc00]',
+    statusRed: 'bg-[#ff3b30]',
+    statusEmpty: 'bg-gray-100',
+    statusHover: 'hover:opacity-80 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-[#34c759]/10 text-[#34c759] px-2.5 py-0.5 text-xs font-medium rounded-full',
+    badgeYellow: 'bg-[#ffcc00]/10 text-[#ffcc00] px-2.5 py-0.5 text-xs font-medium rounded-full',
+    badgeRed: 'bg-[#ff3b30]/10 text-[#ff3b30] px-2.5 py-0.5 text-xs font-medium rounded-full',
+    timeLabel: 'text-[11px] text-gray-400 font-medium uppercase tracking-wide mt-3',
+    tooltip: 'bg-white/90 backdrop-blur-xl border border-gray-100 rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] p-4 z-[9999]',
+    tooltipTitle: 'font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-100',
+    tooltipLabel: 'text-gray-500 text-xs',
+    tooltipValue: 'text-gray-900 font-medium',
+    legendText: 'text-xs text-gray-400 font-medium',
+    legendDot: 'w-2.5 h-2.5 rounded-full',
+    emptyText: 'text-gray-400',
+    loader: 'text-gray-400',
+  },
+
+  // ========== MATERIAL (Google Style) ==========
+  material: {
+    container: 'min-h-screen bg-[#f0f4f8] text-[#1f1f1f] p-6 font-sans',
+    headerTitle: 'text-3xl font-normal text-[#1f1f1f] tracking-tight',
+    headerSubtitle: 'text-sm text-[#444746] mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2 text-sm bg-[#e0e2ec] text-[#1f1f1f] rounded-2xl',
+    countdownText: 'text-[#005cbb] font-medium',
+    countdownLabel: 'text-[#444746]',
+    card: 'bg-[#fdfcff] rounded-[20px] p-5 shadow-sm transition-all duration-300',
+    cardHover: 'hover:shadow-md hover:bg-[#f8faff]',
+    modelName: 'font-medium text-[#1f1f1f] truncate max-w-md text-lg',
+    statsText: 'text-sm text-[#444746]',
+    statsValue: 'text-[#1f1f1f] font-medium',
+    statusGreen: 'bg-[#1e8e3e]',
+    statusYellow: 'bg-[#f9ab00]',
+    statusRed: 'bg-[#d93025]',
+    statusEmpty: 'bg-[#e0e2ec]',
+    statusHover: 'hover:ring-4 hover:ring-[#d3e3fd] hover:z-10 relative rounded-sm',
+    badgeGreen: 'bg-[#c4eed0] text-[#072711] px-3 py-1 rounded-lg text-sm font-medium',
+    badgeYellow: 'bg-[#ffe082] text-[#261900] px-3 py-1 rounded-lg text-sm font-medium',
+    badgeRed: 'bg-[#f9d7e5] text-[#3e001d] px-3 py-1 rounded-lg text-sm font-medium',
+    timeLabel: 'text-xs text-[#444746]',
+    tooltip: 'bg-[#2f3033] text-[#f2f2f2] rounded-lg shadow-lg p-3 z-[9999]',
+    tooltipTitle: 'font-medium text-[#f2f2f2] mb-2',
+    tooltipLabel: 'text-[#c4c7c5] text-xs',
+    tooltipValue: 'text-[#f2f2f2] font-medium',
+    legendText: 'text-xs text-[#444746]',
+    legendDot: 'w-3 h-3 rounded-full',
+    emptyText: 'text-[#444746]',
+    loader: 'text-[#005cbb]',
+  },
+
+  // ========== OPENAI (Origin Style) ==========
+  openai: {
+    container: 'min-h-screen bg-[#343541] text-gray-100 p-6 font-sans',
+    headerTitle: 'text-2xl font-bold text-white tracking-tight',
+    headerSubtitle: 'text-sm text-gray-400 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-[#40414f] rounded text-gray-300',
+    countdownText: 'text-[#10a37f] font-medium',
+    countdownLabel: 'text-gray-500',
+    card: 'bg-[#444654] rounded-md p-5 transition-all duration-200 border border-transparent',
+    cardHover: 'hover:border-gray-500/50',
+    modelName: 'font-medium text-white truncate max-w-md',
+    statsText: 'text-sm text-gray-400',
+    statsValue: 'text-gray-200 font-medium',
+    statusGreen: 'bg-[#10a37f]',
+    statusYellow: 'bg-[#f7d070]',
+    statusRed: 'bg-[#ef4444]',
+    statusEmpty: 'bg-[#565869]',
+    statusHover: 'hover:opacity-80',
+    badgeGreen: 'text-[#10a37f] text-xs font-medium uppercase tracking-wide',
+    badgeYellow: 'text-[#f7d070] text-xs font-medium uppercase tracking-wide',
+    badgeRed: 'text-[#ef4444] text-xs font-medium uppercase tracking-wide',
+    timeLabel: 'text-xs text-gray-500 font-medium',
+    tooltip: 'bg-[#202123] border border-gray-600 rounded shadow-xl p-3 z-[9999]',
+    tooltipTitle: 'font-medium text-white mb-2 text-sm',
+    tooltipLabel: 'text-gray-400 text-xs',
+    tooltipValue: 'text-white text-sm',
+    legendText: 'text-xs text-gray-400',
+    legendDot: 'w-2.5 h-2.5 rounded-sm',
+    emptyText: 'text-gray-500',
+    loader: 'text-gray-400',
+  },
+
+  // ========== ANTHROPIC (Human Style) ==========
+  anthropic: {
+    container: 'min-h-screen bg-[#f4f1ea] text-[#191919] p-6 font-sans',
+    headerTitle: 'text-3xl font-serif font-medium text-[#191919] tracking-tight',
+    headerSubtitle: 'text-sm text-[#6b665c] mt-1.5 font-serif',
+    countdownBox: 'flex items-center gap-2 px-0 py-0 text-sm bg-transparent text-[#6b665c]',
+    countdownText: 'text-[#d97757] font-serif italic',
+    countdownLabel: 'text-[#6b665c] font-serif italic',
+    card: 'bg-white border border-[#e6e1d6] rounded-xl p-6 shadow-sm transition-all duration-300',
+    cardHover: 'hover:border-[#d97757]/30 hover:shadow-md',
+    modelName: 'font-serif font-medium text-[#191919] truncate max-w-md text-xl',
+    statsText: 'text-sm text-[#6b665c] font-serif',
+    statsValue: 'text-[#191919] font-medium font-sans',
+    statusGreen: 'bg-[#2d4f43]', // Dark Green used by Anthropic
+    statusYellow: 'bg-[#e3b26c]',
+    statusRed: 'bg-[#d97757]', // Terracotta
+    statusEmpty: 'bg-[#e6e1d6]',
+    statusHover: 'hover:scale-y-110 origin-bottom transition-transform',
+    badgeGreen: 'bg-[#eef3f1] text-[#2d4f43] border border-[#d6e3de] px-2 py-0.5 text-xs font-serif rounded',
+    badgeYellow: 'bg-[#fff9ed] text-[#b38641] border border-[#faecd1] px-2 py-0.5 text-xs font-serif rounded',
+    badgeRed: 'bg-[#fdf3f0] text-[#d97757] border border-[#f5dcd6] px-2 py-0.5 text-xs font-serif rounded',
+    timeLabel: 'text-xs text-[#9c9485] font-serif italic',
+    tooltip: 'bg-white border border-[#e6e1d6] rounded-lg shadow-[0_4px_20px_rgba(0,0,0,0.08)] p-4 z-[9999]',
+    tooltipTitle: 'font-serif font-medium text-[#191919] mb-2 pb-2 border-b border-[#f4f1ea]',
+    tooltipLabel: 'text-[#6b665c] font-serif text-xs',
+    tooltipValue: 'text-[#191919] font-sans',
+    legendText: 'text-xs text-[#6b665c] font-serif',
+    legendDot: 'w-2.5 h-2.5 rounded-full',
+    emptyText: 'text-[#6b665c] font-serif italic',
+    loader: 'text-[#d97757]',
+  },
+
+  // ========== VERCEL (Geist Style) ==========
+  vercel: {
+    container: 'min-h-screen bg-black text-white p-6 font-sans tracking-tight',
+    background: `
+      background-color: #000;
+      background-image: radial-gradient(#333 1px, transparent 1px);
+      background-size: 32px 32px;
+    `,
+    headerTitle: 'text-2xl font-bold text-white tracking-tight',
+    headerSubtitle: 'text-sm text-[#888] mt-1.5 font-medium',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-[#111] border border-[#333] rounded-md transition-colors hover:border-[#444]',
+    countdownText: 'text-white font-mono font-medium',
+    countdownLabel: 'text-[#666]',
+    card: 'bg-black border border-[#333] rounded-lg p-5 transition-all duration-200 group',
+    cardHover: 'hover:border-white', // Iconic Vercel hover effect
+    modelName: 'font-bold text-white truncate max-w-md tracking-tight group-hover:text-white transition-colors',
+    statsText: 'text-sm text-[#888] font-medium',
+    statsValue: 'text-white font-bold',
+    statusGreen: 'bg-[#0070f3]', // Vercel Blue
+    statusYellow: 'bg-[#f5a623]',
+    statusRed: 'bg-[#ff0000]',
+    statusEmpty: 'bg-[#1a1a1a]',
+    statusHover: 'hover:opacity-80 transition-opacity',
+    badgeGreen: 'bg-[#0070f3]/10 text-[#0070f3] border border-[#0070f3]/20 px-2 py-0.5 text-xs font-semibold rounded',
+    badgeYellow: 'bg-[#f5a623]/10 text-[#f5a623] border border-[#f5a623]/20 px-2 py-0.5 text-xs font-semibold rounded',
+    badgeRed: 'bg-[#ff0000]/10 text-[#ff0000] border border-[#ff0000]/20 px-2 py-0.5 text-xs font-semibold rounded',
+    timeLabel: 'text-[10px] text-[#666] font-mono font-medium uppercase tracking-wider',
+    tooltip: 'bg-black border border-[#333] rounded-lg shadow-[0_0_15px_rgba(255,255,255,0.1)] p-4 z-[9999]',
+    tooltipTitle: 'font-bold text-white mb-2 pb-2 border-b border-[#333]',
+    tooltipLabel: 'text-[#888] text-xs font-medium uppercase tracking-wider',
+    tooltipValue: 'text-white font-mono',
+    legendText: 'text-xs text-[#666] font-medium uppercase tracking-wider',
+    legendDot: 'w-2 h-2 rounded-full',
+    emptyText: 'text-[#666] font-medium',
+    loader: 'text-white',
+  },
+
+  // ========== LINEAR (Streamlined Style) ==========
+  linear: {
+    container: 'min-h-screen bg-[#0f1015] text-[#ededee] p-6 font-sans',
+    // Subtle top highlight
+    background: 'background: radial-gradient(circle at 50% 0%, rgba(94,106,210,0.15), transparent 60%), #0f1015',
+    headerTitle: 'text-2xl font-medium text-[#ededee] tracking-tight',
+    headerSubtitle: 'text-sm text-[#8a8f98] mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-[#1a1b21] border border-[#2e2f36] rounded-[6px] shadow-sm',
+    countdownText: 'text-[#5e6ad2] font-medium',
+    countdownLabel: 'text-[#8a8f98]',
+    card: 'bg-[#16171d] border border-[#282930] rounded-xl p-5 transition-all duration-300 shadow-[0_2px_4px_rgba(0,0,0,0.2)]',
+    cardHover: 'hover:border-[#3a3b42] hover:shadow-[0_4px_12px_rgba(0,0,0,0.3)] hover:bg-[#1a1b21]',
+    modelName: 'font-medium text-[#ededee] truncate max-w-md',
+    statsText: 'text-sm text-[#8a8f98]',
+    statsValue: 'text-[#ededee] font-medium',
+    statusGreen: 'bg-[#5e6ad2]', // Linear Purple/Blue
+    statusYellow: 'bg-[#d29922]',
+    statusRed: 'bg-[#df4a4a]',
+    statusEmpty: 'bg-[#25262e]',
+    statusHover: 'hover:brightness-125 transition-all duration-200 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-[#5e6ad2]/10 text-[#7c86e0] border border-[#5e6ad2]/20 px-2.5 py-0.5 text-xs font-medium rounded',
+    badgeYellow: 'bg-[#d29922]/10 text-[#e6b955] border border-[#d29922]/20 px-2.5 py-0.5 text-xs font-medium rounded',
+    badgeRed: 'bg-[#df4a4a]/10 text-[#f57171] border border-[#df4a4a]/20 px-2.5 py-0.5 text-xs font-medium rounded',
+    timeLabel: 'text-xs text-[#636873] font-medium',
+    tooltip: 'bg-[#16171d] border border-[#2e2f36] rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.4)] p-3 z-[9999]',
+    tooltipTitle: 'font-medium text-[#ededee] mb-2 pb-2 border-b border-[#2e2f36]',
+    tooltipLabel: 'text-[#8a8f98] text-xs',
+    tooltipValue: 'text-[#ededee]',
+    legendText: 'text-xs text-[#8a8f98] font-medium',
+    legendDot: 'w-2.5 h-2.5 rounded-full shadow-[0_0_8px_rgba(94,106,210,0.4)]',
+    emptyText: 'text-[#8a8f98]',
+    loader: 'text-[#5e6ad2]',
+  },
+
+  // ========== STRIPE (Fintech Style) ==========
+  stripe: {
+    container: 'min-h-screen bg-white text-[#3c4257] p-6 font-sans',
+    // Mesh gradient emulation
+    background: 'background-image: radial-gradient(at 0% 0%, rgba(99, 91, 255, 0.15) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(0, 212, 255, 0.15) 0px, transparent 50%); background-color: #f7f9fc;',
+    headerTitle: 'text-2xl font-bold text-[#3c4257] tracking-tight',
+    headerSubtitle: 'text-sm text-[#697386] mt-1.5 font-medium',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-white rounded-full shadow-sm border border-[#e3e8ee]',
+    countdownText: 'text-[#635bff] font-semibold',
+    countdownLabel: 'text-[#697386]',
+    card: 'bg-white rounded-lg p-5 shadow-[0_2px_5px_-1px_rgba(50,50,93,0.25),0_1px_3px_-1px_rgba(0,0,0,0.3)] transition-all duration-300',
+    cardHover: 'hover:shadow-[0_6px_12px_-2px_rgba(50,50,93,0.25),0_3px_7px_-3px_rgba(0,0,0,0.3)] hover:-translate-y-0.5',
+    modelName: 'font-bold text-[#3c4257] truncate max-w-md',
+    statsText: 'text-sm text-[#697386] font-medium',
+    statsValue: 'text-[#3c4257] font-bold',
+    statusGreen: 'bg-[#635bff]', // Stripe Blurple
+    statusYellow: 'bg-[#f5a623]',
+    statusRed: 'bg-[#e22525]',
+    statusEmpty: 'bg-[#e3e8ee]',
+    statusHover: 'hover:opacity-80 transition-opacity',
+    badgeGreen: 'bg-[#635bff]/10 text-[#635bff] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded',
+    badgeYellow: 'bg-[#f5a623]/10 text-[#f5a623] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded',
+    badgeRed: 'bg-[#e22525]/10 text-[#e22525] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider rounded',
+    timeLabel: 'text-xs text-[#697386] font-semibold uppercase tracking-wide',
+    tooltip: 'bg-white rounded-lg shadow-[0_13px_27px_-5px_rgba(50,50,93,0.25),0_8px_16px_-8px_rgba(0,0,0,0.3)] p-4 z-[9999]',
+    tooltipTitle: 'font-bold text-[#3c4257] mb-2 pb-2 border-b border-[#e3e8ee]',
+    tooltipLabel: 'text-[#697386] text-xs font-semibold uppercase',
+    tooltipValue: 'text-[#3c4257] font-semibold',
+    legendText: 'text-xs text-[#697386] font-semibold uppercase tracking-wide',
+    legendDot: 'w-2.5 h-2.5 rounded-full',
+    emptyText: 'text-[#697386] font-medium',
+    loader: 'text-[#635bff]',
+  },
+
+  // ========== GITHUB (Primer Dark Style) ==========
+  github: {
+    container: 'min-h-screen bg-[#0d1117] text-[#c9d1d9] p-6 font-sans',
+    headerTitle: 'text-2xl font-semibold text-[#c9d1d9] tracking-tight',
+    headerSubtitle: 'text-sm text-[#8b949e] mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-[#161b22] border border-[#30363d] rounded-md',
+    countdownText: 'text-[#58a6ff] font-semibold',
+    countdownLabel: 'text-[#8b949e]',
+    card: 'bg-[#161b22] border border-[#30363d] rounded-md p-5 transition-all duration-200',
+    cardHover: 'hover:border-[#8b949e]',
+    modelName: 'font-semibold text-[#c9d1d9] truncate max-w-md hover:text-[#58a6ff] transition-colors',
+    statsText: 'text-sm text-[#8b949e]',
+    statsValue: 'text-[#c9d1d9] font-semibold',
+    statusGreen: 'bg-[#238636]', // Primer Green
+    statusYellow: 'bg-[#9e6a03]', // Primer Yellow
+    statusRed: 'bg-[#da3633]', // Primer Red
+    statusEmpty: 'bg-[#21262d]',
+    statusHover: 'hover:brightness-110 transition-all',
+    badgeGreen: 'bg-[#238636]/15 text-[#3fb950] border border-[#238636]/40 px-2 py-0.5 text-xs font-medium rounded-2xl',
+    badgeYellow: 'bg-[#9e6a03]/15 text-[#d29922] border border-[#9e6a03]/40 px-2 py-0.5 text-xs font-medium rounded-2xl',
+    badgeRed: 'bg-[#da3633]/15 text-[#f85149] border border-[#da3633]/40 px-2 py-0.5 text-xs font-medium rounded-2xl',
+    timeLabel: 'text-xs text-[#8b949e]',
+    tooltip: 'bg-[#161b22] border border-[#30363d] rounded-md shadow-xl p-3 z-[9999]',
+    tooltipTitle: 'font-semibold text-[#c9d1d9] mb-2 pb-2 border-b border-[#30363d]',
+    tooltipLabel: 'text-[#8b949e] text-xs',
+    tooltipValue: 'text-[#c9d1d9] font-mono text-sm',
+    legendText: 'text-xs text-[#8b949e]',
+    legendDot: 'w-2.5 h-2.5 rounded-sm', // GitHub contribution cells are slightly rounded squares
+    emptyText: 'text-[#8b949e]',
+    loader: 'text-[#58a6ff]',
+  },
+
+  // ========== DISCORD (Gaming Style) ==========
+  discord: {
+    container: 'min-h-screen bg-[#313338] text-[#dbdee1] p-6 font-sans',
+    headerTitle: 'text-2xl font-black text-[#f2f3f5] tracking-tight uppercase',
+    headerSubtitle: 'text-sm text-[#949ba4] mt-1.5 font-medium',
+    countdownBox: 'flex items-center gap-2 px-3 py-1.5 text-sm bg-[#1e1f22] rounded-[4px] shadow-sm',
+    countdownText: 'text-[#5865F2] font-bold', // Blurple
+    countdownLabel: 'text-[#949ba4]',
+    card: 'bg-[#2b2d31] rounded-[4px] p-5 transition-all duration-200 group',
+    cardHover: 'hover:bg-[#404249] hover:shadow-md',
+    modelName: 'font-bold text-[#f2f3f5] truncate max-w-md group-hover:text-white transition-colors',
+    statsText: 'text-sm text-[#949ba4] font-medium',
+    statsValue: 'text-[#f2f3f5] font-bold',
+    statusGreen: 'bg-[#23a559]',
+    statusYellow: 'bg-[#f0b232]',
+    statusRed: 'bg-[#da373c]',
+    statusEmpty: 'bg-[#1e1f22]',
+    statusHover: 'hover:scale-110 transition-transform origin-center',
+    badgeGreen: 'bg-[#23a559]/20 text-[#23a559] px-2 py-0.5 text-xs font-bold rounded-[4px]',
+    badgeYellow: 'bg-[#f0b232]/20 text-[#f0b232] px-2 py-0.5 text-xs font-bold rounded-[4px]',
+    badgeRed: 'bg-[#da373c]/20 text-[#da373c] px-2 py-0.5 text-xs font-bold rounded-[4px]',
+    timeLabel: 'text-[10px] text-[#949ba4] font-bold uppercase tracking-wide',
+    tooltip: 'bg-[#111214] rounded-[4px] shadow-xl p-3 z-[9999]',
+    tooltipTitle: 'font-bold text-[#f2f3f5] mb-2',
+    tooltipLabel: 'text-[#b5bac1] text-xs font-bold uppercase',
+    tooltipValue: 'text-[#f2f3f5] font-bold',
+    legendText: 'text-xs text-[#949ba4] font-bold',
+    legendDot: 'w-3 h-3 rounded-full',
+    emptyText: 'text-[#949ba4] font-medium',
+    loader: 'text-[#5865F2]',
+  },
+
+  // ========== TESLA (Industrial Future Style) ==========
+  tesla: {
+    container: 'min-h-screen bg-black text-white p-6 font-sans',
+    headerTitle: 'text-2xl font-medium tracking-[0.15em] uppercase text-white',
+    headerSubtitle: 'text-sm text-[#666] mt-2 tracking-wide uppercase',
+    countdownBox: 'flex items-center gap-2 px-4 py-1.5 text-sm border border-[#333] rounded-none',
+    countdownText: 'text-[#e82127] font-medium tracking-wider', // Tesla Red
+    countdownLabel: 'text-[#666] uppercase text-xs tracking-wider',
+    card: 'bg-[#111] border-t-2 border-[#333] p-5 transition-all duration-300 hover:bg-[#181818]',
+    cardHover: 'hover:border-[#e82127] hover:shadow-[0_-4px_10px_rgba(232,33,39,0.2)]',
+    modelName: 'font-medium text-white truncate max-w-md tracking-wider uppercase',
+    statsText: 'text-sm text-[#666] tracking-wide uppercase',
+    statsValue: 'text-white font-medium',
+    statusGreen: 'bg-white', // Minimalist white for good status in dark mode
+    statusYellow: 'bg-[#e82127]', // Use red for warning/error to keep palette strict
+    statusRed: 'bg-[#e82127]',
+    statusEmpty: 'bg-[#222]',
+    statusHover: 'hover:bg-[#e82127] transition-colors',
+    badgeGreen: 'border border-white text-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em]',
+    badgeYellow: 'border border-[#e82127] text-[#e82127] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em]',
+    badgeRed: 'bg-[#e82127] text-white px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em]',
+    timeLabel: 'text-[10px] text-[#444] tracking-[0.2em] uppercase',
+    tooltip: 'bg-black border border-[#333] shadow-[0_0_30px_rgba(0,0,0,0.8)] p-4 z-[9999]',
+    tooltipTitle: 'font-medium text-white mb-3 pb-2 border-b border-[#333] tracking-widest uppercase text-xs',
+    tooltipLabel: 'text-[#666] text-[10px] uppercase tracking-wider',
+    tooltipValue: 'text-white font-medium tracking-wide',
+    legendText: 'text-[10px] text-[#666] tracking-[0.1em] uppercase',
+    legendDot: 'w-2 h-2 rounded-none',
+    emptyText: 'text-[#444] uppercase tracking-wider',
+    loader: 'text-[#e82127]',
   },
 }
 
