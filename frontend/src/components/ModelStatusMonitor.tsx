@@ -752,7 +752,13 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState<string | null>(null)
   
   // Get current origin for embed URL
-  const embedUrl = `${window.location.origin}/embed`
+  const currentOrigin = window.location.origin
+  const embedPath = '/embed.html'
+  const embedUrl = `${currentOrigin}${embedPath}`
+  
+  // Check if using IP address (recommend using domain with HTTPS)
+  const isIpAddress = /^https?:\/\/(\d{1,3}\.){3}\d{1,3}/.test(currentOrigin)
+  const isHttps = currentOrigin.startsWith('https://')
   
   const codeExamples = {
     basic: `<iframe 
@@ -806,6 +812,22 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
         
         {/* Content */}
         <div className="p-4 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+          {/* Security Warning for IP/HTTP */}
+          {(isIpAddress || !isHttps) && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+              <h3 className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-2">⚠️ 安全建议</h3>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                {isIpAddress && (
+                  <li>• 当前使用 IP 地址访问，建议配置域名以获得更好的兼容性</li>
+                )}
+                {!isHttps && (
+                  <li>• 当前使用 HTTP 协议，<strong>强烈建议</strong>使用 HTTPS 以确保数据安全</li>
+                )}
+                <li>• 示例：<code className="bg-muted px-1 rounded">https://your-domain.com{embedPath}</code></li>
+              </ul>
+            </div>
+          )}
+
           {/* Embed URL */}
           <div>
             <h3 className="text-sm font-medium mb-2">嵌入地址</h3>
@@ -894,7 +916,8 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
             <ul className="text-sm text-muted-foreground space-y-1">
               <li>• 在主界面选择的模型、主题、刷新间隔会自动同步到嵌入页面</li>
               <li>• 嵌入页面使用独立的公开 API，不需要认证</li>
-              <li>• 建议使用 HTTPS 以确保安全性</li>
+              <li>• <strong>推荐使用域名 + HTTPS</strong> 方式部署，确保安全性和兼容性</li>
+              <li>• 部分浏览器可能阻止 HTTP iframe 嵌入到 HTTPS 页面</li>
             </ul>
           </div>
         </div>
@@ -904,7 +927,7 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-          <Button onClick={() => window.open(embedUrl, '_blank')}>
+          <Button onClick={() => window.open(`${currentOrigin}${embedPath}`, '_blank')}>
             预览嵌入页面
           </Button>
         </div>
