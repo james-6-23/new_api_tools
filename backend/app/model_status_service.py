@@ -406,7 +406,7 @@ def get_model_status_service() -> ModelStatusService:
     return _model_status_service
 
 
-async def warmup_model_status(max_models: int = 100) -> Dict[str, Any]:
+async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
     Warms up ALL time windows (1h, 6h, 12h, 24h) for each model.
@@ -418,7 +418,7 @@ async def warmup_model_status(max_models: int = 100) -> Dict[str, Any]:
     - Longer delay between batches
 
     Args:
-        max_models: Maximum number of models to warmup (default 100).
+        max_models: Maximum number of models to warmup (0 = all models).
 
     Returns:
         Warmup result with success count and timing.
@@ -430,7 +430,7 @@ async def warmup_model_status(max_models: int = 100) -> Dict[str, Any]:
 
     # Get available models (force refresh to get latest list)
     models = service.get_available_models(use_cache=False)
-    models_to_warmup = models[:max_models]
+    models_to_warmup = models[:max_models] if max_models > 0 else models
 
     if not models_to_warmup:
         logger.info("[模型状态] 无可用模型，跳过预热")
