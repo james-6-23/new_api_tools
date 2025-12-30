@@ -581,10 +581,12 @@ async def _warmup_ip_monitoring_data():
     3. 支持缓存复用（key不包含limit）
     """
     from .ip_monitoring_service import get_ip_monitoring_service, WINDOW_SECONDS
+    from .cache_manager import get_cache_manager
 
     logger.phase(5, "预热 IP 监控数据")
 
     ip_service = get_ip_monitoring_service()
+    cache = get_cache_manager()
     IP_WARMUP_LIMIT = 200
     IP_WARMUP_WINDOWS = ["1h", "24h", "7d"]
 
