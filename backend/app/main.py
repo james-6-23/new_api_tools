@@ -124,6 +124,30 @@ async def lifespan(app: FastAPI):
         db.connect()
         logger.system(f"数据库连接成功: {db.config.engine.value} @ {db.config.host}:{db.config.port}")
         
+        # 检查并清理冗余索引，然后检查索引状态
+        try:
+            # 先分析索引情况
+            analysis = db.get_logs_index_analysis()
+            system_count = analysis.get('system_count', 0)
+            ours_count = analysis.get('ours_count', 0)
+            redundant_count = analysis.get('redundant_count', 0)
+            unknown_count = analysis.get('unknown_count', 0)
+            
+            # 始终输出索引分析结果
+            logger.system(f"Logs表索引分析: 系统={system_count}, 工具={ours_count}, 冗余={redundant_count}, 未知={unknown_count}")
+            
+            if redundant_count > 0:
+                redundant_list = analysis.get('details', {}).get('redundant', [])
+                logger.system(f"发现 {redundant_count} 个冗余索引: {redundant_list}，开始清理...")
+                cleanup_result = db.cleanup_redundant_indexes(log_progress=True)
+                deleted = cleanup_result.get("deleted", 0)
+                if deleted > 0:
+                    logger.system(f"已清理 {deleted} 个冗余索引: {cleanup_result.get('deleted_indexes', [])}")
+                else:
+                    logger.system(f"冗余索引清理完成，无需删除")
+        except Exception as e:
+            logger.warning(f"索引分析/清理失败: {e}", category="数据库")
+        
         # 检查索引状态并输出
         index_status = db.get_index_status()
         if index_status["all_ready"]:
