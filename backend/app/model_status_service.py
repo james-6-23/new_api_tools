@@ -16,7 +16,8 @@ LOG_TYPE_CONSUMPTION = 2  # type=2 is consumption/usage log (success)
 LOG_TYPE_FAILURE = 5  # type=5 is failure log (request failed)
 
 # Cache TTL in seconds
-CACHE_TTL = 60  # 1 minute cache
+# Should be <= minimum frontend refresh interval (30s) to ensure data freshness
+CACHE_TTL = 30  # 30 seconds cache
 
 # Time window configurations: (total_seconds, num_slots, slot_seconds)
 TIME_WINDOWS = {
@@ -389,57 +390,65 @@ def get_model_status_service() -> ModelStatusService:
 async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
-    
+    Warms up ALL time windows (1h, 6h, 12h, 24h) for each model.
+
     Args:
         max_models: Maximum number of models to warmup (default 50).
-        
+
     Returns:
         Warmup result with success count and timing.
     """
     import asyncio
-    
+
     service = get_model_status_service()
     start_time = time.time()
-    
+
     # Get available models
     models = service.get_available_models()
     models_to_warmup = models[:max_models]
-    
+
     if not models_to_warmup:
         logger.info("[模型状态] 无可用模型，跳过预热")
         return {
             "success": True,
             "models_warmed": 0,
+            "windows_warmed": 0,
             "elapsed": 0,
         }
-    
-    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型状态...")
-    
+
+    # Get all time windows
+    time_windows = list(TIME_WINDOWS.keys())  # ['1h', '6h', '12h', '24h']
+    total_tasks = len(models_to_warmup) * len(time_windows)
+
+    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存...")
+
     success_count = 0
-    failed_models = []
-    
+    failed_tasks = []
+
     for model_name in models_to_warmup:
-        try:
-            # Force refresh cache
-            service.get_model_status(model_name, use_cache=False)
-            success_count += 1
-            # Small delay to avoid overwhelming the database
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            logger.warn(f"[模型状态] 预热 {model_name} 失败: {e}")
-            failed_models.append(model_name)
-    
+        for window in time_windows:
+            try:
+                # Force refresh cache for each time window
+                service.get_model_status(model_name, time_window=window, use_cache=False)
+                success_count += 1
+                # Small delay to avoid overwhelming the database
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                logger.warn(f"[模型状态] 预热 {model_name}@{window} 失败: {e}")
+                failed_tasks.append(f"{model_name}@{window}")
+
     elapsed = time.time() - start_time
-    
-    if failed_models:
-        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{len(models_to_warmup)}，失败: {', '.join(failed_models[:5])}")
+
+    if failed_tasks:
+        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{total_tasks}，失败 {len(failed_tasks)} 个")
     else:
-        logger.info(f"[模型状态] 预热完成，{success_count} 个模型，耗时 {elapsed:.1f}s")
-    
+        logger.info(f"[模型状态] 预热完成: {len(models_to_warmup)} 模型 × {len(time_windows)} 窗口 = {success_count} 缓存，耗时 {elapsed:.1f}s")
+
     return {
         "success": True,
-        "models_warmed": success_count,
-        "total_models": len(models_to_warmup),
-        "failed": failed_models,
+        "models_warmed": len(models_to_warmup),
+        "windows_warmed": len(time_windows),
+        "total_cached": success_count,
+        "failed": len(failed_tasks),
         "elapsed": round(elapsed, 2),
     }

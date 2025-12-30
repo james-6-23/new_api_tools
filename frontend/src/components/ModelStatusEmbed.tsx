@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Sparkles, Minimize2 } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2 } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -27,7 +27,7 @@ interface ModelStatus {
   slot_data: SlotStatus[]
 }
 
-type ThemeId = 'obsidian' | 'daylight' | 'aurora' | 'minimal' | 'neon'
+type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon'
 
 interface ThemeConfig {
   id: ThemeId
@@ -44,7 +44,6 @@ interface ThemeConfig {
 export const THEMES: ThemeConfig[] = [
   { id: 'daylight', name: '日光', nameEn: 'Daylight', icon: Sun, description: '明亮清新的浅色主题' },
   { id: 'obsidian', name: '黑曜石', nameEn: 'Obsidian', icon: Moon, description: '经典深色主题，专业稳重' },
-  { id: 'aurora', name: '极光', nameEn: 'Aurora', icon: Sparkles, description: '玻璃拟态，梦幻通透' },
   { id: 'minimal', name: '极简', nameEn: 'Minimal', icon: Minimize2, description: '极度精简，适合嵌入' },
   { id: 'neon', name: '霓虹', nameEn: 'Neon', icon: Zap, description: '赛博朋克，科技感十足' },
 ]
@@ -150,40 +149,6 @@ const themeStyles: Record<ThemeId, {
     legendDot: 'w-3 h-3 rounded shadow-sm',
     emptyText: 'text-slate-400',
     loader: 'text-slate-400',
-  },
-
-  // ========== AURORA (Glassmorphism Theme) ==========
-  aurora: {
-    container: 'min-h-screen text-white p-6 relative overflow-hidden',
-    background: `
-      background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-    `,
-    headerTitle: 'text-2xl font-bold text-white tracking-tight drop-shadow-lg',
-    headerSubtitle: 'text-sm text-purple-200/70 mt-1.5',
-    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-lg',
-    countdownText: 'text-cyan-300 font-mono font-semibold',
-    countdownLabel: 'text-purple-200/60',
-    card: 'bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-5 shadow-xl transition-all duration-500',
-    cardHover: 'hover:bg-white/15 hover:border-white/30 hover:shadow-2xl hover:shadow-purple-500/10',
-    modelName: 'font-semibold text-white truncate max-w-md drop-shadow',
-    statsText: 'text-sm text-purple-200/70',
-    statsValue: 'text-white font-semibold',
-    statusGreen: 'bg-gradient-to-t from-emerald-600 to-emerald-400',
-    statusYellow: 'bg-gradient-to-t from-amber-600 to-amber-400',
-    statusRed: 'bg-gradient-to-t from-rose-600 to-rose-400',
-    statusHover: 'hover:shadow-lg hover:shadow-current/50 hover:scale-y-125 origin-bottom',
-    badgeGreen: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 backdrop-blur',
-    badgeYellow: 'bg-amber-500/20 text-amber-300 border border-amber-400/30 backdrop-blur',
-    badgeRed: 'bg-rose-500/20 text-rose-300 border border-rose-400/30 backdrop-blur',
-    timeLabel: 'text-xs text-purple-300/50 font-mono',
-    tooltip: 'bg-slate-900/80 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl p-4',
-    tooltipTitle: 'font-semibold text-white mb-3 pb-2 border-b border-white/10',
-    tooltipLabel: 'text-purple-200/60',
-    tooltipValue: 'text-white font-medium',
-    legendText: 'text-xs text-purple-200/50',
-    legendDot: 'w-3 h-3 rounded shadow-lg',
-    emptyText: 'text-purple-200/50',
-    loader: 'text-purple-300',
   },
 
   // ========== MINIMAL (Ultra Simple Theme) ==========
@@ -376,7 +341,8 @@ export function ModelStatusEmbed({
   }, [loadConfig])
 
   // Fetch model statuses
-  const fetchModelStatuses = useCallback(async () => {
+  // forceRefresh: bypass cache to get fresh data
+  const fetchModelStatuses = useCallback(async (forceRefresh = false) => {
     if (selectedModels.length === 0) {
       setModelStatuses([])
       setLoading(false)
@@ -384,7 +350,9 @@ export function ModelStatusEmbed({
     }
 
     try {
-      const response = await fetch(`${apiUrl}/api/model-status/embed/status/batch?window=${timeWindow}`, {
+      // Add no_cache=true when force refreshing to bypass backend cache
+      const cacheParam = forceRefresh ? '&no_cache=true' : ''
+      const response = await fetch(`${apiUrl}/api/model-status/embed/status/batch?window=${timeWindow}${cacheParam}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selectedModels),
@@ -414,7 +382,8 @@ export function ModelStatusEmbed({
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          fetchModelStatuses()
+          // Auto refresh should get fresh data
+          fetchModelStatuses(true)
           return refreshInterval
         }
         return prev - 1
@@ -441,14 +410,6 @@ export function ModelStatusEmbed({
       className={styles.container}
       style={styles.background ? { background: styles.background.replace(/\s+/g, ' ') } : undefined}
     >
-      {/* Aurora theme decorative elements */}
-      {theme === 'aurora' && (
-        <>
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-[120px] pointer-events-none" />
-          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/20 rounded-full blur-[120px] pointer-events-none" />
-        </>
-      )}
-
       {/* Neon theme scan line effect */}
       {theme === 'neon' && (
         <div className="absolute inset-0 pointer-events-none overflow-hidden">

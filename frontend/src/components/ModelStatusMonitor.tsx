@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Sparkles, Minimize2, Zap } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -56,7 +56,6 @@ const TIME_WINDOWS = [
 const THEMES = [
   { id: 'daylight', name: '日光', nameEn: 'Daylight', icon: Sun, description: '明亮清新的浅色', preview: 'bg-slate-100' },
   { id: 'obsidian', name: '黑曜石', nameEn: 'Obsidian', icon: Moon, description: '经典深色，专业稳重', preview: 'bg-[#0d1117]' },
-  { id: 'aurora', name: '极光', nameEn: 'Aurora', icon: Sparkles, description: '玻璃拟态，梦幻通透', preview: 'bg-gradient-to-r from-purple-900 to-indigo-900' },
   { id: 'minimal', name: '极简', nameEn: 'Minimal', icon: Minimize2, description: '极度精简，适合嵌入', preview: 'bg-white' },
   { id: 'neon', name: '霓虹', nameEn: 'Neon', icon: Zap, description: '赛博朋克，科技感', preview: 'bg-black' },
 ]
@@ -296,19 +295,22 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   }, [apiUrl, getApiPrefix, getAuthHeaders, loadConfigFromBackend, saveSelectedModelsToBackend])
 
   // Fetch model statuses
-  const fetchModelStatuses = useCallback(async (showLoadingToast = false) => {
+  // forceRefresh: bypass cache to get fresh data (used for manual refresh)
+  const fetchModelStatuses = useCallback(async (forceRefresh = false) => {
     if (selectedModels.length === 0) {
       setModelStatuses([])
       setLoading(false)
       return
     }
 
-    if (showLoadingToast) {
+    if (forceRefresh) {
       setRefreshing(true)
     }
 
     try {
-      const response = await fetch(`${apiUrl}${getApiPrefix()}/status/batch?window=${timeWindow}`, {
+      // Add no_cache=true when force refreshing to bypass backend cache
+      const cacheParam = forceRefresh ? '&no_cache=true' : ''
+      const response = await fetch(`${apiUrl}${getApiPrefix()}/status/batch?window=${timeWindow}${cacheParam}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify(selectedModels),
@@ -345,7 +347,8 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          fetchModelStatuses()
+          // Auto refresh should also get fresh data
+          fetchModelStatuses(true)
           return refreshIntervalRef.current
         }
         return prev - 1
@@ -560,15 +563,17 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                   variant="outline"
                   size="sm"
                   onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
-                  className="h-9 min-w-[100px]"
+                  className="h-9 w-[120px] justify-between"
                 >
-                  <Timer className="h-4 w-4 mr-2" />
-                  {refreshInterval > 0 && countdown > 0 ? (
-                    <span className="text-primary font-medium">{formatCountdown(countdown)}</span>
-                  ) : (
-                    '自动刷新'
-                  )}
-                  <ChevronDown className="h-3 w-3 ml-1" />
+                  <div className="flex items-center">
+                    <Timer className="h-4 w-4 mr-2 flex-shrink-0" />
+                    {refreshInterval > 0 && countdown > 0 ? (
+                      <span className="text-primary font-medium tabular-nums">{formatCountdown(countdown)}</span>
+                    ) : (
+                      <span>自动刷新</span>
+                    )}
+                  </div>
+                  <ChevronDown className="h-3 w-3 flex-shrink-0" />
                 </Button>
 
                 {showIntervalDropdown && (
@@ -712,7 +717,8 @@ function ModelStatusCard({ model }: ModelStatusCardProps) {
                 key={index}
                 className={cn(
                   "flex-1 h-8 rounded cursor-pointer transition-all hover:ring-2 hover:ring-primary hover:ring-offset-1",
-                  STATUS_COLORS[slot.status]
+                  STATUS_COLORS[slot.status],
+                  slot.total_requests === 0 && "opacity-30"
                 )}
                 onMouseEnter={(e) => handleMouseEnter(slot, e)}
                 onMouseLeave={() => setHoveredSlot(null)}
