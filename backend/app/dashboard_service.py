@@ -554,6 +554,151 @@ class DashboardService:
             for row in result
         ]
 
+    # ==================== 槽数据查询方法（用于增量缓存）====================
+
+    def get_model_usage_slot(
+        self,
+        start_time: int,
+        end_time: int,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取单个时间槽的模型使用数据（用于增量缓存）
+
+        Args:
+            start_time: 槽开始时间戳
+            end_time: 槽结束时间戳
+            limit: 每个槽最多返回的模型数（默认 100，足够聚合）
+
+        Returns:
+            List of model usage data for this slot
+        """
+        sql = """
+            SELECT
+                model_name,
+                COUNT(*) as request_count,
+                COALESCE(SUM(quota), 0) as quota_used,
+                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) as completion_tokens
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND type = 2
+                AND model_name IS NOT NULL AND model_name != ''
+            GROUP BY model_name
+            ORDER BY request_count DESC
+            LIMIT :limit
+        """
+        result = self.db.execute(sql, {
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+        })
+
+        return [
+            {
+                "model_name": row["model_name"],
+                "request_count": int(row["request_count"] or 0),
+                "quota_used": int(row["quota_used"] or 0),
+                "prompt_tokens": int(row["prompt_tokens"] or 0),
+                "completion_tokens": int(row["completion_tokens"] or 0),
+            }
+            for row in result
+        ]
+
+    def get_usage_statistics_slot(
+        self,
+        start_time: int,
+        end_time: int,
+    ) -> Dict[str, Any]:
+        """
+        获取单个时间槽的使用统计数据（用于增量缓存）
+
+        Args:
+            start_time: 槽开始时间戳
+            end_time: 槽结束时间戳
+
+        Returns:
+            Usage statistics for this slot
+        """
+        sql = """
+            SELECT
+                COUNT(*) as total_requests,
+                COALESCE(SUM(quota), 0) as total_quota,
+                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+                COALESCE(AVG(use_time), 0) as avg_time
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND type = 2
+        """
+        result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
+        row = result[0] if result else {}
+
+        return {
+            "total_requests": int(row.get("total_requests", 0) or 0),
+            "total_quota_used": int(row.get("total_quota", 0) or 0),
+            "total_prompt_tokens": int(row.get("prompt_tokens", 0) or 0),
+            "total_completion_tokens": int(row.get("completion_tokens", 0) or 0),
+            "average_response_time": float(row.get("avg_time", 0) or 0),
+        }
+
+    def get_top_users_slot(
+        self,
+        start_time: int,
+        end_time: int,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取单个时间槽的用户排行数据（用于增量缓存）
+
+        Args:
+            start_time: 槽开始时间戳
+            end_time: 槽结束时间戳
+            limit: 每个槽最多返回的用户数（默认 100，足够聚合）
+
+        Returns:
+            List of user ranking data for this slot
+        """
+        from .database import DatabaseEngine
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+
+        if is_pg:
+            username_fallback = "'User#' || l.user_id::text"
+        else:
+            username_fallback = "CONCAT('User#', l.user_id)"
+
+        sql = f"""
+            SELECT
+                l.user_id,
+                COALESCE(u.username, {username_fallback}) as username,
+                COUNT(*) as request_count,
+                COALESCE(SUM(l.quota), 0) as quota_used
+            FROM logs l
+            LEFT JOIN users u ON l.user_id = u.id
+            WHERE l.created_at >= :start_time AND l.created_at < :end_time
+                AND l.type = 2
+                AND l.user_id IS NOT NULL
+            GROUP BY l.user_id, u.username
+            ORDER BY quota_used DESC
+            LIMIT :limit
+        """
+
+        result = self.db.execute(sql, {
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+        })
+
+        return [
+            {
+                "user_id": int(row["user_id"]),
+                "username": str(row["username"] or f"User#{row['user_id']}"),
+                "request_count": int(row["request_count"] or 0),
+                "quota_used": int(row["quota_used"] or 0),
+            }
+            for row in result
+        ]
+
 
 # Global service instance
 _dashboard_service: Optional[DashboardService] = None

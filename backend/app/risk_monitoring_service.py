@@ -158,12 +158,21 @@ class RiskMonitoringService:
             # Cache miss - query database (只读)
             if log_progress:
                 logger.debug(f"[预热] {w} 缓存未命中，查询数据库...")
-            
-            raw_data = self._get_leaderboard_raw(
-                window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
-            )
+
+            # 对 3d/7d 使用增量缓存查询
+            if self.cache.is_incremental_window(w):
+                if log_progress:
+                    logger.info(f"[预热] {w} 使用增量缓存模式")
+                raw_data = self._get_leaderboard_incremental(
+                    window=w, limit=limit, now=now, sort_by=sort_by, log_progress=log_progress
+                )
+            else:
+                raw_data = self._get_leaderboard_raw(
+                    window_seconds=seconds, limit=limit, now=now, sort_by=sort_by
+                )
+
             window_results[w] = raw_data
-            
+
             if log_progress:
                 logger.debug(f"[预热] {w} 数据库返回 {len(raw_data)} 条数据")
 
@@ -209,6 +218,135 @@ class RiskMonitoringService:
 
         # Per-window cache already updated above, no need for combined cache
         return result
+
+    def _get_leaderboard_incremental(
+        self,
+        window: str,
+        limit: int,
+        now: int,
+        sort_by: str,
+        log_progress: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        增量获取排行榜数据（仅用于 3d/7d）
+
+        流程：
+        1. 计算需要的所有槽
+        2. 检查已缓存的槽
+        3. 只查询缺失的槽
+        4. 聚合所有槽数据生成 Top N
+        """
+        # 获取缺失的槽和已缓存的槽
+        missing_slots, cached_slots = self.cache.get_missing_slots(window, sort_by, now)
+
+        if log_progress:
+            total_slots = len(missing_slots) + len(cached_slots)
+            logger.info(
+                f"[增量预热] {window} 槽状态",
+                总槽数=total_slots,
+                已缓存=len(cached_slots),
+                待查询=len(missing_slots),
+            )
+
+        # 查询缺失的槽
+        for slot in missing_slots:
+            slot_start = slot["slot_start"]
+            slot_end = slot["slot_end"]
+
+            if log_progress:
+                from datetime import datetime
+                start_str = datetime.fromtimestamp(slot_start).strftime("%m-%d %H:%M")
+                end_str = datetime.fromtimestamp(slot_end).strftime("%m-%d %H:%M")
+                logger.debug(f"[增量预热] 查询槽 {start_str} ~ {end_str}")
+
+            # 查询该槽的数据（不限制 limit，获取所有用户）
+            slot_data = self._get_slot_data(slot_start, slot_end, sort_by)
+
+            # 保存到槽缓存
+            self.cache.set_slot(window, sort_by, slot_start, slot_end, slot_data)
+
+            # 添加到已缓存的槽
+            cached_slots[slot_start] = {
+                "slot_end": slot_end,
+                "data": slot_data,
+            }
+
+            if log_progress:
+                logger.debug(f"[增量预热] 槽缓存完成，用户数={len(slot_data)}")
+
+        # 聚合所有槽数据
+        result = self.cache.aggregate_slots(cached_slots, sort_by, limit)
+
+        if log_progress:
+            logger.success(
+                f"[增量预热] {window} 聚合完成",
+                槽数=len(cached_slots),
+                Top用户数=len(result),
+            )
+
+        return result
+
+    def _get_slot_data(
+        self,
+        start_time: int,
+        end_time: int,
+        sort_by: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        查询单个时间槽的用户聚合数据（不限制数量）
+
+        注意：返回该槽内所有活跃用户的数据，用于后续跨槽聚合
+        """
+        order_by_map = {
+            "requests": "total_requests DESC",
+            "quota": "quota_used DESC",
+            "failure_rate": "failure_rate DESC, total_requests DESC",
+        }
+        order_by = order_by_map.get(sort_by, order_by_map["requests"])
+
+        # 查询该槽内所有用户的聚合数据
+        # 为了控制数据量，限制最多 500 个用户（Top 500 足够覆盖 Top 50 聚合）
+        sql = """
+            SELECT
+                user_id,
+                MAX(username) as username,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+                (SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) * 1.0) / NULLIF(COUNT(*), 0) as failure_rate,
+                COALESCE(SUM(quota), 0) as quota_used,
+                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+                COUNT(DISTINCT NULLIF(ip, '')) as unique_ips
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND type IN (2, 5)
+                AND user_id IS NOT NULL
+            GROUP BY user_id
+            ORDER BY """ + order_by + """
+            LIMIT 500
+        """
+
+        try:
+            self.db.connect()
+            rows = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
+        except Exception as e:
+            logger.db_error(f"获取槽数据失败: {e}")
+            return []
+
+        return [
+            {
+                "user_id": int(r.get("user_id") or 0),
+                "username": r.get("username") or "",
+                "request_count": int(r.get("total_requests") or 0),
+                "failure_requests": int(r.get("failure_requests") or 0),
+                "failure_rate": float(r.get("failure_rate") or 0),
+                "quota_used": int(r.get("quota_used") or 0),
+                "prompt_tokens": int(r.get("prompt_tokens") or 0),
+                "completion_tokens": int(r.get("completion_tokens") or 0),
+                "unique_ips": int(r.get("unique_ips") or 0),
+            }
+            for r in rows
+        ]
 
     def _get_leaderboard_raw(
         self,

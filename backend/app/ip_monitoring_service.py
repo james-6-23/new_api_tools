@@ -45,7 +45,7 @@ class IPMonitoringService:
         if self._db is None:
             self._db = get_db_manager()
         return self._db
-    
+
     @property
     def cache(self):
         """获取缓存管理器（延迟加载）"""
@@ -53,13 +53,17 @@ class IPMonitoringService:
             from .cache_manager import get_cache_manager
             self._cache_manager = get_cache_manager()
         return self._cache_manager
-    
+
     def _get_window_name(self, window_seconds: int) -> str:
         """将秒数转换为窗口名称"""
         for name, seconds in WINDOW_SECONDS.items():
             if seconds == window_seconds:
                 return name
         return f"{window_seconds}s"
+
+    def _is_incremental_window(self, window_name: str) -> bool:
+        """判断是否使用增量缓存的窗口"""
+        return self.cache.is_incremental_window(window_name)
 
     def get_ip_recording_stats(self, use_cache: bool = True) -> Dict[str, Any]:
         """
@@ -169,11 +173,14 @@ class IPMonitoringService:
         limit: int = 50,
         now: Optional[int] = None,
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         Get IPs that are used by multiple tokens.
         Helps identify potential account sharing.
         Optimized: single query with aggregated token info.
+
+        对于 3d/7d 窗口，使用增量缓存模式。
         """
         if now is None:
             now = int(time.time())
@@ -185,6 +192,31 @@ class IPMonitoringService:
             cached = self.cache.get_ip_monitoring("shared_ips", window_name, limit)
             if cached is not None:
                 return {"items": cached, "total": len(cached)}
+
+        # 对 3d/7d 使用增量缓存模式
+        if self._is_incremental_window(window_name):
+            if log_progress:
+                logger.info(f"[IP监控] shared_ips@{window_name} 使用增量缓存模式")
+
+            # 增量获取基础数据
+            base_items = self._get_incremental_data(
+                "shared_ips", window_name, now, min_tokens, limit, log_progress
+            )
+
+            # 对 Top N 结果获取详情（tokens 列表）
+            items = self._enrich_shared_ips_details(base_items, start_time, now)
+
+            # 保存到缓存
+            ttl = _get_cache_ttl()
+            self.cache.set_ip_monitoring("shared_ips", window_name, items, ttl)
+            logger.success(
+                f"IP监控 缓存更新: shared_ips [增量]",
+                window=window_name,
+                items=len(items),
+                TTL=f"{ttl}s"
+            )
+
+            return {"items": items, "total": len(items)}
         
         self.db.connect()
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
@@ -372,11 +404,14 @@ class IPMonitoringService:
         limit: int = 50,
         now: Optional[int] = None,
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         Get tokens that are used from multiple IPs.
         Helps identify potential token sharing or leakage.
         Optimized: batch query for IP details to avoid N+1 problem.
+
+        对于 3d/7d 窗口，使用增量缓存模式。
         """
         if now is None:
             now = int(time.time())
@@ -388,6 +423,31 @@ class IPMonitoringService:
             cached = self.cache.get_ip_monitoring("multi_ip_tokens", window_name, limit)
             if cached is not None:
                 return {"items": cached, "total": len(cached)}
+
+        # 对 3d/7d 使用增量缓存模式
+        if self._is_incremental_window(window_name):
+            if log_progress:
+                logger.info(f"[IP监控] multi_ip_tokens@{window_name} 使用增量缓存模式")
+
+            # 增量获取基础数据
+            base_items = self._get_incremental_data(
+                "multi_ip_tokens", window_name, now, min_ips, limit, log_progress
+            )
+
+            # 对 Top N 结果获取详情（ips 列表）
+            items = self._enrich_multi_ip_tokens_details(base_items, start_time, now)
+
+            # 保存到缓存
+            ttl = _get_cache_ttl()
+            self.cache.set_ip_monitoring("multi_ip_tokens", window_name, items, ttl)
+            logger.success(
+                f"IP监控 缓存更新: multi_ip_tokens [增量]",
+                window=window_name,
+                items=len(items),
+                TTL=f"{ttl}s"
+            )
+
+            return {"items": items, "total": len(items)}
 
         self.db.connect()
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
@@ -492,11 +552,14 @@ class IPMonitoringService:
         limit: int = 50,
         now: Optional[int] = None,
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         Get users that access from multiple IPs.
         Helps identify potential account sharing.
         Optimized: batch query for IP details to avoid N+1 problem.
+
+        对于 3d/7d 窗口，使用增量缓存模式。
         """
         if now is None:
             now = int(time.time())
@@ -508,6 +571,31 @@ class IPMonitoringService:
             cached = self.cache.get_ip_monitoring("multi_ip_users", window_name, limit)
             if cached is not None:
                 return {"items": cached, "total": len(cached)}
+
+        # 对 3d/7d 使用增量缓存模式
+        if self._is_incremental_window(window_name):
+            if log_progress:
+                logger.info(f"[IP监控] multi_ip_users@{window_name} 使用增量缓存模式")
+
+            # 增量获取基础数据
+            base_items = self._get_incremental_data(
+                "multi_ip_users", window_name, now, min_ips, limit, log_progress
+            )
+
+            # 对 Top N 结果获取详情（top_ips 列表）
+            items = self._enrich_multi_ip_users_details(base_items, start_time, now)
+
+            # 保存到缓存
+            ttl = _get_cache_ttl()
+            self.cache.set_ip_monitoring("multi_ip_users", window_name, items, ttl)
+            logger.success(
+                f"IP监控 缓存更新: multi_ip_users [增量]",
+                window=window_name,
+                items=len(items),
+                TTL=f"{ttl}s"
+            )
+
+            return {"items": items, "total": len(items)}
 
         self.db.connect()
 
@@ -688,7 +776,7 @@ class IPMonitoringService:
         self.db.connect()
 
         sql = """
-            SELECT 
+            SELECT
                 ip,
                 COUNT(*) as request_count,
                 MIN(created_at) as first_seen,
@@ -722,6 +810,525 @@ class IPMonitoringService:
         except Exception as e:
             logger.db_error(f"获取用户 IP 列表失败: {e}")
             return []
+
+    # ==================== 增量缓存查询方法（3d/7d） ====================
+
+    def _get_shared_ips_slot_data(
+        self,
+        start_time: int,
+        end_time: int,
+        min_tokens: int = 2,
+    ) -> List[Dict[str, Any]]:
+        """
+        查询单个时间槽的共享 IP 基础数据（用于增量缓存）
+
+        返回格式：每个 IP 包含 token_ids 和 user_ids 列表，用于跨槽去重聚合
+        """
+        self.db.connect()
+
+        sql = """
+            SELECT
+                ip,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND ip IS NOT NULL AND ip <> ''
+                AND token_id IS NOT NULL AND token_id > 0
+            GROUP BY ip
+            HAVING COUNT(DISTINCT token_id) >= :min_tokens
+            ORDER BY COUNT(DISTINCT token_id) DESC
+            LIMIT 500
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": end_time,
+                "min_tokens": min_tokens,
+            })
+
+            if not rows:
+                return []
+
+            # 批量获取每个 IP 的 token_ids 和 user_ids
+            ips = [r.get("ip") for r in rows if r.get("ip")]
+            token_user_map = {}
+
+            if ips:
+                placeholders = ",".join([f":ip{i}" for i in range(len(ips))])
+                detail_sql = f"""
+                    SELECT
+                        ip,
+                        token_id,
+                        user_id
+                    FROM logs
+                    WHERE created_at >= :start_time AND created_at < :end_time
+                        AND ip IN ({placeholders})
+                        AND token_id IS NOT NULL AND token_id > 0
+                    GROUP BY ip, token_id, user_id
+                """
+                params = {"start_time": start_time, "end_time": end_time}
+                for i, ip in enumerate(ips):
+                    params[f"ip{i}"] = ip
+
+                detail_rows = self.db.execute(detail_sql, params)
+                for r in (detail_rows or []):
+                    ip = r.get("ip")
+                    if ip not in token_user_map:
+                        token_user_map[ip] = {"token_ids": set(), "user_ids": set()}
+                    if r.get("token_id"):
+                        token_user_map[ip]["token_ids"].add(r["token_id"])
+                    if r.get("user_id"):
+                        token_user_map[ip]["user_ids"].add(r["user_id"])
+
+            return [
+                {
+                    "ip": r.get("ip") or "",
+                    "request_count": int(r.get("request_count") or 0),
+                    "token_ids": list(token_user_map.get(r.get("ip"), {}).get("token_ids", [])),
+                    "user_ids": list(token_user_map.get(r.get("ip"), {}).get("user_ids", [])),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.db_error(f"获取共享IP槽数据失败: {e}")
+            return []
+
+    def _get_multi_ip_tokens_slot_data(
+        self,
+        start_time: int,
+        end_time: int,
+        min_ips: int = 2,
+    ) -> List[Dict[str, Any]]:
+        """
+        查询单个时间槽的多IP令牌基础数据（用于增量缓存）
+
+        返回格式：每个 token 包含 ips 列表，用于跨槽去重聚合
+        """
+        self.db.connect()
+
+        sql = """
+            SELECT
+                token_id,
+                COALESCE(MAX(token_name), '') as token_name,
+                MAX(user_id) as user_id,
+                COALESCE(MAX(username), '') as username,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND token_id IS NOT NULL AND token_id > 0
+            GROUP BY token_id
+            HAVING COUNT(DISTINCT NULLIF(ip, '')) >= :min_ips
+            ORDER BY COUNT(DISTINCT NULLIF(ip, '')) DESC
+            LIMIT 500
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": end_time,
+                "min_ips": min_ips,
+            })
+
+            if not rows:
+                return []
+
+            # 批量获取每个 token 的 IP 列表
+            token_ids = [int(r.get("token_id") or 0) for r in rows if r.get("token_id")]
+            ip_map = {}
+
+            if token_ids:
+                placeholders = ",".join([f":tid{i}" for i in range(len(token_ids))])
+                ip_sql = f"""
+                    SELECT DISTINCT token_id, ip
+                    FROM logs
+                    WHERE created_at >= :start_time AND created_at < :end_time
+                        AND token_id IN ({placeholders})
+                        AND ip IS NOT NULL AND ip <> ''
+                """
+                params = {"start_time": start_time, "end_time": end_time}
+                for i, tid in enumerate(token_ids):
+                    params[f"tid{i}"] = tid
+
+                ip_rows = self.db.execute(ip_sql, params)
+                for r in (ip_rows or []):
+                    tid = int(r.get("token_id") or 0)
+                    if tid not in ip_map:
+                        ip_map[tid] = set()
+                    if r.get("ip"):
+                        ip_map[tid].add(r["ip"])
+
+            return [
+                {
+                    "token_id": int(r.get("token_id") or 0),
+                    "token_name": r.get("token_name") or "",
+                    "user_id": int(r.get("user_id") or 0),
+                    "username": r.get("username") or "",
+                    "request_count": int(r.get("request_count") or 0),
+                    "ips": list(ip_map.get(int(r.get("token_id") or 0), [])),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.db_error(f"获取多IP令牌槽数据失败: {e}")
+            return []
+
+    def _get_multi_ip_users_slot_data(
+        self,
+        start_time: int,
+        end_time: int,
+        min_ips: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """
+        查询单个时间槽的多IP用户基础数据（用于增量缓存）
+
+        返回格式：每个 user 包含 ips 列表，用于跨槽去重聚合
+        """
+        self.db.connect()
+
+        sql = """
+            SELECT
+                user_id,
+                COALESCE(MAX(username), '') as username,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND user_id IS NOT NULL
+            GROUP BY user_id
+            HAVING COUNT(DISTINCT NULLIF(ip, '')) >= :min_ips
+            ORDER BY COUNT(DISTINCT NULLIF(ip, '')) DESC
+            LIMIT 500
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": end_time,
+                "min_ips": min_ips,
+            })
+
+            if not rows:
+                return []
+
+            # 批量获取每个用户的 IP 列表
+            user_ids = [int(r.get("user_id") or 0) for r in rows if r.get("user_id")]
+            ip_map = {}
+
+            if user_ids:
+                placeholders = ",".join([f":uid{i}" for i in range(len(user_ids))])
+                ip_sql = f"""
+                    SELECT DISTINCT user_id, ip
+                    FROM logs
+                    WHERE created_at >= :start_time AND created_at < :end_time
+                        AND user_id IN ({placeholders})
+                        AND ip IS NOT NULL AND ip <> ''
+                """
+                params = {"start_time": start_time, "end_time": end_time}
+                for i, uid in enumerate(user_ids):
+                    params[f"uid{i}"] = uid
+
+                ip_rows = self.db.execute(ip_sql, params)
+                for r in (ip_rows or []):
+                    uid = int(r.get("user_id") or 0)
+                    if uid not in ip_map:
+                        ip_map[uid] = set()
+                    if r.get("ip"):
+                        ip_map[uid].add(r["ip"])
+
+            return [
+                {
+                    "user_id": int(r.get("user_id") or 0),
+                    "username": r.get("username") or "",
+                    "request_count": int(r.get("request_count") or 0),
+                    "ips": list(ip_map.get(int(r.get("user_id") or 0), [])),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.db_error(f"获取多IP用户槽数据失败: {e}")
+            return []
+
+    def _enrich_shared_ips_details(
+        self,
+        base_items: List[Dict],
+        start_time: int,
+        end_time: int,
+    ) -> List[Dict]:
+        """
+        为共享 IP 基础数据添加 tokens 详情（阶段2：对 Top N 获取详情）
+        """
+        if not base_items:
+            return []
+
+        self.db.connect()
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+
+        ips = [item["ip"] for item in base_items if item.get("ip")]
+        if not ips:
+            return base_items
+
+        # 批量获取所有 IP 的 token 详情
+        placeholders = ",".join([f":ip{i}" for i in range(len(ips))])
+
+        if is_pg:
+            token_sql = f"""
+                SELECT
+                    ip,
+                    token_id,
+                    MAX(token_name) as token_name,
+                    user_id,
+                    MAX(username) as username,
+                    COUNT(*) as request_count
+                FROM logs
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND ip IN ({placeholders})
+                    AND token_id IS NOT NULL AND token_id > 0
+                GROUP BY ip, token_id, user_id
+                ORDER BY ip, COUNT(*) DESC
+            """
+        else:
+            token_sql = f"""
+                SELECT
+                    ip,
+                    token_id,
+                    MAX(token_name) as token_name,
+                    user_id,
+                    MAX(username) as username,
+                    COUNT(*) as request_count
+                FROM logs
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND ip IN ({placeholders})
+                    AND token_id IS NOT NULL AND token_id > 0
+                GROUP BY ip, token_id, user_id
+                ORDER BY ip, request_count DESC
+            """
+
+        params = {"start_time": start_time, "end_time": end_time}
+        for i, ip in enumerate(ips):
+            params[f"ip{i}"] = ip
+
+        try:
+            token_rows = self.db.execute(token_sql, params)
+            token_map = {}
+            for t in (token_rows or []):
+                ip = t.get("ip")
+                if ip not in token_map:
+                    token_map[ip] = []
+                if len(token_map[ip]) < 10:
+                    token_map[ip].append({
+                        "token_id": int(t.get("token_id") or 0),
+                        "token_name": t.get("token_name") or "",
+                        "user_id": int(t.get("user_id") or 0),
+                        "username": t.get("username") or "",
+                        "request_count": int(t.get("request_count") or 0),
+                    })
+
+            return [
+                {
+                    **item,
+                    "tokens": token_map.get(item["ip"], []),
+                }
+                for item in base_items
+            ]
+        except Exception as e:
+            logger.db_error(f"获取共享IP详情失败: {e}")
+            return base_items
+
+    def _enrich_multi_ip_tokens_details(
+        self,
+        base_items: List[Dict],
+        start_time: int,
+        end_time: int,
+    ) -> List[Dict]:
+        """
+        为多IP令牌基础数据添加 ips 详情（阶段2：对 Top N 获取详情）
+        """
+        if not base_items:
+            return []
+
+        self.db.connect()
+
+        token_ids = [item["token_id"] for item in base_items if item.get("token_id")]
+        if not token_ids:
+            return base_items
+
+        placeholders = ",".join([f":tid{i}" for i in range(len(token_ids))])
+        ip_sql = f"""
+            SELECT
+                token_id,
+                ip,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND token_id IN ({placeholders})
+                AND ip IS NOT NULL AND ip <> ''
+            GROUP BY token_id, ip
+            ORDER BY token_id, COUNT(*) DESC
+        """
+
+        params = {"start_time": start_time, "end_time": end_time}
+        for i, tid in enumerate(token_ids):
+            params[f"tid{i}"] = tid
+
+        try:
+            ip_rows = self.db.execute(ip_sql, params)
+            ip_map = {}
+            for r in (ip_rows or []):
+                tid = int(r.get("token_id") or 0)
+                if tid not in ip_map:
+                    ip_map[tid] = []
+                if len(ip_map[tid]) < 10:
+                    ip_map[tid].append({
+                        "ip": r.get("ip") or "",
+                        "request_count": int(r.get("request_count") or 0),
+                    })
+
+            return [
+                {
+                    **item,
+                    "ips": ip_map.get(item["token_id"], []),
+                }
+                for item in base_items
+            ]
+        except Exception as e:
+            logger.db_error(f"获取多IP令牌详情失败: {e}")
+            return base_items
+
+    def _enrich_multi_ip_users_details(
+        self,
+        base_items: List[Dict],
+        start_time: int,
+        end_time: int,
+    ) -> List[Dict]:
+        """
+        为多IP用户基础数据添加 top_ips 详情（阶段2：对 Top N 获取详情）
+        """
+        if not base_items:
+            return []
+
+        self.db.connect()
+
+        user_ids = [item["user_id"] for item in base_items if item.get("user_id")]
+        if not user_ids:
+            return base_items
+
+        placeholders = ",".join([f":uid{i}" for i in range(len(user_ids))])
+        ip_sql = f"""
+            SELECT
+                user_id,
+                ip,
+                COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND user_id IN ({placeholders})
+                AND ip IS NOT NULL AND ip <> ''
+            GROUP BY user_id, ip
+            ORDER BY user_id, COUNT(*) DESC
+        """
+
+        params = {"start_time": start_time, "end_time": end_time}
+        for i, uid in enumerate(user_ids):
+            params[f"uid{i}"] = uid
+
+        try:
+            ip_rows = self.db.execute(ip_sql, params)
+            ip_map = {}
+            for r in (ip_rows or []):
+                uid = int(r.get("user_id") or 0)
+                if uid not in ip_map:
+                    ip_map[uid] = []
+                if len(ip_map[uid]) < 10:
+                    ip_map[uid].append({
+                        "ip": r.get("ip") or "",
+                        "request_count": int(r.get("request_count") or 0),
+                    })
+
+            return [
+                {
+                    **item,
+                    "top_ips": ip_map.get(item["user_id"], []),
+                }
+                for item in base_items
+            ]
+        except Exception as e:
+            logger.db_error(f"获取多IP用户详情失败: {e}")
+            return base_items
+
+    def _get_incremental_data(
+        self,
+        monitor_type: str,
+        window_name: str,
+        now: int,
+        min_threshold: int,
+        limit: int,
+        log_progress: bool = False,
+    ) -> List[Dict]:
+        """
+        增量获取 IP 监控数据（通用方法）
+
+        流程：
+        1. 获取缺失的槽和已缓存的槽
+        2. 只查询缺失的槽
+        3. 聚合所有槽数据生成 Top N
+        """
+        # 获取缺失的槽和已缓存的槽
+        missing_slots, cached_slots = self.cache.get_ip_monitor_missing_slots(
+            monitor_type, window_name, now
+        )
+
+        if log_progress:
+            total_slots = len(missing_slots) + len(cached_slots)
+            logger.info(
+                f"[IP增量预热] {monitor_type}@{window_name} 槽状态",
+                总槽数=total_slots,
+                已缓存=len(cached_slots),
+                待查询=len(missing_slots),
+            )
+
+        # 查询缺失的槽
+        for slot in missing_slots:
+            slot_start = slot["slot_start"]
+            slot_end = slot["slot_end"]
+
+            if log_progress:
+                from datetime import datetime
+                start_str = datetime.fromtimestamp(slot_start).strftime("%m-%d %H:%M")
+                end_str = datetime.fromtimestamp(slot_end).strftime("%m-%d %H:%M")
+                logger.debug(f"[IP增量预热] 查询槽 {start_str} ~ {end_str}")
+
+            # 根据类型查询槽数据
+            if monitor_type == "shared_ips":
+                slot_data = self._get_shared_ips_slot_data(slot_start, slot_end, min_threshold)
+            elif monitor_type == "multi_ip_tokens":
+                slot_data = self._get_multi_ip_tokens_slot_data(slot_start, slot_end, min_threshold)
+            elif monitor_type == "multi_ip_users":
+                slot_data = self._get_multi_ip_users_slot_data(slot_start, slot_end, min_threshold)
+            else:
+                slot_data = []
+
+            # 保存到槽缓存
+            self.cache.set_ip_monitor_slot(monitor_type, window_name, slot_start, slot_end, slot_data)
+
+            # 添加到已缓存的槽
+            cached_slots[slot_start] = {
+                "slot_end": slot_end,
+                "data": slot_data,
+            }
+
+            if log_progress:
+                logger.debug(f"[IP增量预热] 槽缓存完成，条目数={len(slot_data)}")
+
+        # 聚合所有槽数据
+        result = self.cache.aggregate_ip_monitor_slots(monitor_type, cached_slots, limit)
+
+        if log_progress:
+            logger.success(
+                f"[IP增量预热] {monitor_type}@{window_name} 聚合完成",
+                槽数=len(cached_slots),
+                结果数=len(result),
+            )
+
+        return result
 
 
 _ip_monitoring_service: Optional[IPMonitoringService] = None

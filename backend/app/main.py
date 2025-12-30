@@ -351,10 +351,13 @@ async def _warmup_dashboard_data():
     5. /api/dashboard/top-users?period=7d&limit=10  <-- 关键！
 
     必须全部预热，否则首次访问会导致高并发数据库查询。
-    
+
     缓存存储：使用 CacheManager 统一缓存管理器（SQLite + Redis 混合）
+
+    增量缓存：对于 3d/7d/14d 周期的 usage/models/top_users，
+    使用槽缓存增量模式，只查询缺失的时间槽，大幅减少查询时间。
     """
-    from .cached_dashboard import get_cached_dashboard_service
+    from .cached_dashboard import get_cached_dashboard_service, INCREMENTAL_PERIODS
     from .user_management_service import get_user_management_service
     from .system_scale_service import get_scale_service
 
@@ -363,7 +366,7 @@ async def _warmup_dashboard_data():
 
     dashboard_service = get_cached_dashboard_service()
     user_service = get_user_management_service()
-    
+
     # 获取系统规模信息用于估算
     try:
         scale_service = get_scale_service()
@@ -377,44 +380,54 @@ async def _warmup_dashboard_data():
 
     # 预热项目列表（按前端加载顺序）
     # 必须包含所有 Dashboard 首次加载时调用的 API
-    # 格式: (name, fetch_func, estimated_logs_multiplier)
-    # multiplier 基于 24h 日志数估算扫描量
+    # 格式: (name, period, method, kwargs, estimated_logs_multiplier)
+    # - period: 用于判断是否使用增量缓存（3d/7d/14d）
+    # - method: 方法名
+    # - kwargs: 方法参数
+    # - multiplier: 基于 24h 日志数估算扫描量
     warmup_items = [
         # === 核心 Dashboard API（前端 Promise.all 并发调用）===
-        ("overview_7d", lambda: dashboard_service.get_system_overview(period="7d", use_cache=False), 5.0),
-        ("usage_7d", lambda: dashboard_service.get_usage_statistics(period="7d", use_cache=False), 5.0),
-        ("models_7d", lambda: dashboard_service.get_model_usage(period="7d", limit=8, use_cache=False), 5.0),
-        ("trends_daily_7d", lambda: dashboard_service.get_daily_trends(days=7, use_cache=False), 5.0),
-        ("top_users_7d", lambda: dashboard_service.get_top_users(period="7d", limit=10, use_cache=False), 5.0),
+        ("overview_7d", "7d", "get_system_overview", {"period": "7d"}, 5.0),
+        ("usage_7d", "7d", "get_usage_statistics", {"period": "7d"}, 5.0),
+        ("models_7d", "7d", "get_model_usage", {"period": "7d", "limit": 8}, 5.0),
+        ("trends_daily_7d", None, "get_daily_trends", {"days": 7}, 5.0),
+        ("top_users_7d", "7d", "get_top_users", {"period": "7d", "limit": 10}, 5.0),
 
         # === 常用的其他时间周期 ===
-        ("overview_24h", lambda: dashboard_service.get_system_overview(period="24h", use_cache=False), 1.0),
-        ("usage_24h", lambda: dashboard_service.get_usage_statistics(period="24h", use_cache=False), 1.0),
-        ("trends_hourly_24h", lambda: dashboard_service.get_hourly_trends(hours=24, use_cache=False), 1.0),
+        ("overview_24h", "24h", "get_system_overview", {"period": "24h"}, 1.0),
+        ("usage_24h", "24h", "get_usage_statistics", {"period": "24h"}, 1.0),
+        ("trends_hourly_24h", None, "get_hourly_trends", {"hours": 24}, 1.0),
 
         # === 3天周期（用户切换时间周期时需要）===
-        ("overview_3d", lambda: dashboard_service.get_system_overview(period="3d", use_cache=False), 2.5),
-        ("usage_3d", lambda: dashboard_service.get_usage_statistics(period="3d", use_cache=False), 2.5),
-        ("models_3d", lambda: dashboard_service.get_model_usage(period="3d", limit=8, use_cache=False), 2.5),
-        ("trends_daily_3d", lambda: dashboard_service.get_daily_trends(days=3, use_cache=False), 2.5),
-        ("top_users_3d", lambda: dashboard_service.get_top_users(period="3d", limit=10, use_cache=False), 2.5),
+        ("overview_3d", "3d", "get_system_overview", {"period": "3d"}, 2.5),
+        ("usage_3d", "3d", "get_usage_statistics", {"period": "3d"}, 2.5),
+        ("models_3d", "3d", "get_model_usage", {"period": "3d", "limit": 8}, 2.5),
+        ("trends_daily_3d", None, "get_daily_trends", {"days": 3}, 2.5),
+        ("top_users_3d", "3d", "get_top_users", {"period": "3d", "limit": 10}, 2.5),
 
         # === 14天周期（用户切换时间周期时需要）===
-        ("overview_14d", lambda: dashboard_service.get_system_overview(period="14d", use_cache=False), 10.0),
-        ("usage_14d", lambda: dashboard_service.get_usage_statistics(period="14d", use_cache=False), 10.0),
-        ("models_14d", lambda: dashboard_service.get_model_usage(period="14d", limit=8, use_cache=False), 10.0),
-        ("trends_daily_14d", lambda: dashboard_service.get_daily_trends(days=14, use_cache=False), 10.0),
-        ("top_users_14d", lambda: dashboard_service.get_top_users(period="14d", limit=10, use_cache=False), 10.0),
+        ("overview_14d", "14d", "get_system_overview", {"period": "14d"}, 10.0),
+        ("usage_14d", "14d", "get_usage_statistics", {"period": "14d"}, 10.0),
+        ("models_14d", "14d", "get_model_usage", {"period": "14d", "limit": 8}, 10.0),
+        ("trends_daily_14d", None, "get_daily_trends", {"days": 14}, 10.0),
+        ("top_users_14d", "14d", "get_top_users", {"period": "14d", "limit": 10}, 10.0),
 
         # === 用户统计（UserManagement 页面需要）===
-        ("user_stats", lambda: user_service.get_activity_stats(), 1.0),
+        ("user_stats", None, None, {}, 1.0),
     ]
-    
+
     # 计算预计扫描总日志数
-    total_estimated_logs = sum(int(logs_24h * m) for _, _, m in warmup_items)
-    
+    total_estimated_logs = sum(int(logs_24h * m) for _, _, _, _, m in warmup_items)
+
+    # 统计增量缓存项目数
+    incremental_count = sum(
+        1 for _, period, method, _, _ in warmup_items
+        if period in INCREMENTAL_PERIODS and method in ("get_usage_statistics", "get_model_usage", "get_top_users")
+    )
+
     logger.kvs({
         "待预热项目": f"{len(warmup_items)} 个",
+        "增量缓存项目": f"{incremental_count} 个",
         "预计扫描日志": f"{total_estimated_logs:,} 条",
     })
 
@@ -422,18 +435,41 @@ async def _warmup_dashboard_data():
     success_count = 0
     failed_items = []
 
-    for idx, (name, fetch_func, multiplier) in enumerate(warmup_items):
+    for idx, (name, period, method, kwargs, multiplier) in enumerate(warmup_items):
         estimated_logs = int(logs_24h * multiplier)
+
+        # 判断是否使用增量缓存（仅 usage/models/top_users 支持）
+        is_incremental = (
+            period in INCREMENTAL_PERIODS and
+            method in ("get_usage_statistics", "get_model_usage", "get_top_users")
+        )
+        mode_tag = " [增量]" if is_incremental else ""
+
         try:
             item_start = time.time()
+
+            # 构建调用参数
+            call_kwargs = {"use_cache": False, **kwargs}
+            if is_incremental:
+                call_kwargs["log_progress"] = True
+
+            # 获取要调用的方法
+            if method is None:
+                # user_stats 特殊处理
+                fetch_func = lambda: user_service.get_activity_stats()
+            else:
+                service_method = getattr(dashboard_service, method)
+                # 使用闭包捕获当前参数
+                fetch_func = lambda m=service_method, k=call_kwargs: m(**k)
+
             # 在线程池中执行，避免阻塞事件循环
             await asyncio.get_event_loop().run_in_executor(None, fetch_func)
             item_elapsed = time.time() - item_start
-            logger.success(f"Dashboard {name} 预热完成", 耗时=f"{item_elapsed:.2f}s")
+            logger.success(f"Dashboard {name}{mode_tag} 预热完成", 耗时=f"{item_elapsed:.2f}s")
             success_count += 1
         except Exception as e:
             failed_items.append(name)
-            logger.warn(f"Dashboard {name} 预热失败: {e}")
+            logger.warn(f"Dashboard {name}{mode_tag} 预热失败: {e}")
 
     total_elapsed = time.time() - warmup_start
 
@@ -559,6 +595,10 @@ async def _warmup_ip_monitoring_data():
     for window_key in IP_WARMUP_WINDOWS:
         window_seconds = WINDOW_SECONDS.get(window_key, 86400)
 
+        # 检查是否使用增量缓存（3d/7d）
+        is_incremental = cache.is_incremental_window(window_key)
+        mode_tag = " [增量]" if is_incremental else ""
+
         # 共享IP
         try:
             start = time.time()
@@ -566,9 +606,10 @@ async def _warmup_ip_monitoring_data():
                 window_seconds=window_seconds,
                 min_tokens=2,
                 limit=IP_WARMUP_LIMIT,
-                use_cache=False
+                use_cache=False,
+                log_progress=is_incremental,  # 增量模式时显示详细日志
             )
-            logger.success(f"IP监控 shared_ips({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            logger.success(f"IP监控 shared_ips({window_key}){mode_tag} 预热完成", 耗时=f"{time.time()-start:.2f}s")
             success_count += 1
         except Exception as e:
             failed_items.append(f"shared_ips({window_key})")
@@ -581,9 +622,10 @@ async def _warmup_ip_monitoring_data():
                 window_seconds=window_seconds,
                 min_ips=2,
                 limit=IP_WARMUP_LIMIT,
-                use_cache=False
+                use_cache=False,
+                log_progress=is_incremental,
             )
-            logger.success(f"IP监控 multi_ip_tokens({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            logger.success(f"IP监控 multi_ip_tokens({window_key}){mode_tag} 预热完成", 耗时=f"{time.time()-start:.2f}s")
             success_count += 1
         except Exception as e:
             failed_items.append(f"multi_ip_tokens({window_key})")
@@ -596,9 +638,10 @@ async def _warmup_ip_monitoring_data():
                 window_seconds=window_seconds,
                 min_ips=3,
                 limit=IP_WARMUP_LIMIT,
-                use_cache=False
+                use_cache=False,
+                log_progress=is_incremental,
             )
-            logger.success(f"IP监控 multi_ip_users({window_key}) 预热完成", 耗时=f"{time.time()-start:.2f}s")
+            logger.success(f"IP监控 multi_ip_users({window_key}){mode_tag} 预热完成", 耗时=f"{time.time()-start:.2f}s")
             success_count += 1
         except Exception as e:
             failed_items.append(f"multi_ip_users({window_key})")
@@ -907,12 +950,25 @@ async def background_cache_warmup():
             _set_warmup_status("initializing", progress, f"排行榜: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s", steps)
         
         window_start = time.time()
-        logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口，预计扫描 {window_estimated_logs:,} 条日志...")
-        
+
+        # 检查是否使用增量缓存（3d/7d）
+        is_incremental = cache.is_incremental_window(window)
+        if is_incremental:
+            # 检查槽缓存状态
+            missing_slots, cached_slots = cache.get_missing_slots(window, "requests")
+            total_slots = len(missing_slots) + len(cached_slots)
+            if cached_slots:
+                logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口 [增量模式: {len(cached_slots)}/{total_slots} 槽已缓存]")
+            else:
+                logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口 [增量模式: 需查询 {total_slots} 个槽]")
+        else:
+            logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口，预计扫描 {window_estimated_logs:,} 条日志...")
+
         try:
             # 查询 PostgreSQL（只读）
             # 注意：这里只查询 Top 50 用户的聚合数据，不是全量数据
             # 即使有千万级日志，SQL 使用索引聚合，只返回 50 条结果
+            # 对于 3d/7d，使用增量缓存模式，复用已有槽数据
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(
                 None,
@@ -924,14 +980,17 @@ async def background_cache_warmup():
                     log_progress=True,
                 ),
             )
-            
+
             window_elapsed = time.time() - window_start
             window_times.append(window_elapsed)  # 记录实际耗时
 
             if data and window in data.get("windows", {}):
                 result_count = len(data["windows"][window])
                 warmed.append(window)
-                logger.success(f"{window} 预热完成", 数据=result_count, 耗时=f"{window_elapsed:.2f}s")
+                if is_incremental:
+                    logger.success(f"{window} 预热完成 [增量]", 数据=result_count, 耗时=f"{window_elapsed:.2f}s")
+                else:
+                    logger.success(f"{window} 预热完成", 数据=result_count, 耗时=f"{window_elapsed:.2f}s")
             else:
                 failed.append(window)
                 logger.warn(f"{window} 无数据", 耗时=f"{window_elapsed:.2f}s")

@@ -13,7 +13,7 @@ import time
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
-from .cache_manager import get_cache_manager as get_unified_cache_manager
+from .cache_manager import get_cache_manager as get_unified_cache_manager, SLOT_CONFIG
 from .dashboard_service import (
     DashboardService,
     DailyTrend,
@@ -25,6 +25,10 @@ from .dashboard_service import (
 )
 from .local_storage import get_local_storage
 from .logger import logger
+
+
+# 支持增量缓存的周期
+INCREMENTAL_PERIODS = {"3d", "7d", "14d"}
 
 
 def _get_system_scale() -> str:
@@ -157,6 +161,7 @@ class CachedDashboardService:
         self,
         period: str = "24h",
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> Dict[str, Any]:
         """
         Get usage statistics with caching.
@@ -164,6 +169,7 @@ class CachedDashboardService:
         Args:
             period: Time period (1h, 6h, 24h, 7d, 30d)
             use_cache: Whether to use cached data
+            log_progress: Whether to log incremental progress (for warmup)
 
         Returns:
             Usage statistics data
@@ -175,43 +181,118 @@ class CachedDashboardService:
             if cached_data:
                 return cached_data
 
-        # Calculate time range
-        end_time = int(time.time())
-        period_map = {
-            "1h": 3600,
-            "6h": 6 * 3600,
-            "24h": 24 * 3600,
-            "3d": 3 * 24 * 3600,
-            "7d": 7 * 24 * 3600,
-            "14d": 14 * 24 * 3600,
-        }
-        start_time = end_time - period_map.get(period, 24 * 3600)
+        # 对于 3d/7d/14d 使用增量缓存
+        if period in INCREMENTAL_PERIODS:
+            stats_data = self._get_usage_statistics_incremental(period, log_progress)
+            data = {
+                "period": period,
+                **stats_data,
+            }
+        else:
+            # Calculate time range
+            end_time = int(time.time())
+            period_map = {
+                "1h": 3600,
+                "6h": 6 * 3600,
+                "24h": 24 * 3600,
+                "3d": 3 * 24 * 3600,
+                "7d": 7 * 24 * 3600,
+                "14d": 14 * 24 * 3600,
+            }
+            start_time = end_time - period_map.get(period, 24 * 3600)
 
-        # Fetch fresh data
-        stats = self.service.get_usage_statistics(start_time=start_time, end_time=end_time)
-        data = {
-            "period": period,
-            **asdict(stats),
-        }
+            # Fetch fresh data
+            stats = self.service.get_usage_statistics(start_time=start_time, end_time=end_time)
+            data = {
+                "period": period,
+                **asdict(stats),
+            }
 
         # 使用差异化 TTL 配置
         ttl = _get_ttl_config(period)
         self._cache.set(cache_key, data, ttl=ttl)
+
+        mode_tag = " [增量]" if period in INCREMENTAL_PERIODS else ""
         logger.success(
-            f"Dashboard 缓存更新: usage",
+            f"Dashboard 缓存更新: usage{mode_tag}",
             period=period,
-            requests=data.get("request_count", 0),
-            tokens=data.get("total_tokens", 0),
+            requests=data.get("total_requests", 0),
+            tokens=data.get("total_prompt_tokens", 0) + data.get("total_completion_tokens", 0),
             TTL=f"{ttl}s"
         )
 
         return data
+
+    def _get_usage_statistics_incremental(
+        self,
+        period: str,
+        log_progress: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        使用增量缓存获取使用统计数据
+
+        流程：
+        1. 获取缺失的槽和已缓存的槽
+        2. 只查询缺失的槽
+        3. 聚合所有槽数据
+        """
+        now = int(time.time())
+
+        # 获取缺失的槽和已缓存的槽
+        missing_slots, cached_slots = self._cache.get_dashboard_missing_slots(
+            "usage_stats", period, now
+        )
+
+        if log_progress:
+            total_slots = len(missing_slots) + len(cached_slots)
+            logger.info(
+                f"[Dashboard增量] usage_stats@{period} 槽状态",
+                总槽数=total_slots,
+                已缓存=len(cached_slots),
+                待查询=len(missing_slots),
+            )
+
+        # 查询缺失的槽
+        for slot in missing_slots:
+            slot_start = slot["slot_start"]
+            slot_end = slot["slot_end"]
+
+            if log_progress:
+                from datetime import datetime
+                start_str = datetime.fromtimestamp(slot_start).strftime("%m-%d %H:%M")
+                end_str = datetime.fromtimestamp(slot_end).strftime("%m-%d %H:%M")
+                logger.debug(f"[Dashboard增量] 查询槽 {start_str} ~ {end_str}")
+
+            # 查询槽数据
+            slot_data = self.service.get_usage_statistics_slot(slot_start, slot_end)
+
+            # 保存到槽缓存
+            self._cache.set_dashboard_slot("usage_stats", period, slot_start, slot_end, slot_data)
+
+            # 添加到已缓存的槽
+            cached_slots[slot_start] = {
+                "slot_end": slot_end,
+                "data": slot_data,
+            }
+
+        # 聚合所有槽数据
+        result = self._cache.aggregate_dashboard_slots("usage_stats", cached_slots)
+
+        if log_progress:
+            logger.success(
+                f"[Dashboard增量] usage_stats@{period} 聚合完成",
+                槽数=len(cached_slots),
+                请求数=result.get("total_requests", 0),
+            )
+
+        return result
 
     def get_model_usage(
         self,
         period: str = "7d",
         limit: int = 10,
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get model usage distribution with caching.
@@ -220,6 +301,7 @@ class CachedDashboardService:
             period: Time period
             limit: Max number of models
             use_cache: Whether to use cached data
+            log_progress: Whether to log incremental progress (for warmup)
 
         Returns:
             List of model usage data
@@ -231,29 +313,35 @@ class CachedDashboardService:
             if cached_data:
                 return cached_data
 
-        # Calculate time range
-        end_time = int(time.time())
-        period_map = {
-            "24h": 24 * 3600,
-            "3d": 3 * 24 * 3600,
-            "7d": 7 * 24 * 3600,
-            "14d": 14 * 24 * 3600,
-        }
-        start_time = end_time - period_map.get(period, 7 * 24 * 3600)
+        # 对于 3d/7d/14d 使用增量缓存
+        if period in INCREMENTAL_PERIODS:
+            data = self._get_model_usage_incremental(period, limit, log_progress)
+        else:
+            # Calculate time range
+            end_time = int(time.time())
+            period_map = {
+                "24h": 24 * 3600,
+                "3d": 3 * 24 * 3600,
+                "7d": 7 * 24 * 3600,
+                "14d": 14 * 24 * 3600,
+            }
+            start_time = end_time - period_map.get(period, 7 * 24 * 3600)
 
-        # Fetch fresh data
-        models = self.service.get_model_usage(
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
-        )
-        data = [asdict(m) for m in models]
+            # Fetch fresh data
+            models = self.service.get_model_usage(
+                start_time=start_time,
+                end_time=end_time,
+                limit=limit,
+            )
+            data = [asdict(m) for m in models]
 
         # Cache for 10 minutes (大型系统自动延长)
         ttl = int(600 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+
+        mode_tag = " [增量]" if period in INCREMENTAL_PERIODS else ""
         logger.success(
-            f"Dashboard 缓存更新: models",
+            f"Dashboard 缓存更新: models{mode_tag}",
             period=period,
             limit=limit,
             models=len(data),
@@ -264,6 +352,71 @@ class CachedDashboardService:
         self._storage.save_stats_snapshot("models", {"period": period, "models": data})
 
         return data
+
+    def _get_model_usage_incremental(
+        self,
+        period: str,
+        limit: int,
+        log_progress: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        使用增量缓存获取模型使用数据
+
+        流程：
+        1. 获取缺失的槽和已缓存的槽
+        2. 只查询缺失的槽
+        3. 聚合所有槽数据生成 Top N
+        """
+        now = int(time.time())
+
+        # 获取缺失的槽和已缓存的槽
+        missing_slots, cached_slots = self._cache.get_dashboard_missing_slots(
+            "model_usage", period, now
+        )
+
+        if log_progress:
+            total_slots = len(missing_slots) + len(cached_slots)
+            logger.info(
+                f"[Dashboard增量] model_usage@{period} 槽状态",
+                总槽数=total_slots,
+                已缓存=len(cached_slots),
+                待查询=len(missing_slots),
+            )
+
+        # 查询缺失的槽
+        for slot in missing_slots:
+            slot_start = slot["slot_start"]
+            slot_end = slot["slot_end"]
+
+            if log_progress:
+                from datetime import datetime
+                start_str = datetime.fromtimestamp(slot_start).strftime("%m-%d %H:%M")
+                end_str = datetime.fromtimestamp(slot_end).strftime("%m-%d %H:%M")
+                logger.debug(f"[Dashboard增量] 查询槽 {start_str} ~ {end_str}")
+
+            # 查询槽数据
+            slot_data = self.service.get_model_usage_slot(slot_start, slot_end, limit=100)
+
+            # 保存到槽缓存
+            self._cache.set_dashboard_slot("model_usage", period, slot_start, slot_end, slot_data)
+
+            # 添加到已缓存的槽
+            cached_slots[slot_start] = {
+                "slot_end": slot_end,
+                "data": slot_data,
+            }
+
+        # 聚合所有槽数据
+        result = self._cache.aggregate_dashboard_slots("model_usage", cached_slots, limit)
+
+        if log_progress:
+            logger.success(
+                f"[Dashboard增量] model_usage@{period} 聚合完成",
+                槽数=len(cached_slots),
+                结果数=len(result),
+            )
+
+        return result
 
     def get_daily_trends(
         self,
@@ -345,6 +498,7 @@ class CachedDashboardService:
         period: str = "7d",
         limit: int = 10,
         use_cache: bool = True,
+        log_progress: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get top users with caching.
@@ -353,6 +507,7 @@ class CachedDashboardService:
             period: Time period
             limit: Max number of users
             use_cache: Whether to use cached data
+            log_progress: Whether to log incremental progress (for warmup)
 
         Returns:
             List of top user data
@@ -364,29 +519,35 @@ class CachedDashboardService:
             if cached_data:
                 return cached_data
 
-        # Calculate time range
-        end_time = int(time.time())
-        period_map = {
-            "24h": 24 * 3600,
-            "3d": 3 * 24 * 3600,
-            "7d": 7 * 24 * 3600,
-            "14d": 14 * 24 * 3600,
-        }
-        start_time = end_time - period_map.get(period, 7 * 24 * 3600)
+        # 对于 3d/7d/14d 使用增量缓存
+        if period in INCREMENTAL_PERIODS:
+            data = self._get_top_users_incremental(period, limit, log_progress)
+        else:
+            # Calculate time range
+            end_time = int(time.time())
+            period_map = {
+                "24h": 24 * 3600,
+                "3d": 3 * 24 * 3600,
+                "7d": 7 * 24 * 3600,
+                "14d": 14 * 24 * 3600,
+            }
+            start_time = end_time - period_map.get(period, 7 * 24 * 3600)
 
-        # Fetch fresh data
-        users = self.service.get_top_users(
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
-        )
-        data = [asdict(u) for u in users]
+            # Fetch fresh data
+            users = self.service.get_top_users(
+                start_time=start_time,
+                end_time=end_time,
+                limit=limit,
+            )
+            data = [asdict(u) for u in users]
 
         # Cache for 10 minutes (大型系统自动延长)
         ttl = int(600 * _get_ttl_multiplier())
         self._cache.set(cache_key, data, ttl=ttl)
+
+        mode_tag = " [增量]" if period in INCREMENTAL_PERIODS else ""
         logger.success(
-            f"Dashboard 缓存更新: top_users",
+            f"Dashboard 缓存更新: top_users{mode_tag}",
             period=period,
             limit=limit,
             users=len(data),
@@ -394,6 +555,71 @@ class CachedDashboardService:
         )
 
         return data
+
+    def _get_top_users_incremental(
+        self,
+        period: str,
+        limit: int,
+        log_progress: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        使用增量缓存获取用户排行数据
+
+        流程：
+        1. 获取缺失的槽和已缓存的槽
+        2. 只查询缺失的槽
+        3. 聚合所有槽数据生成 Top N
+        """
+        now = int(time.time())
+
+        # 获取缺失的槽和已缓存的槽
+        missing_slots, cached_slots = self._cache.get_dashboard_missing_slots(
+            "top_users", period, now
+        )
+
+        if log_progress:
+            total_slots = len(missing_slots) + len(cached_slots)
+            logger.info(
+                f"[Dashboard增量] top_users@{period} 槽状态",
+                总槽数=total_slots,
+                已缓存=len(cached_slots),
+                待查询=len(missing_slots),
+            )
+
+        # 查询缺失的槽
+        for slot in missing_slots:
+            slot_start = slot["slot_start"]
+            slot_end = slot["slot_end"]
+
+            if log_progress:
+                from datetime import datetime
+                start_str = datetime.fromtimestamp(slot_start).strftime("%m-%d %H:%M")
+                end_str = datetime.fromtimestamp(slot_end).strftime("%m-%d %H:%M")
+                logger.debug(f"[Dashboard增量] 查询槽 {start_str} ~ {end_str}")
+
+            # 查询槽数据
+            slot_data = self.service.get_top_users_slot(slot_start, slot_end, limit=100)
+
+            # 保存到槽缓存
+            self._cache.set_dashboard_slot("top_users", period, slot_start, slot_end, slot_data)
+
+            # 添加到已缓存的槽
+            cached_slots[slot_start] = {
+                "slot_end": slot_end,
+                "data": slot_data,
+            }
+
+        # 聚合所有槽数据
+        result = self._cache.aggregate_dashboard_slots("top_users", cached_slots, limit)
+
+        if log_progress:
+            logger.success(
+                f"[Dashboard增量] top_users@{period} 聚合完成",
+                槽数=len(cached_slots),
+                结果数=len(result),
+            )
+
+        return result
 
     def get_channel_status(self, use_cache: bool = True) -> List[Dict[str, Any]]:
         """
