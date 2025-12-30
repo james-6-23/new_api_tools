@@ -148,38 +148,44 @@ class ModelStatusService:
             cursor.execute("DELETE FROM model_status_cache WHERE expires_at < ?", (now,))
             conn.commit()
 
-    def get_available_models(self) -> List[str]:
+    def get_available_models(self, use_cache: bool = True) -> List[str]:
         """
-        Get list of all models that have logs in the last 24 hours.
-        
+        Get list of all models from online channels (abilities table).
+        Returns models that are enabled in active channels (status=1).
+
+        Args:
+            use_cache: Whether to use cached data (default: True).
+
         Returns:
-            List of model names.
+            List of model names from online channels.
         """
         cache_key = "available_models"
-        cached = self._get_cache(cache_key)
-        if cached:
-            return cached.get("models", [])
+        if use_cache:
+            cached = self._get_cache(cache_key)
+            if cached:
+                return cached.get("models", [])
 
-        now = int(time.time())
-        start_time = now - 86400  # 24 hours ago
+        # Query models from abilities table (online channels)
+        # Join with channels to filter only active channels (status=1)
+        from .database import DatabaseEngine
+        is_pg = self._db.config.engine == DatabaseEngine.POSTGRESQL
 
         sql = """
-            SELECT DISTINCT model_name
-            FROM logs
-            WHERE created_at >= :start_time
-              AND type IN (:type_success, :type_failure)
-              AND model_name IS NOT NULL
-              AND model_name != ''
-            ORDER BY model_name
+            SELECT DISTINCT a.model as model_name
+            FROM abilities a
+            INNER JOIN channels c ON c.id = a.channel_id
+            WHERE c.status = 1
         """
+        # Filter enabled abilities
+        if is_pg:
+            sql += " AND COALESCE(a.enabled, TRUE) = TRUE"
+        else:
+            sql += " AND COALESCE(a.enabled, 1) = 1"
+        sql += " ORDER BY a.model"
 
         try:
             self._db.connect()
-            result = self._db.execute(sql, {
-                "start_time": start_time,
-                "type_success": LOG_TYPE_CONSUMPTION,
-                "type_failure": LOG_TYPE_FAILURE,
-            })
+            result = self._db.execute(sql)
             models = [row["model_name"] for row in result if row.get("model_name")]
             self._set_cache(cache_key, {"models": models}, ttl=300)  # 5 min cache
             return models
@@ -400,14 +406,19 @@ def get_model_status_service() -> ModelStatusService:
     return _model_status_service
 
 
-async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
+async def warmup_model_status(max_models: int = 100) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
     Warms up ALL time windows (1h, 6h, 12h, 24h) for each model.
     Uses longer cache TTL (5 min) since these are background warmup caches.
 
+    Gentle warmup strategy:
+    - Dynamic delay based on total tasks (more tasks = longer delay)
+    - Batch processing with progress logging
+    - Longer delay between batches
+
     Args:
-        max_models: Maximum number of models to warmup (default 50).
+        max_models: Maximum number of models to warmup (default 100).
 
     Returns:
         Warmup result with success count and timing.
@@ -417,8 +428,8 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     service = get_model_status_service()
     start_time = time.time()
 
-    # Get available models
-    models = service.get_available_models()
+    # Get available models (force refresh to get latest list)
+    models = service.get_available_models(use_cache=False)
     models_to_warmup = models[:max_models]
 
     if not models_to_warmup:
@@ -434,12 +445,33 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     time_windows = list(TIME_WINDOWS.keys())  # ['1h', '6h', '12h', '24h']
     total_tasks = len(models_to_warmup) * len(time_windows)
 
-    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存 (TTL={CACHE_TTL_LONG}s)...")
+    # Dynamic delay based on total tasks (more tasks = gentler warmup)
+    # < 50 tasks: 0.1s delay
+    # 50-100 tasks: 0.15s delay
+    # 100-200 tasks: 0.2s delay
+    # > 200 tasks: 0.25s delay
+    if total_tasks < 50:
+        query_delay = 0.1
+    elif total_tasks < 100:
+        query_delay = 0.15
+    elif total_tasks < 200:
+        query_delay = 0.2
+    else:
+        query_delay = 0.25
+
+    # Batch size for progress logging (every 10 models)
+    batch_size = 10
+    batch_delay = 1.0  # Extra delay between batches
+
+    estimated_time = total_tasks * query_delay + (len(models_to_warmup) // batch_size) * batch_delay
+
+    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存")
+    logger.info(f"[模型状态] 预热策略: 查询延迟 {query_delay}s, 批次延迟 {batch_delay}s, 预计耗时 {estimated_time:.0f}s")
 
     success_count = 0
     failed_tasks = []
 
-    for model_name in models_to_warmup:
+    for idx, model_name in enumerate(models_to_warmup):
         for window in time_windows:
             try:
                 # Force refresh cache with LONG TTL for warmup
@@ -450,16 +482,24 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
                     cache_ttl=CACHE_TTL_LONG  # 5 minutes for warmup cache
                 )
                 success_count += 1
-                # Small delay to avoid overwhelming the database
-                await asyncio.sleep(0.05)
+                # Gentle delay to avoid overwhelming the database
+                await asyncio.sleep(query_delay)
             except Exception as e:
                 logger.warn(f"[模型状态] 预热 {model_name}@{window} 失败: {e}")
                 failed_tasks.append(f"{model_name}@{window}")
 
+        # Progress logging and batch delay
+        if (idx + 1) % batch_size == 0:
+            progress = (idx + 1) / len(models_to_warmup) * 100
+            elapsed = time.time() - start_time
+            logger.info(f"[模型状态] 预热进度: {idx + 1}/{len(models_to_warmup)} 模型 ({progress:.0f}%), 已耗时 {elapsed:.1f}s")
+            # Extra delay between batches to let database breathe
+            await asyncio.sleep(batch_delay)
+
     elapsed = time.time() - start_time
 
     if failed_tasks:
-        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{total_tasks}，失败 {len(failed_tasks)} 个")
+        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{total_tasks}，失败 {len(failed_tasks)} 个，耗时 {elapsed:.1f}s")
     else:
         logger.info(f"[模型状态] 预热完成: {len(models_to_warmup)} 模型 × {len(time_windows)} 窗口 = {success_count} 缓存，耗时 {elapsed:.1f}s")
 
