@@ -791,7 +791,22 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
 
   const copyToClipboard = async (code: string, key: string) => {
     try {
-      await navigator.clipboard.writeText(code)
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(code)
+      } else {
+        // Fallback for HTTP or older browsers
+        const textArea = document.createElement('textarea')
+        textArea.value = code
+        textArea.style.position = 'fixed'
+        textArea.style.left = '-999999px'
+        textArea.style.top = '-999999px'
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+      }
       setCopied(key)
       setTimeout(() => setCopied(null), 2000)
     } catch (err) {

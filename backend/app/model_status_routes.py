@@ -295,14 +295,14 @@ async def get_embed_model_status(
 async def get_embed_multiple_models_status(
     model_names: List[str],
     window: str = Query(DEFAULT_TIME_WINDOW, description="Time window: 1h, 6h, 12h, 24h"),
-    no_cache: bool = Query(False, description="Skip cache and fetch fresh data"),
 ):
     """
     [Public] Get status for multiple models within a time window.
     No authentication required for iframe embedding.
+    Always uses cache to prevent database overload from high-traffic embed pages.
     """
     service = get_model_status_service()
-    statuses = service.get_multiple_models_status(model_names, window, use_cache=not no_cache)
+    statuses = service.get_multiple_models_status(model_names, window, use_cache=True)
     
     return MultipleModelsStatusResponse(
         success=True,
@@ -315,14 +315,14 @@ async def get_embed_multiple_models_status(
 @router.get("/embed/status", response_model=MultipleModelsStatusResponse)
 async def get_embed_all_models_status(
     window: str = Query(DEFAULT_TIME_WINDOW, description="Time window: 1h, 6h, 12h, 24h"),
-    no_cache: bool = Query(False, description="Skip cache and fetch fresh data"),
 ):
     """
     [Public] Get status for all available models within a time window.
     No authentication required for iframe embedding.
+    Always uses cache to prevent database overload from high-traffic embed pages.
     """
     service = get_model_status_service()
-    statuses = service.get_all_models_status(window, use_cache=not no_cache)
+    statuses = service.get_all_models_status(window, use_cache=True)
     
     return MultipleModelsStatusResponse(
         success=True,

@@ -445,8 +445,8 @@ export function ModelStatusEmbed({
   }, [loadConfig])
 
   // Fetch model statuses
-  // forceRefresh: bypass cache to get fresh data
-  const fetchModelStatuses = useCallback(async (forceRefresh = false) => {
+  // Embed page always uses cache to reduce database load
+  const fetchModelStatuses = useCallback(async () => {
     if (selectedModels.length === 0) {
       setModelStatuses([])
       setLoading(false)
@@ -454,9 +454,7 @@ export function ModelStatusEmbed({
     }
 
     try {
-      // Add no_cache=true when force refreshing to bypass backend cache
-      const cacheParam = forceRefresh ? '&no_cache=true' : ''
-      const response = await fetch(`${apiUrl}/api/model-status/embed/status/batch?window=${timeWindow}${cacheParam}`, {
+      const response = await fetch(`${apiUrl}/api/model-status/embed/status/batch?window=${timeWindow}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selectedModels),
@@ -479,22 +477,47 @@ export function ModelStatusEmbed({
     }
   }, [fetchModelStatuses, selectedModels])
 
-  // Auto refresh
+  // Auto refresh with visibility change handling
+  // When page is in background, browser throttles setInterval
+  // So we refresh immediately when page becomes visible again
   useEffect(() => {
     if (refreshInterval <= 0) return
+
+    let lastRefreshTime = Date.now()
 
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          // Auto refresh should get fresh data
-          fetchModelStatuses(true)
+          fetchModelStatuses()
+          lastRefreshTime = Date.now()
           return refreshInterval
         }
         return prev - 1
       })
     }, 1000)
 
-    return () => clearInterval(timer)
+    // Handle page visibility change
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Math.floor((Date.now() - lastRefreshTime) / 1000)
+        if (elapsed >= refreshInterval) {
+          // Enough time has passed, refresh immediately
+          fetchModelStatuses()
+          lastRefreshTime = Date.now()
+          setCountdown(refreshInterval)
+        } else {
+          // Update countdown to reflect actual remaining time
+          setCountdown(Math.max(1, refreshInterval - elapsed))
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [refreshInterval, fetchModelStatuses])
 
   // Loading state
