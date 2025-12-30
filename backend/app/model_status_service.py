@@ -389,27 +389,168 @@ class ModelStatusService:
         return model_status
 
     def get_multiple_models_status(
-        self, 
+        self,
         model_names: List[str],
         time_window: str = DEFAULT_TIME_WINDOW,
         use_cache: bool = True
     ) -> List[ModelStatus]:
         """
-        Get status for multiple models.
-        
+        Get status for multiple models using batch query.
+
+        Optimized to use a single SQL query instead of N queries.
+
         Args:
             model_names: List of model names to query.
             time_window: Time window ('1h', '6h', '12h', '24h').
             use_cache: Whether to use cached data.
-            
+
         Returns:
             List of ModelStatus objects.
         """
+        if not model_names:
+            return []
+
+        # Validate time window
+        if time_window not in TIME_WINDOWS:
+            time_window = DEFAULT_TIME_WINDOW
+
+        # Check cache first for all models
         results = []
+        models_to_query = []
+        cached_results = {}
+
+        if use_cache:
+            for model_name in model_names:
+                cache_key = f"model_status:{model_name}:{time_window}"
+                cached = self._get_cache(cache_key)
+                if cached:
+                    cached_results[model_name] = self._dict_to_model_status(cached)
+                else:
+                    models_to_query.append(model_name)
+        else:
+            models_to_query = list(model_names)
+
+        # If all from cache, return immediately
+        if not models_to_query:
+            return [cached_results[name] for name in model_names if name in cached_results]
+
+        # Batch query for uncached models
+        now = int(time.time())
+        total_seconds, num_slots, slot_seconds = get_time_window_config(time_window)
+        window_start = now - total_seconds
+
+        # Build parameterized query with model list
+        # Use numbered placeholders for model names
+        model_placeholders = ", ".join([f":model_{i}" for i in range(len(models_to_query))])
+
+        sql = f"""
+            SELECT
+                model_name,
+                FLOOR((created_at - :window_start) / :slot_seconds) as slot_idx,
+                COUNT(*) as total,
+                SUM(CASE WHEN type = :type_success THEN 1 ELSE 0 END) as success
+            FROM logs
+            WHERE model_name IN ({model_placeholders})
+              AND created_at >= :window_start
+              AND created_at < :now
+              AND type IN (:type_success, :type_failure)
+            GROUP BY model_name, FLOOR((created_at - :window_start) / :slot_seconds)
+        """
+
+        # Build parameters
+        params = {
+            "window_start": window_start,
+            "now": now,
+            "slot_seconds": slot_seconds,
+            "type_success": LOG_TYPE_CONSUMPTION,
+            "type_failure": LOG_TYPE_FAILURE,
+        }
+        for i, model_name in enumerate(models_to_query):
+            params[f"model_{i}"] = model_name
+
+        # Initialize slot data for all models
+        model_slot_data: Dict[str, Dict[int, Dict]] = {}
+        for model_name in models_to_query:
+            model_slot_data[model_name] = {}
+            for i in range(num_slots):
+                slot_start = window_start + (i * slot_seconds)
+                slot_end = slot_start + slot_seconds
+                model_slot_data[model_name][i] = {
+                    'slot': i,
+                    'start_time': slot_start,
+                    'end_time': slot_end,
+                    'total_requests': 0,
+                    'success_count': 0,
+                }
+
+        # Execute batch query
+        try:
+            self._db.connect()
+            result = self._db.execute(sql, params)
+
+            for row in result:
+                model_name = row.get("model_name")
+                slot_idx = int(row.get("slot_idx") or 0)
+                if model_name in model_slot_data and 0 <= slot_idx < num_slots:
+                    model_slot_data[model_name][slot_idx]['total_requests'] = int(row.get("total") or 0)
+                    model_slot_data[model_name][slot_idx]['success_count'] = int(row.get("success") or 0)
+
+        except Exception as e:
+            logger.db_error(f"批量获取模型状态失败: {e}")
+
+        # Build ModelStatus for each model
+        queried_results = {}
+        for model_name in models_to_query:
+            slot_data = []
+            total_requests = 0
+            total_success = 0
+
+            for i in range(num_slots):
+                slot_info = model_slot_data[model_name][i]
+                slot_total = slot_info['total_requests']
+                slot_success = slot_info['success_count']
+                success_rate = (slot_success / slot_total * 100) if slot_total > 0 else 100.0
+                status = get_status_color(success_rate, slot_total)
+
+                slot_data.append(SlotStatus(
+                    slot=i,
+                    start_time=slot_info['start_time'],
+                    end_time=slot_info['end_time'],
+                    total_requests=slot_total,
+                    success_count=slot_success,
+                    success_rate=round(success_rate, 2),
+                    status=status,
+                ))
+
+                total_requests += slot_total
+                total_success += slot_success
+
+            overall_rate = (total_success / total_requests * 100) if total_requests > 0 else 100.0
+            current_status = get_status_color(overall_rate, total_requests)
+
+            model_status = ModelStatus(
+                model_name=model_name,
+                display_name=self._get_display_name(model_name),
+                time_window=time_window,
+                total_requests=total_requests,
+                success_count=total_success,
+                success_rate=round(overall_rate, 2),
+                current_status=current_status,
+                slot_data=slot_data,
+            )
+
+            # Cache the result
+            cache_key = f"model_status:{model_name}:{time_window}"
+            self._set_cache(cache_key, self._model_status_to_dict(model_status), ttl=CACHE_TTL_SHORT)
+            queried_results[model_name] = model_status
+
+        # Merge cached and queried results, preserving original order
         for model_name in model_names:
-            status = self.get_model_status(model_name, time_window, use_cache)
-            if status:
-                results.append(status)
+            if model_name in cached_results:
+                results.append(cached_results[model_name])
+            elif model_name in queried_results:
+                results.append(queried_results[model_name])
+
         return results
 
     def get_all_models_status(self, time_window: str = DEFAULT_TIME_WINDOW, use_cache: bool = True) -> List[ModelStatus]:
