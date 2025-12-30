@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2 } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets } from 'lucide-react'
 
 // ============================================================================
 // Types
@@ -27,7 +27,7 @@ interface ModelStatus {
   slot_data: SlotStatus[]
 }
 
-type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon'
+type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean' | 'terminal'
 
 interface ThemeConfig {
   id: ThemeId
@@ -46,6 +46,9 @@ export const THEMES: ThemeConfig[] = [
   { id: 'obsidian', name: '黑曜石', nameEn: 'Obsidian', icon: Moon, description: '经典深色主题，专业稳重' },
   { id: 'minimal', name: '极简', nameEn: 'Minimal', icon: Minimize2, description: '极度精简，适合嵌入' },
   { id: 'neon', name: '霓虹', nameEn: 'Neon', icon: Zap, description: '赛博朋克，科技感十足' },
+  { id: 'forest', name: '森林', nameEn: 'Forest', icon: Leaf, description: '深邃自然的森林色调' },
+  { id: 'ocean', name: '海洋', nameEn: 'Ocean', icon: Droplets, description: '宁静深邃的海洋蓝' },
+  { id: 'terminal', name: '终端', nameEn: 'Terminal', icon: Terminal, description: '复古极客风格' },
 ]
 
 // Theme-specific styles
@@ -69,6 +72,7 @@ const themeStyles: Record<ThemeId, {
   statusGreen: string
   statusYellow: string
   statusRed: string
+  statusEmpty: string  // No requests - neutral color
   statusHover: string
   // Badge
   badgeGreen: string
@@ -105,12 +109,13 @@ const themeStyles: Record<ThemeId, {
     statusGreen: 'bg-emerald-500',
     statusYellow: 'bg-amber-500',
     statusRed: 'bg-rose-500',
+    statusEmpty: 'bg-gray-700',  // No requests
     statusHover: 'hover:ring-2 hover:ring-white/30 hover:scale-y-110 origin-bottom',
     badgeGreen: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
     badgeYellow: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
     badgeRed: 'bg-rose-500/15 text-rose-400 border border-rose-500/30',
     timeLabel: 'text-xs text-gray-600 font-mono',
-    tooltip: 'bg-[#1c2128] border border-gray-700 rounded-xl shadow-2xl p-4',
+    tooltip: 'bg-[#1c2128] border border-gray-700 rounded-xl shadow-2xl p-4 z-[9999]',
     tooltipTitle: 'font-semibold text-white mb-3 pb-2 border-b border-gray-700/50',
     tooltipLabel: 'text-gray-400',
     tooltipValue: 'text-white font-medium',
@@ -136,12 +141,13 @@ const themeStyles: Record<ThemeId, {
     statusGreen: 'bg-emerald-500',
     statusYellow: 'bg-amber-500',
     statusRed: 'bg-rose-500',
+    statusEmpty: 'bg-slate-300',  // No requests
     statusHover: 'hover:ring-2 hover:ring-slate-400/50 hover:scale-y-110 origin-bottom',
     badgeGreen: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     badgeYellow: 'bg-amber-100 text-amber-700 border border-amber-200',
     badgeRed: 'bg-rose-100 text-rose-700 border border-rose-200',
     timeLabel: 'text-xs text-slate-400 font-mono',
-    tooltip: 'bg-white border border-slate-200 rounded-xl shadow-xl p-4',
+    tooltip: 'bg-white border border-slate-200 rounded-xl shadow-xl p-4 z-[9999]',
     tooltipTitle: 'font-semibold text-slate-800 mb-3 pb-2 border-b border-slate-100',
     tooltipLabel: 'text-slate-500',
     tooltipValue: 'text-slate-800 font-medium',
@@ -167,12 +173,13 @@ const themeStyles: Record<ThemeId, {
     statusGreen: 'bg-gray-900',
     statusYellow: 'bg-gray-400',
     statusRed: 'bg-gray-200',
+    statusEmpty: 'bg-gray-100',  // No requests
     statusHover: 'hover:opacity-70',
     badgeGreen: 'text-[10px] text-gray-500 font-normal',
     badgeYellow: 'text-[10px] text-gray-400 font-normal',
     badgeRed: 'text-[10px] text-gray-300 font-normal',
     timeLabel: 'text-[10px] text-gray-300',
-    tooltip: 'bg-gray-900 text-white rounded-lg shadow-lg p-3',
+    tooltip: 'bg-gray-900 text-white rounded-lg shadow-lg p-3 z-[9999]',
     tooltipTitle: 'font-medium text-white text-xs mb-2',
     tooltipLabel: 'text-gray-400 text-xs',
     tooltipValue: 'text-white text-xs',
@@ -205,12 +212,13 @@ const themeStyles: Record<ThemeId, {
     statusGreen: 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
     statusYellow: 'bg-gradient-to-t from-yellow-600 to-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]',
     statusRed: 'bg-gradient-to-t from-pink-600 to-pink-400 shadow-[0_0_10px_rgba(236,72,153,0.5)]',
+    statusEmpty: 'bg-gray-800',  // No requests
     statusHover: 'hover:shadow-[0_0_20px_currentColor] hover:scale-y-150 origin-bottom',
     badgeGreen: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]',
     badgeYellow: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.3)]',
     badgeRed: 'bg-pink-500/20 text-pink-400 border border-pink-500/50 shadow-[0_0_10px_rgba(236,72,153,0.3)]',
     timeLabel: 'text-xs text-gray-600 font-mono uppercase tracking-wider',
-    tooltip: 'bg-black/90 border border-purple-500/50 rounded-lg shadow-[0_0_30px_rgba(168,85,247,0.3)] p-4 backdrop-blur',
+    tooltip: 'bg-black/90 border border-purple-500/50 rounded-lg shadow-[0_0_30px_rgba(168,85,247,0.3)] p-4 backdrop-blur z-[9999]',
     tooltipTitle: 'font-bold text-cyan-400 mb-3 pb-2 border-b border-purple-500/30 font-mono',
     tooltipLabel: 'text-gray-500 font-mono text-xs uppercase',
     tooltipValue: 'text-white font-mono',
@@ -218,6 +226,102 @@ const themeStyles: Record<ThemeId, {
     legendDot: 'w-3 h-3 rounded shadow-[0_0_8px_currentColor]',
     emptyText: 'text-gray-600 font-mono',
     loader: 'text-purple-500',
+  },
+
+  // ========== FOREST (Nature Theme) ==========
+  forest: {
+    container: 'min-h-screen bg-[#022c22] text-emerald-50 p-6',
+    headerTitle: 'text-2xl font-bold text-emerald-100 tracking-tight',
+    headerSubtitle: 'text-sm text-emerald-400/60 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-[#064e3b]/30 border border-[#065f46] rounded-xl',
+    countdownText: 'text-emerald-300 font-mono font-semibold',
+    countdownLabel: 'text-emerald-400/60',
+    card: 'bg-[#064e3b]/20 border border-[#065f46]/50 rounded-xl p-5 transition-all duration-300 backdrop-blur-sm',
+    cardHover: 'hover:border-[#10b981]/30 hover:bg-[#064e3b]/30',
+    modelName: 'font-semibold text-emerald-50 truncate max-w-md',
+    statsText: 'text-sm text-emerald-400/60',
+    statsValue: 'text-emerald-100 font-semibold',
+    statusGreen: 'bg-emerald-500',
+    statusYellow: 'bg-yellow-500',
+    statusRed: 'bg-red-500',
+    statusEmpty: 'bg-emerald-900/30',
+    statusHover: 'hover:ring-2 hover:ring-emerald-200/30 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50',
+    badgeYellow: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700/50',
+    badgeRed: 'bg-red-900/50 text-red-300 border border-red-700/50',
+    timeLabel: 'text-xs text-emerald-400/40 font-mono',
+    tooltip: 'bg-[#022c22] border border-[#065f46] rounded-xl shadow-2xl p-4 z-[9999]',
+    tooltipTitle: 'font-semibold text-emerald-100 mb-3 pb-2 border-b border-[#065f46]',
+    tooltipLabel: 'text-emerald-400/60',
+    tooltipValue: 'text-emerald-100 font-medium',
+    legendText: 'text-xs text-emerald-400/60',
+    legendDot: 'w-3 h-3 rounded',
+    emptyText: 'text-emerald-400/40',
+    loader: 'text-emerald-500',
+  },
+
+  // ========== OCEAN (Blue Theme) ==========
+  ocean: {
+    container: 'min-h-screen bg-[#0b1121] text-blue-50 p-6',
+    headerTitle: 'text-2xl font-bold text-blue-100 tracking-tight',
+    headerSubtitle: 'text-sm text-blue-400/60 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-blue-900/20 border border-blue-800/50 rounded-xl',
+    countdownText: 'text-cyan-300 font-mono font-semibold',
+    countdownLabel: 'text-blue-400/60',
+    card: 'bg-blue-900/10 border border-blue-700/30 rounded-xl p-5 transition-all duration-300 backdrop-blur-md',
+    cardHover: 'hover:border-blue-500/30 hover:bg-blue-900/20',
+    modelName: 'font-semibold text-blue-50 truncate max-w-md',
+    statsText: 'text-sm text-blue-400/60',
+    statsValue: 'text-blue-100 font-semibold',
+    statusGreen: 'bg-cyan-500',
+    statusYellow: 'bg-amber-500',
+    statusRed: 'bg-rose-500',
+    statusEmpty: 'bg-blue-900/30',
+    statusHover: 'hover:ring-2 hover:ring-cyan-200/30 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-cyan-900/30 text-cyan-300 border border-cyan-700/30',
+    badgeYellow: 'bg-amber-900/30 text-amber-300 border border-amber-700/30',
+    badgeRed: 'bg-rose-900/30 text-rose-300 border border-rose-700/30',
+    timeLabel: 'text-xs text-blue-400/40 font-mono',
+    tooltip: 'bg-[#0f172a] border border-blue-800/50 rounded-xl shadow-2xl p-4 z-[9999]',
+    tooltipTitle: 'font-semibold text-blue-100 mb-3 pb-2 border-b border-blue-800/50',
+    tooltipLabel: 'text-blue-400/60',
+    tooltipValue: 'text-blue-100 font-medium',
+    legendText: 'text-xs text-blue-400/60',
+    legendDot: 'w-3 h-3 rounded',
+    emptyText: 'text-blue-400/40',
+    loader: 'text-cyan-500',
+  },
+
+  // ========== TERMINAL (Retro Theme) ==========
+  terminal: {
+    container: 'min-h-screen bg-black text-green-500 p-6 font-mono',
+    headerTitle: 'text-2xl font-bold text-green-500 tracking-tight uppercase border-b-2 border-green-500/50 pb-2 inline-block',
+    headerSubtitle: 'text-sm text-green-500/60 mt-2',
+    countdownBox: 'flex items-center gap-2 px-4 py-2 text-sm bg-black border border-green-500/50 rounded-none',
+    countdownText: 'text-green-400 font-bold',
+    countdownLabel: 'text-green-500/60',
+    card: 'bg-black border border-green-900 p-5 transition-all duration-300 hover:border-green-500',
+    cardHover: 'hover:shadow-[0_0_10px_rgba(34,197,94,0.2)]',
+    modelName: 'font-bold text-green-500 truncate max-w-md',
+    statsText: 'text-sm text-green-500/60',
+    statsValue: 'text-green-500 font-bold',
+    statusGreen: 'bg-green-600',
+    statusYellow: 'bg-yellow-600',
+    statusRed: 'bg-red-600',
+    statusEmpty: 'bg-green-900/30',
+    statusHover: 'hover:bg-green-400',
+    badgeGreen: 'bg-black text-green-500 border border-green-500 text-xs px-2 py-0.5',
+    badgeYellow: 'bg-black text-yellow-500 border border-yellow-500 text-xs px-2 py-0.5',
+    badgeRed: 'bg-black text-red-500 border border-red-500 text-xs px-2 py-0.5',
+    timeLabel: 'text-xs text-green-500/40',
+    tooltip: 'bg-black border border-green-500 shadow-none p-3 max-w-xs z-[9999]',
+    tooltipTitle: 'font-bold text-green-500 mb-2 border-b border-green-900 pb-1',
+    tooltipLabel: 'text-green-500/60',
+    tooltipValue: 'text-green-500',
+    legendText: 'text-xs text-green-500/60',
+    legendDot: 'w-2 h-2 rounded-none',
+    emptyText: 'text-green-500/40',
+    loader: 'text-green-500',
   },
 }
 
@@ -484,6 +588,13 @@ export function ModelStatusEmbed({
               </span>
             </div>
           ))}
+          {/* No requests indicator */}
+          <div className="flex items-center gap-2">
+            <span className={cn(styles.legendDot, styles.statusEmpty)} />
+            <span className={styles.legendText}>
+              {theme === 'minimal' ? 'No req' : '无请求'}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -575,9 +686,8 @@ function EmbedModelCard({ model, theme, styles }: EmbedModelCardProps) {
               key={index}
               className={cn(
                 "flex-1 rounded-sm cursor-pointer transition-all duration-200",
-                getStatusColor(slot.status, styles),
-                styles.statusHover,
-                slot.total_requests === 0 && 'opacity-30'
+                slot.total_requests === 0 ? styles.statusEmpty : getStatusColor(slot.status, styles),
+                styles.statusHover
               )}
               onMouseEnter={(e) => handleMouseEnter(slot, e)}
               onMouseLeave={() => setHoveredSlot(null)}

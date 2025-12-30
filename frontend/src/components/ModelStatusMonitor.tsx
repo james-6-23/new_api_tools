@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -36,6 +36,7 @@ const STATUS_COLORS = {
   green: 'bg-green-500',
   yellow: 'bg-yellow-500',
   red: 'bg-red-500',
+  empty: 'bg-gray-200 dark:bg-gray-700',  // No requests - neutral gray
 }
 
 const STATUS_LABELS = {
@@ -58,6 +59,9 @@ const THEMES = [
   { id: 'obsidian', name: '黑曜石', nameEn: 'Obsidian', icon: Moon, description: '经典深色，专业稳重', preview: 'bg-[#0d1117]' },
   { id: 'minimal', name: '极简', nameEn: 'Minimal', icon: Minimize2, description: '极度精简，适合嵌入', preview: 'bg-white' },
   { id: 'neon', name: '霓虹', nameEn: 'Neon', icon: Zap, description: '赛博朋克，科技感', preview: 'bg-black' },
+  { id: 'forest', name: '森林', nameEn: 'Forest', icon: Leaf, description: '深邃自然的森林色调', preview: 'bg-[#022c22]' },
+  { id: 'ocean', name: '海洋', nameEn: 'Ocean', icon: Droplets, description: '宁静深邃的海洋蓝', preview: 'bg-[#0b1121]' },
+  { id: 'terminal', name: '终端', nameEn: 'Terminal', icon: Terminal, description: '复古极客风格', preview: 'bg-black border border-green-500' },
 ]
 
 function formatTime(timestamp: number): string {
@@ -335,10 +339,40 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     fetchAvailableModels()
   }, [fetchAvailableModels])
 
-  // Fetch statuses when selected models or time window change
+  // Track if models/window changed (not initial load)
+  const isInitialMount = useRef(true)
+  const prevSelectedModels = useRef<string[]>([])
+  const prevTimeWindow = useRef<string>(timeWindow)
+
+  // Handle model selection and time window changes
   useEffect(() => {
-    fetchModelStatuses()
-  }, [fetchModelStatuses])
+    if (isInitialMount.current) {
+      // Initial load - use cache for fast loading
+      isInitialMount.current = false
+      prevSelectedModels.current = selectedModels
+      prevTimeWindow.current = timeWindow
+      fetchModelStatuses(false)  // Use cache on initial load
+      return
+    }
+
+    // Check what changed
+    const modelsChanged =
+      selectedModels.length !== prevSelectedModels.current.length ||
+      selectedModels.some(m => !prevSelectedModels.current.includes(m))
+    const windowChanged = timeWindow !== prevTimeWindow.current
+
+    // Update refs
+    prevSelectedModels.current = selectedModels
+    prevTimeWindow.current = timeWindow
+
+    if (modelsChanged) {
+      // Models selection changed - fetch fresh data for new models
+      fetchModelStatuses(true)
+    } else if (windowChanged) {
+      // Only time window changed - can use cache (pre-warmed)
+      fetchModelStatuses(false)
+    }
+  }, [selectedModels, timeWindow, fetchModelStatuses])
 
   // Auto refresh countdown
   useEffect(() => {
@@ -652,6 +686,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
               <span className="w-3 h-3 rounded bg-red-500" />
               <span>成功率 &lt; 80%</span>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded bg-gray-200 dark:bg-gray-700" />
+              <span>无请求</span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -717,8 +755,7 @@ function ModelStatusCard({ model }: ModelStatusCardProps) {
                 key={index}
                 className={cn(
                   "flex-1 h-8 rounded cursor-pointer transition-all hover:ring-2 hover:ring-primary hover:ring-offset-1",
-                  STATUS_COLORS[slot.status],
-                  slot.total_requests === 0 && "opacity-30"
+                  slot.total_requests === 0 ? STATUS_COLORS.empty : STATUS_COLORS[slot.status]
                 )}
                 onMouseEnter={(e) => handleMouseEnter(slot, e)}
                 onMouseLeave={() => setHoveredSlot(null)}
@@ -736,7 +773,7 @@ function ModelStatusCard({ model }: ModelStatusCardProps) {
           {/* Tooltip */}
           {hoveredSlot && (
             <div
-              className="fixed z-50 bg-popover border rounded-lg shadow-lg p-3 text-sm pointer-events-none"
+              className="fixed z-[9999] bg-popover border rounded-lg shadow-lg p-3 text-sm pointer-events-none"
               style={{
                 left: tooltipPosition.x,
                 top: tooltipPosition.y,

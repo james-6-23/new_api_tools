@@ -20,7 +20,7 @@ THEME_CACHE_KEY = "model_status:theme"
 REFRESH_INTERVAL_CACHE_KEY = "model_status:refresh_interval"
 
 # Available themes
-AVAILABLE_THEMES = ["daylight", "obsidian", "minimal", "neon"]
+AVAILABLE_THEMES = ["daylight", "obsidian", "minimal", "neon", "forest", "ocean", "terminal"]
 DEFAULT_THEME = "daylight"
 
 # Available refresh intervals (in seconds)

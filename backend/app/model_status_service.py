@@ -16,8 +16,10 @@ LOG_TYPE_CONSUMPTION = 2  # type=2 is consumption/usage log (success)
 LOG_TYPE_FAILURE = 5  # type=5 is failure log (request failed)
 
 # Cache TTL in seconds
-# Should be <= minimum frontend refresh interval (30s) to ensure data freshness
-CACHE_TTL = 30  # 30 seconds cache
+# Short TTL for actively monitored models (selected models refresh frequently)
+CACHE_TTL_SHORT = 30  # 30 seconds for selected models
+# Long TTL for warmup/background cache (unselected models, reduce DB load)
+CACHE_TTL_LONG = 300  # 5 minutes for warmup cache
 
 # Time window configurations: (total_seconds, num_slots, slot_seconds)
 TIME_WINDOWS = {
@@ -125,7 +127,7 @@ class ModelStatusService:
                 return json.loads(row[0])
         return None
 
-    def _set_cache(self, key: str, data: Dict, ttl: int = CACHE_TTL):
+    def _set_cache(self, key: str, data: Dict, ttl: int = CACHE_TTL_SHORT):
         """Set cache with TTL."""
         import json
         now = int(time.time())
@@ -186,26 +188,28 @@ class ModelStatusService:
             return []
 
     def get_model_status(
-        self, 
-        model_name: str, 
+        self,
+        model_name: str,
         time_window: str = DEFAULT_TIME_WINDOW,
-        use_cache: bool = True
+        use_cache: bool = True,
+        cache_ttl: int = CACHE_TTL_SHORT
     ) -> Optional[ModelStatus]:
         """
         Get status for a specific model within a time window.
-        
+
         Args:
             model_name: Name of the model to query.
             time_window: Time window ('1h', '6h', '12h', '24h').
             use_cache: Whether to use cached data.
-            
+            cache_ttl: Cache TTL in seconds (default: short TTL for active monitoring).
+
         Returns:
             ModelStatus with slot breakdown.
         """
         # Validate time window
         if time_window not in TIME_WINDOWS:
             time_window = DEFAULT_TIME_WINDOW
-        
+
         cache_key = f"model_status:{model_name}:{time_window}"
         if use_cache:
             cached = self._get_cache(cache_key)
@@ -214,74 +218,83 @@ class ModelStatusService:
 
         now = int(time.time())
         total_seconds, num_slots, slot_seconds = get_time_window_config(time_window)
-        
+
+        # Calculate time range
+        window_start = now - total_seconds
+
+        # Single optimized query - aggregate by time slot using floor division
+        # This reduces N queries to 1 query per model
+        sql = """
+            SELECT
+                FLOOR((created_at - :window_start) / :slot_seconds) as slot_idx,
+                COUNT(*) as total,
+                SUM(CASE WHEN type = :type_success THEN 1 ELSE 0 END) as success
+            FROM logs
+            WHERE model_name = :model_name
+              AND created_at >= :window_start
+              AND created_at < :now
+              AND type IN (:type_success, :type_failure)
+            GROUP BY FLOOR((created_at - :window_start) / :slot_seconds)
+        """
+
+        # Initialize all slots with zeros
+        slot_data_map = {}
+        for i in range(num_slots):
+            slot_start = window_start + (i * slot_seconds)
+            slot_end = slot_start + slot_seconds
+            slot_data_map[i] = {
+                'slot': i,
+                'start_time': slot_start,
+                'end_time': slot_end,
+                'total_requests': 0,
+                'success_count': 0,
+            }
+
+        try:
+            self._db.connect()
+            result = self._db.execute(sql, {
+                "model_name": model_name,
+                "window_start": window_start,
+                "now": now,
+                "slot_seconds": slot_seconds,
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
+            })
+
+            # Fill in actual data from query results
+            for row in result:
+                slot_idx = int(row.get("slot_idx") or 0)
+                if 0 <= slot_idx < num_slots:
+                    slot_data_map[slot_idx]['total_requests'] = int(row.get("total") or 0)
+                    slot_data_map[slot_idx]['success_count'] = int(row.get("success") or 0)
+
+        except Exception as e:
+            logger.db_error(f"获取模型 {model_name} 状态失败: {e}")
+
+        # Build slot_data list with status colors
         slot_data = []
         total_requests = 0
         total_success = 0
 
-        # Query each slot separately
-        for slot_offset in range(num_slots):
-            end_time = now - (slot_offset * slot_seconds)
-            start_time = end_time - slot_seconds
+        for i in range(num_slots):
+            slot_info = slot_data_map[i]
+            slot_total = slot_info['total_requests']
+            slot_success = slot_info['success_count']
+            success_rate = (slot_success / slot_total * 100) if slot_total > 0 else 100.0
+            status = get_status_color(success_rate, slot_total)
 
-            sql = """
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN type = :type_success THEN 1 ELSE 0 END) as success
-                FROM logs
-                WHERE model_name = :model_name
-                  AND created_at >= :start_time
-                  AND created_at < :end_time
-                  AND type IN (:type_success, :type_failure)
-            """
+            slot_data.append(SlotStatus(
+                slot=i,
+                start_time=slot_info['start_time'],
+                end_time=slot_info['end_time'],
+                total_requests=slot_total,
+                success_count=slot_success,
+                success_rate=round(success_rate, 2),
+                status=status,
+            ))
 
-            try:
-                self._db.connect()
-                result = self._db.execute(sql, {
-                    "model_name": model_name,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "type_success": LOG_TYPE_CONSUMPTION,
-                    "type_failure": LOG_TYPE_FAILURE,
-                })
-
-                if result:
-                    slot_total = int(result[0].get("total") or 0)
-                    slot_success = int(result[0].get("success") or 0)
-                else:
-                    slot_total = 0
-                    slot_success = 0
-
-                success_rate = (slot_success / slot_total * 100) if slot_total > 0 else 100.0
-                status = get_status_color(success_rate, slot_total)
-
-                slot_data.append(SlotStatus(
-                    slot=slot_offset,
-                    start_time=start_time,
-                    end_time=end_time,
-                    total_requests=slot_total,
-                    success_count=slot_success,
-                    success_rate=round(success_rate, 2),
-                    status=status,
-                ))
-
-                total_requests += slot_total
-                total_success += slot_success
-
-            except Exception as e:
-                logger.db_error(f"获取模型 {model_name} 第 {slot_offset} 个时间段状态失败: {e}")
-                slot_data.append(SlotStatus(
-                    slot=slot_offset,
-                    start_time=start_time,
-                    end_time=end_time,
-                    total_requests=0,
-                    success_count=0,
-                    success_rate=100.0,
-                    status='green',
-                ))
-
-        # Reverse to show oldest first (left to right)
-        slot_data.reverse()
+            total_requests += slot_total
+            total_success += slot_success
 
         overall_rate = (total_success / total_requests * 100) if total_requests > 0 else 100.0
         current_status = get_status_color(overall_rate, total_requests)
@@ -297,8 +310,8 @@ class ModelStatusService:
             slot_data=slot_data,
         )
 
-        # Cache the result
-        self._set_cache(cache_key, self._model_status_to_dict(model_status))
+        # Cache the result with specified TTL
+        self._set_cache(cache_key, self._model_status_to_dict(model_status), ttl=cache_ttl)
 
         return model_status
 
@@ -391,6 +404,7 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
     Warms up ALL time windows (1h, 6h, 12h, 24h) for each model.
+    Uses longer cache TTL (5 min) since these are background warmup caches.
 
     Args:
         max_models: Maximum number of models to warmup (default 50).
@@ -420,7 +434,7 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     time_windows = list(TIME_WINDOWS.keys())  # ['1h', '6h', '12h', '24h']
     total_tasks = len(models_to_warmup) * len(time_windows)
 
-    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存...")
+    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存 (TTL={CACHE_TTL_LONG}s)...")
 
     success_count = 0
     failed_tasks = []
@@ -428,8 +442,13 @@ async def warmup_model_status(max_models: int = 50) -> Dict[str, Any]:
     for model_name in models_to_warmup:
         for window in time_windows:
             try:
-                # Force refresh cache for each time window
-                service.get_model_status(model_name, time_window=window, use_cache=False)
+                # Force refresh cache with LONG TTL for warmup
+                service.get_model_status(
+                    model_name,
+                    time_window=window,
+                    use_cache=False,
+                    cache_ttl=CACHE_TTL_LONG  # 5 minutes for warmup cache
+                )
                 success_count += 1
                 # Small delay to avoid overwhelming the database
                 await asyncio.sleep(0.05)
