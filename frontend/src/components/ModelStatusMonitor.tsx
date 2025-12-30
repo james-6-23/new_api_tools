@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -137,6 +137,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
   const [showWindowDropdown, setShowWindowDropdown] = useState(false)
   const [showThemeDropdown, setShowThemeDropdown] = useState(false)
+  const [showEmbedHelp, setShowEmbedHelp] = useState(false)
   const modelSelectorRef = useRef<HTMLDivElement>(null)
   const intervalDropdownRef = useRef<HTMLDivElement>(null)
   const windowDropdownRef = useRef<HTMLDivElement>(null)
@@ -675,10 +676,26 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 )}
                 刷新
               </Button>
+
+              {/* Embed Help Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowEmbedHelp(true)}
+                title="嵌入说明"
+                className="h-9 w-9"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Embed Help Modal */}
+      {showEmbedHelp && (
+        <EmbedHelpModal onClose={() => setShowEmbedHelp(false)} />
+      )}
 
       {/* Model Status Cards */}
       {modelStatuses.length > 0 ? (
@@ -728,6 +745,172 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
 
 interface ModelStatusCardProps {
   model: ModelStatus
+}
+
+// Embed Help Modal Component
+function EmbedHelpModal({ onClose }: { onClose: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null)
+  
+  // Get current origin for embed URL
+  const embedUrl = `${window.location.origin}/embed`
+  
+  const codeExamples = {
+    basic: `<iframe 
+  src="${embedUrl}" 
+  width="100%" 
+  height="600" 
+  frameborder="0"
+  style="border-radius: 8px;"
+></iframe>`,
+    responsive: `<div style="position: relative; width: 100%; padding-bottom: 56.25%;">
+  <iframe 
+    src="${embedUrl}" 
+    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; border-radius: 8px;"
+  ></iframe>
+</div>`,
+    fullpage: `<!DOCTYPE html>
+<html>
+<head>
+  <title>模型状态监控</title>
+  <style>
+    body { margin: 0; padding: 0; }
+    iframe { width: 100vw; height: 100vh; border: none; }
+  </style>
+</head>
+<body>
+  <iframe src="${embedUrl}"></iframe>
+</body>
+</html>`,
+  }
+
+  const copyToClipboard = async (code: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(key)
+      setTimeout(() => setCopied(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-background border rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="text-lg font-semibold">使用 iframe 嵌入模型状态监控</h2>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        
+        {/* Content */}
+        <div className="p-4 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+          {/* Embed URL */}
+          <div>
+            <h3 className="text-sm font-medium mb-2">嵌入地址</h3>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-muted px-3 py-2 rounded text-sm break-all">
+                {embedUrl}
+              </code>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copyToClipboard(embedUrl, 'url')}
+              >
+                {copied === 'url' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+
+          {/* Features */}
+          <div>
+            <h3 className="text-sm font-medium mb-2">功能特点</h3>
+            <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+              <li>无需登录即可访问（公开嵌入模式）</li>
+              <li>支持多种主题风格（在主界面选择后自动同步）</li>
+              <li>自动刷新数据，实时监控模型状态</li>
+              <li>响应式设计，适配各种屏幕尺寸</li>
+            </ul>
+          </div>
+
+          {/* Basic Example */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">基础嵌入</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(codeExamples.basic, 'basic')}
+              >
+                {copied === 'basic' ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
+                复制
+              </Button>
+            </div>
+            <pre className="bg-muted p-3 rounded text-xs overflow-x-auto">
+              <code>{codeExamples.basic}</code>
+            </pre>
+          </div>
+
+          {/* Responsive Example */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">响应式嵌入（16:9 比例）</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(codeExamples.responsive, 'responsive')}
+              >
+                {copied === 'responsive' ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
+                复制
+              </Button>
+            </div>
+            <pre className="bg-muted p-3 rounded text-xs overflow-x-auto">
+              <code>{codeExamples.responsive}</code>
+            </pre>
+          </div>
+
+          {/* Full Page Example */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium">全屏页面</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(codeExamples.fullpage, 'fullpage')}
+              >
+                {copied === 'fullpage' ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
+                复制
+              </Button>
+            </div>
+            <pre className="bg-muted p-3 rounded text-xs overflow-x-auto">
+              <code>{codeExamples.fullpage}</code>
+            </pre>
+          </div>
+
+          {/* Tips */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+            <h3 className="text-sm font-medium text-blue-600 dark:text-blue-400 mb-2">💡 提示</h3>
+            <ul className="text-sm text-muted-foreground space-y-1">
+              <li>• 在主界面选择的模型、主题、刷新间隔会自动同步到嵌入页面</li>
+              <li>• 嵌入页面使用独立的公开 API，不需要认证</li>
+              <li>• 建议使用 HTTPS 以确保安全性</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end gap-2 p-4 border-t">
+          <Button variant="outline" onClick={onClose}>
+            关闭
+          </Button>
+          <Button onClick={() => window.open(embedUrl, '_blank')}>
+            预览嵌入页面
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ModelStatusCard({ model }: ModelStatusCardProps) {
