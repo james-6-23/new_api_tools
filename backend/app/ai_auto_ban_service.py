@@ -558,12 +558,19 @@ class AIAutoBanService:
         payload = {
             "model": self._ai_model,
             "messages": [
-                {"role": "system", "content": "你是一个专业的 API 风控分析师，擅长识别异常用户行为。"},
+                {"role": "system", "content": "你是一个专业的 API 风控分析师，擅长识别异常用户行为。请只返回 JSON 格式的响应，不要包含任何其他文本。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
             "max_tokens": 500,
         }
+        
+        # 尝试添加 response_format 参数（OpenAI 兼容 API 支持）
+        # 注意：某些 API 可能不支持此参数，会被忽略
+        try:
+            payload["response_format"] = {"type": "json_object"}
+        except Exception:
+            pass
 
         last_error = None
         url = self._get_endpoint_url(self._openai_base_url, "/chat/completions")
@@ -843,6 +850,77 @@ class AIAutoBanService:
                 "message": f"测试失败: {str(e)}",
             }
 
+    def _extract_json_from_response(self, response: str) -> tuple[str, str]:
+        """
+        从 AI 响应中提取 JSON 字符串
+        
+        Returns:
+            (json_str, extraction_method)
+        """
+        import re
+        
+        # 方法1: 直接尝试解析整个响应
+        try:
+            json.loads(response.strip())
+            return response.strip(), "direct"
+        except json.JSONDecodeError:
+            pass
+        
+        # 方法2: 提取 ```json ... ``` 代码块
+        if "```json" in response:
+            try:
+                json_str = response.split("```json")[1].split("```")[0].strip()
+                json.loads(json_str)  # 验证是否有效
+                return json_str, "json_code_block"
+            except (IndexError, json.JSONDecodeError):
+                pass
+        
+        # 方法3: 提取 ``` ... ``` 代码块
+        if "```" in response:
+            try:
+                json_str = response.split("```")[1].split("```")[0].strip()
+                json.loads(json_str)  # 验证是否有效
+                return json_str, "code_block"
+            except (IndexError, json.JSONDecodeError):
+                pass
+        
+        # 方法4: 查找第一个 { 到最后一个 } 之间的内容
+        first_brace = response.find('{')
+        last_brace = response.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            try:
+                json_str = response[first_brace:last_brace + 1]
+                json.loads(json_str)  # 验证是否有效
+                return json_str, "brace_extract"
+            except json.JSONDecodeError:
+                pass
+        
+        # 方法5: 使用正则匹配包含 should_ban 的 JSON（支持嵌套）
+        # 从包含 should_ban 的位置向前找 {，向后找匹配的 }
+        match = re.search(r'"should_ban"', response)
+        if match:
+            start_pos = match.start()
+            # 向前找最近的 {
+            brace_start = response.rfind('{', 0, start_pos)
+            if brace_start != -1:
+                # 从 brace_start 开始，找匹配的 }
+                depth = 0
+                for i, char in enumerate(response[brace_start:], brace_start):
+                    if char == '{':
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                json_str = response[brace_start:i + 1]
+                                json.loads(json_str)  # 验证是否有效
+                                return json_str, "nested_extract"
+                            except json.JSONDecodeError:
+                                break
+        
+        # 所有方法都失败，返回原始响应
+        return response, "fallback"
+
     def _parse_ai_response(
         self,
         response: str,
@@ -860,22 +938,7 @@ class AIAutoBanService:
 
         try:
             # 尝试提取 JSON
-            json_str = response
-            extraction_method = "direct"
-
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0]
-                extraction_method = "json_code_block"
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0]
-                extraction_method = "code_block"
-            else:
-                # 尝试查找 JSON 对象 { ... }
-                import re
-                json_match = re.search(r'\{[^{}]*"should_ban"[^{}]*\}', response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group()
-                    extraction_method = "regex_extract"
+            json_str, extraction_method = self._extract_json_from_response(response)
 
             logger.debug(f"AI自动封禁: 解析响应 (method={extraction_method}, model={model}), JSON预览: {json_str[:300]}...")
 
@@ -918,7 +981,7 @@ class AIAutoBanService:
         except json.JSONDecodeError as e:
             self._last_error_message = f"JSON 解析失败 (model={model}): {e}"
             logger.error(f"AI自动封禁: JSON 解析失败 - {e}")
-            logger.error(f"AI自动封禁: 尝试解析的内容: {json_str[:500] if 'json_str' in dir() else response[:500]}")
+            logger.error(f"AI自动封禁: 提取方法={extraction_method}, 尝试解析的内容: {json_str[:500]}")
             logger.error(f"AI自动封禁: 完整原始响应: {response}")
             return None
         except (KeyError, ValueError, TypeError) as e:
