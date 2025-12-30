@@ -737,6 +737,10 @@ export function ModelStatusEmbed({
   const [timeWindow, setTimeWindow] = useState('24h')
   const [theme, setTheme] = useState<ThemeId>(defaultTheme || 'daylight')
 
+  // Tooltip state - lifted to parent to avoid z-index/transform issues
+  const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
+
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const styles = themeStyles[theme]
 
@@ -859,6 +863,15 @@ export function ModelStatusEmbed({
     }
   }, [refreshInterval, fetchModelStatuses])
 
+  // Handler for hover
+  const handleSlotHover = (slot: SlotStatus, rect: DOMRect) => {
+    setTooltipPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top - 10,
+    })
+    setHoveredSlot(slot)
+  }
+
   // Loading state
   if (loading && modelStatuses.length === 0) {
     return (
@@ -891,6 +904,11 @@ export function ModelStatusEmbed({
               {theme !== 'minimal' && <Activity className="h-5 w-5 opacity-60" />}
               <h1 className={styles.headerTitle}>
                 {theme === 'minimal' ? 'Status' : '模型状态监控'}
+                {theme !== 'minimal' && (
+                  <span className="ml-3 text-sm font-normal opacity-60">
+                    {THEMES.find(t => t.id === theme)?.name}
+                  </span>
+                )}
               </h1>
             </div>
             <p className={styles.headerSubtitle}>
@@ -921,6 +939,8 @@ export function ModelStatusEmbed({
                 model={model}
                 theme={theme}
                 styles={styles}
+                onHover={handleSlotHover}
+                onLeave={() => setHoveredSlot(null)}
               />
             ))}
           </div>
@@ -959,6 +979,42 @@ export function ModelStatusEmbed({
           </div>
         </div>
       </div>
+
+      {/* Global Tooltip */}
+      {hoveredSlot && (
+        <div
+          className={cn("fixed z-50 pointer-events-none text-sm", styles.tooltip)}
+          style={{
+            left: tooltipPosition.x,
+            top: tooltipPosition.y,
+            transform: 'translate(-50%, -100%)',
+          }}
+        >
+          <div className={styles.tooltipTitle}>
+            {formatDateTime(hoveredSlot.start_time)} - {formatTime(hoveredSlot.end_time)}
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex justify-between gap-6">
+              <span className={styles.tooltipLabel}>总请求</span>
+              <span className={styles.tooltipValue}>{hoveredSlot.total_requests}</span>
+            </div>
+            <div className="flex justify-between gap-6">
+              <span className={styles.tooltipLabel}>成功数</span>
+              <span className={cn(styles.tooltipValue, 'text-emerald-400')}>{hoveredSlot.success_count}</span>
+            </div>
+            <div className="flex justify-between gap-6">
+              <span className={styles.tooltipLabel}>成功率</span>
+              <span className={cn(
+                styles.tooltipValue,
+                hoveredSlot.status === 'green' ? 'text-emerald-400' :
+                hoveredSlot.status === 'yellow' ? 'text-amber-400' : 'text-rose-400'
+              )}>
+                {hoveredSlot.success_rate}%
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -971,19 +1027,15 @@ interface EmbedModelCardProps {
   model: ModelStatus
   theme: ThemeId
   styles: typeof themeStyles.obsidian
+  onHover: (slot: SlotStatus, rect: DOMRect) => void
+  onLeave: () => void
 }
 
-function EmbedModelCard({ model, theme, styles }: EmbedModelCardProps) {
-  const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
-
+function EmbedModelCard({ model, theme, styles, onHover, onLeave }: EmbedModelCardProps) {
+  
   const handleMouseEnter = (slot: SlotStatus, event: React.MouseEvent) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    setTooltipPosition({
-      x: rect.left + rect.width / 2,
-      y: rect.top - 10,
-    })
-    setHoveredSlot(slot)
+    onHover(slot, rect)
   }
 
   const getTimeLabels = () => {
@@ -1052,7 +1104,7 @@ function EmbedModelCard({ model, theme, styles }: EmbedModelCardProps) {
                 styles.statusHover
               )}
               onMouseEnter={(e) => handleMouseEnter(slot, e)}
-              onMouseLeave={() => setHoveredSlot(null)}
+              onMouseLeave={onLeave}
             />
           ))}
         </div>
@@ -1066,42 +1118,6 @@ function EmbedModelCard({ model, theme, styles }: EmbedModelCardProps) {
           <span>{isMinimal ? timeLabels[1].replace('分钟前', 'm').replace('小时前', 'h') : timeLabels[1]}</span>
           <span>{isMinimal ? 'now' : timeLabels[2]}</span>
         </div>
-
-        {/* Tooltip */}
-        {hoveredSlot && (
-          <div
-            className={cn("fixed z-50 pointer-events-none text-sm", styles.tooltip)}
-            style={{
-              left: tooltipPosition.x,
-              top: tooltipPosition.y,
-              transform: 'translate(-50%, -100%)',
-            }}
-          >
-            <div className={styles.tooltipTitle}>
-              {formatDateTime(hoveredSlot.start_time)} - {formatTime(hoveredSlot.end_time)}
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex justify-between gap-6">
-                <span className={styles.tooltipLabel}>总请求</span>
-                <span className={styles.tooltipValue}>{hoveredSlot.total_requests}</span>
-              </div>
-              <div className="flex justify-between gap-6">
-                <span className={styles.tooltipLabel}>成功数</span>
-                <span className={cn(styles.tooltipValue, 'text-emerald-400')}>{hoveredSlot.success_count}</span>
-              </div>
-              <div className="flex justify-between gap-6">
-                <span className={styles.tooltipLabel}>成功率</span>
-                <span className={cn(
-                  styles.tooltipValue,
-                  hoveredSlot.status === 'green' ? 'text-emerald-400' :
-                  hoveredSlot.status === 'yellow' ? 'text-amber-400' : 'text-rose-400'
-                )}>
-                  {hoveredSlot.success_rate}%
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

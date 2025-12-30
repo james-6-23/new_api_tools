@@ -695,13 +695,27 @@ async def background_cache_warmup():
     
     logger.banner("🚀 缓存恢复任务启动")
 
-    _set_warmup_status("initializing", 0, "正在初始化缓存...")
+    # 初始化预热步骤
+    steps = [
+        {"name": "恢复缓存", "status": "pending"},
+        {"name": "检查缓存有效性", "status": "pending"},
+        {"name": "预热排行榜数据", "status": "pending"},
+        {"name": "预热 Dashboard", "status": "pending"},
+        {"name": "预热用户活跃度", "status": "pending"},
+        {"name": "预热 IP 监控", "status": "pending"},
+        {"name": "预热 IP 分布", "status": "pending"},
+        {"name": "预热模型状态", "status": "pending"},
+    ]
+
+    _set_warmup_status("initializing", 0, "正在初始化缓存...", steps)
 
     # 获取缓存管理器
     cache = get_cache_manager()
     
     # 阶段1：从 SQLite 恢复到 Redis（如果 Redis 可用）
     logger.phase(1, "从 SQLite 恢复缓存到 Redis")
+    steps[0]["status"] = "done"
+    _set_warmup_status("initializing", 5, "正在恢复缓存...", steps)
     if cache.redis_available:
         restored = cache.restore_to_redis()
         if restored > 0:
@@ -713,7 +727,8 @@ async def background_cache_warmup():
     
     # 阶段2：检查缓存有效性
     logger.phase(2, "检查缓存有效性")
-    _set_warmup_status("initializing", 20, "正在检查缓存有效性...")
+    steps[1]["status"] = "done"
+    _set_warmup_status("initializing", 10, "正在检查缓存有效性...", steps)
 
     windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
     cached_windows = cache.get_cached_windows()
@@ -722,42 +737,59 @@ async def background_cache_warmup():
     if not missing_windows:
         # 所有缓存都有效，但仍需预热 Dashboard、IP监控 和 IP 分布
         logger.success("所有缓存有效，无需预热排行榜")
+        steps[2]["status"] = "done"  # 排行榜跳过
+        _set_warmup_status("initializing", 40, "排行榜缓存有效，正在预热 Dashboard...", steps)
 
         # 预热 Dashboard 数据
+        steps[3]["status"] = "pending"
         try:
             await _warmup_dashboard_data()
+            steps[3]["status"] = "done"
         except Exception as e:
             logger.warn(f"Dashboard 预热异常: {e}")
+            steps[3]["status"] = "error"
+        _set_warmup_status("initializing", 55, "正在预热用户活跃度列表...", steps)
 
         # 预热用户活跃度列表（仅大型系统）
         try:
             await _warmup_user_activity_list()
+            steps[4]["status"] = "done"
         except Exception as e:
             logger.warn(f"用户活跃度列表预热异常: {e}")
+            steps[4]["status"] = "error"
+        _set_warmup_status("initializing", 65, "正在预热 IP 监控数据...", steps)
 
         # 预热 IP 监控数据（共享IP、多IP令牌、多IP用户、IP Stats）
         try:
             await _warmup_ip_monitoring_data()
+            steps[5]["status"] = "done"
         except Exception as e:
             logger.warn(f"IP监控预热异常: {e}")
+            steps[5]["status"] = "error"
+        _set_warmup_status("initializing", 80, "正在预热 IP 地区分布...", steps)
 
         # 预热 IP 地区分布
         try:
             from .ip_distribution_service import warmup_ip_distribution
             await warmup_ip_distribution()
+            steps[6]["status"] = "done"
         except Exception as e:
             logger.warning(f"[IP分布] 预热异常: {e}")
+            steps[6]["status"] = "error"
+        _set_warmup_status("initializing", 90, "正在预热模型状态...", steps)
 
         # 预热模型状态监控数据（动态获取所有可用模型）
         try:
             from .model_status_service import warmup_model_status
             await warmup_model_status()
+            steps[7]["status"] = "done"
         except Exception as e:
             logger.warning(f"[模型状态] 预热异常: {e}")
+            steps[7]["status"] = "error"
         
         # 所有预热完成
         elapsed = time.time() - warmup_start_time
-        _set_warmup_status("ready", 100, f"缓存恢复完成，耗时 {elapsed:.2f}s")
+        _set_warmup_status("ready", 100, f"预热完成，耗时 {elapsed:.1f}s", steps)
         logger.banner("✅ 缓存预热完成")
         logger.kvs({
             "总耗时": f"{elapsed:.1f}s",
@@ -848,7 +880,7 @@ async def background_cache_warmup():
         "查询延迟": f"{query_delay}s/窗口",
         "预计耗时": f"{estimated_total_time:.0f}~{estimated_total_time * 1.5:.0f} 秒",
     })
-    _set_warmup_status("initializing", 30, f"正在预热 {total_to_warm} 个窗口，预计扫描 {total_logs_to_scan:,} 条日志...")
+    _set_warmup_status("initializing", 15, f"正在预热排行榜 ({total_to_warm} 个窗口)...", steps)
 
     from .risk_monitoring_service import get_risk_monitoring_service
     service = get_risk_monitoring_service()
@@ -858,7 +890,8 @@ async def background_cache_warmup():
     window_times = []  # 记录每个窗口的实际耗时，用于动态估算
     
     for idx, window in enumerate(missing_windows):
-        progress = 30 + int((idx / max(total_to_warm, 1)) * 60)
+        # progress: 15% -> 50% (排行榜预热占 35%)
+        progress = 15 + int((idx / max(total_to_warm, 1)) * 35)
         
         # 获取该窗口预计扫描的日志数
         window_estimated_logs = window_logs_estimate.get(window, 0)
@@ -868,10 +901,10 @@ async def background_cache_warmup():
             avg_time = sum(window_times) / len(window_times)
             remaining_windows = total_to_warm - idx
             remaining_time = (avg_time + query_delay) * remaining_windows
-            _set_warmup_status("initializing", progress, f"正在预热: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s")
+            _set_warmup_status("initializing", progress, f"排行榜: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s", steps)
         else:
             remaining_time = estimated_total_time - (estimated_query_time + query_delay) * idx
-            _set_warmup_status("initializing", progress, f"正在预热: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s")
+            _set_warmup_status("initializing", progress, f"排行榜: {window} ({idx + 1}/{total_to_warm})，剩余约 {remaining_time:.0f}s", steps)
         
         window_start = time.time()
         logger.step(idx + 1, total_to_warm, f"预热 {window} 窗口，预计扫描 {window_estimated_logs:,} 条日志...")
@@ -929,52 +962,70 @@ async def background_cache_warmup():
         "总耗时": f"{total_elapsed:.1f}s",
     })
 
-    # 排行榜窗口预热完成，但系统仍需继续预热 Dashboard/IP 分布，避免前端提前进入导致 DB 负载骤增
+    # 排行榜窗口预热完成
+    steps[2]["status"] = "done" if not failed else "error"
     window_status_msg = (
-        f"排行榜预热完成（部分失败），耗时 {total_elapsed:.1f}s，正在预热 Dashboard..."
+        f"排行榜预热完成（部分失败），正在预热 Dashboard..."
         if failed
-        else f"排行榜预热完成，耗时 {total_elapsed:.1f}s，正在预热 Dashboard..."
+        else f"排行榜预热完成，正在预热 Dashboard..."
     )
-    _set_warmup_status("initializing", 85, window_status_msg)
+    _set_warmup_status("initializing", 50, window_status_msg, steps)
 
     # === 阶段4：预热 Dashboard 数据（重要！避免首次访问超时）===
     try:
         await _warmup_dashboard_data()
+        steps[3]["status"] = "done"
     except Exception as e:
         logger.warn(f"Dashboard 预热异常: {e}")
-    else:
-        _set_warmup_status("initializing", 90, "Dashboard 预热完成，正在预热用户活跃度列表...")
+        steps[3]["status"] = "error"
+    _set_warmup_status("initializing", 60, "正在预热用户活跃度列表...", steps)
 
     # === 阶段5：预热用户活跃度列表（仅大型系统）===
     try:
         await _warmup_user_activity_list()
+        steps[4]["status"] = "done"
     except Exception as e:
         logger.warn(f"用户活跃度列表预热异常: {e}")
-    else:
-        _set_warmup_status("initializing", 94, "用户活跃度列表预热完成，正在预热 IP 地区分布...")
+        steps[4]["status"] = "error"
+    _set_warmup_status("initializing", 70, "正在预热 IP 监控数据...", steps)
+
+    # === 阶段5.5：预热 IP 监控数据 ===
+    try:
+        await _warmup_ip_monitoring_data()
+        steps[5]["status"] = "done"
+    except Exception as e:
+        logger.warn(f"IP监控预热异常: {e}")
+        steps[5]["status"] = "error"
+    _set_warmup_status("initializing", 80, "正在预热 IP 地区分布...", steps)
 
     # === 阶段6：预热 IP 地区分布 ===
     try:
         from .ip_distribution_service import warmup_ip_distribution
         await warmup_ip_distribution()
+        steps[6]["status"] = "done"
     except Exception as e:
         logger.warning(f"[IP分布] 预热异常: {e}")
+        steps[6]["status"] = "error"
+    _set_warmup_status("initializing", 90, "正在预热模型状态...", steps)
 
     # === 阶段7：预热模型状态监控数据（动态获取所有可用模型）
     try:
         from .model_status_service import warmup_model_status
         await warmup_model_status()
+        steps[7]["status"] = "done"
     except Exception as e:
         logger.warning(f"[模型状态] 预热异常: {e}")
+        steps[7]["status"] = "error"
 
     # 所有预热完成后输出完成日志
     total_warmup_elapsed = time.time() - warmup_start_time
+    has_errors = any(s["status"] == "error" for s in steps)
     final_msg = (
         f"预热完成（部分失败），耗时 {total_warmup_elapsed:.1f}s"
-        if failed
+        if has_errors
         else f"预热完成，耗时 {total_warmup_elapsed:.1f}s"
     )
-    _set_warmup_status("ready", 100, final_msg)
+    _set_warmup_status("ready", 100, final_msg, steps)
     logger.banner("✅ 缓存预热完成")
     logger.kvs({
         "总耗时": f"{total_warmup_elapsed:.1f}s",
