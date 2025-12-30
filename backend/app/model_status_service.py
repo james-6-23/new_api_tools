@@ -255,7 +255,9 @@ class ModelStatusService:
         # Sort: models with requests first (by count desc), then models without requests (alphabetically)
         models_with_stats.sort(key=lambda x: (-x["request_count_24h"], x["model_name"]))
 
-        self._set_cache(cache_key, {"models": models_with_stats}, ttl=300)  # 5 min cache
+        # 30 min cache - longer TTL to avoid slow queries when users access the page
+        # This data doesn't change frequently and will be refreshed by background task
+        self._set_cache(cache_key, {"models": models_with_stats}, ttl=1800)
         return models_with_stats
 
     def get_model_status(

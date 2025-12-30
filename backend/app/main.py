@@ -1107,18 +1107,22 @@ async def _background_refresh_loop(cache):
     刷新内容：
     1. 排行榜数据（所有时间窗口）
     2. 仪表盘核心数据（避免用户访问时触发慢查询）
+    3. 模型状态数据（模型列表和状态缓存）
 
     针对大型系统优化：
     - 根据系统规模调整刷新间隔
     - 分批刷新避免瞬间高负载
-    - 仪表盘数据每 N 个周期刷新一次
+    - 仪表盘数据每 3 个周期刷新一次
+    - 模型状态数据每 6 个周期刷新一次（约 30 分钟）
     """
     from .system_scale_service import get_detected_settings
     from .risk_monitoring_service import get_risk_monitoring_service
     from .cached_dashboard import get_cached_dashboard_service
+    from .model_status_service import get_model_status_service
 
     windows = ["1h", "3h", "6h", "12h", "24h", "3d", "7d"]
     dashboard_refresh_counter = 0  # 仪表盘刷新计数器
+    model_status_refresh_counter = 0  # 模型状态刷新计数器
 
     while True:
         try:
@@ -1183,6 +1187,23 @@ async def _background_refresh_loop(cache):
                     logger.debug("[定时刷新] 仪表盘数据已刷新")
                 except Exception as e:
                     logger.warning(f"[定时刷新] 仪表盘刷新失败: {e}")
+
+            # === 刷新模型状态数据（每 6 个周期刷新一次，约 30 分钟）===
+            model_status_refresh_counter += 1
+            if model_status_refresh_counter >= 6:
+                model_status_refresh_counter = 0
+                try:
+                    model_service = get_model_status_service()
+                    loop = asyncio.get_event_loop()
+
+                    # 刷新模型列表（含 24h 请求统计）
+                    await loop.run_in_executor(
+                        None,
+                        lambda: model_service.get_available_models_with_stats(use_cache=False)
+                    )
+                    logger.debug("[定时刷新] 模型状态数据已刷新")
+                except Exception as e:
+                    logger.warning(f"[定时刷新] 模型状态刷新失败: {e}")
 
             refresh_elapsed = time.time() - refresh_start
             logger.debug(f"[定时刷新] 完成，耗时 {refresh_elapsed:.1f}s")
