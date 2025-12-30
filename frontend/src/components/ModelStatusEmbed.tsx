@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Server, AlertTriangle, ShieldCheck, XCircle } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Sparkles, Minimize2 } from 'lucide-react'
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface SlotStatus {
   slot: number
@@ -23,43 +27,260 @@ interface ModelStatus {
   slot_data: SlotStatus[]
 }
 
-const STATUS_COLORS = {
-  green: 'bg-emerald-500 hover:bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]',
-  yellow: 'bg-amber-500 hover:bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]',
-  red: 'bg-rose-500 hover:bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.3)]',
+type ThemeId = 'obsidian' | 'daylight' | 'aurora' | 'minimal' | 'neon'
+
+interface ThemeConfig {
+  id: ThemeId
+  name: string
+  nameEn: string
+  icon: React.ComponentType<{ className?: string }>
+  description: string
 }
 
-const STATUS_ICONS = {
-  green: ShieldCheck,
-  yellow: AlertTriangle,
-  red: XCircle,
+// ============================================================================
+// Theme Definitions
+// ============================================================================
+
+export const THEMES: ThemeConfig[] = [
+  { id: 'daylight', name: '日光', nameEn: 'Daylight', icon: Sun, description: '明亮清新的浅色主题' },
+  { id: 'obsidian', name: '黑曜石', nameEn: 'Obsidian', icon: Moon, description: '经典深色主题，专业稳重' },
+  { id: 'aurora', name: '极光', nameEn: 'Aurora', icon: Sparkles, description: '玻璃拟态，梦幻通透' },
+  { id: 'minimal', name: '极简', nameEn: 'Minimal', icon: Minimize2, description: '极度精简，适合嵌入' },
+  { id: 'neon', name: '霓虹', nameEn: 'Neon', icon: Zap, description: '赛博朋克，科技感十足' },
+]
+
+// Theme-specific styles
+const themeStyles: Record<ThemeId, {
+  // Container
+  container: string
+  background?: string
+  // Header
+  headerTitle: string
+  headerSubtitle: string
+  countdownBox: string
+  countdownText: string
+  countdownLabel: string
+  // Card
+  card: string
+  cardHover: string
+  modelName: string
+  statsText: string
+  statsValue: string
+  // Status colors
+  statusGreen: string
+  statusYellow: string
+  statusRed: string
+  statusHover: string
+  // Badge
+  badgeGreen: string
+  badgeYellow: string
+  badgeRed: string
+  // Timeline
+  timeLabel: string
+  // Tooltip
+  tooltip: string
+  tooltipTitle: string
+  tooltipLabel: string
+  tooltipValue: string
+  // Legend
+  legendText: string
+  legendDot: string
+  // Empty state
+  emptyText: string
+  // Loader
+  loader: string
+}> = {
+  // ========== OBSIDIAN (Default Dark Theme) ==========
+  obsidian: {
+    container: 'min-h-screen bg-[#0d1117] text-gray-100 p-6',
+    headerTitle: 'text-2xl font-bold text-white tracking-tight',
+    headerSubtitle: 'text-sm text-gray-500 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-[#161b22] border border-gray-800 rounded-xl',
+    countdownText: 'text-blue-400 font-mono font-semibold',
+    countdownLabel: 'text-gray-500',
+    card: 'bg-[#161b22] border border-gray-800/80 rounded-xl p-5 transition-all duration-300',
+    cardHover: 'hover:border-gray-700 hover:bg-[#1c2129]',
+    modelName: 'font-semibold text-white truncate max-w-md',
+    statsText: 'text-sm text-gray-400',
+    statsValue: 'text-white font-semibold',
+    statusGreen: 'bg-emerald-500',
+    statusYellow: 'bg-amber-500',
+    statusRed: 'bg-rose-500',
+    statusHover: 'hover:ring-2 hover:ring-white/30 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+    badgeYellow: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
+    badgeRed: 'bg-rose-500/15 text-rose-400 border border-rose-500/30',
+    timeLabel: 'text-xs text-gray-600 font-mono',
+    tooltip: 'bg-[#1c2128] border border-gray-700 rounded-xl shadow-2xl p-4',
+    tooltipTitle: 'font-semibold text-white mb-3 pb-2 border-b border-gray-700/50',
+    tooltipLabel: 'text-gray-400',
+    tooltipValue: 'text-white font-medium',
+    legendText: 'text-xs text-gray-500',
+    legendDot: 'w-3 h-3 rounded',
+    emptyText: 'text-gray-500',
+    loader: 'text-gray-500',
+  },
+
+  // ========== DAYLIGHT (Light Theme) ==========
+  daylight: {
+    container: 'min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900 p-6',
+    headerTitle: 'text-2xl font-bold text-slate-800 tracking-tight',
+    headerSubtitle: 'text-sm text-slate-500 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-white border border-slate-200 rounded-xl shadow-sm',
+    countdownText: 'text-blue-600 font-mono font-semibold',
+    countdownLabel: 'text-slate-400',
+    card: 'bg-white border border-slate-200 rounded-xl p-5 shadow-sm transition-all duration-300',
+    cardHover: 'hover:shadow-md hover:border-slate-300',
+    modelName: 'font-semibold text-slate-800 truncate max-w-md',
+    statsText: 'text-sm text-slate-500',
+    statsValue: 'text-slate-800 font-semibold',
+    statusGreen: 'bg-emerald-500',
+    statusYellow: 'bg-amber-500',
+    statusRed: 'bg-rose-500',
+    statusHover: 'hover:ring-2 hover:ring-slate-400/50 hover:scale-y-110 origin-bottom',
+    badgeGreen: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    badgeYellow: 'bg-amber-100 text-amber-700 border border-amber-200',
+    badgeRed: 'bg-rose-100 text-rose-700 border border-rose-200',
+    timeLabel: 'text-xs text-slate-400 font-mono',
+    tooltip: 'bg-white border border-slate-200 rounded-xl shadow-xl p-4',
+    tooltipTitle: 'font-semibold text-slate-800 mb-3 pb-2 border-b border-slate-100',
+    tooltipLabel: 'text-slate-500',
+    tooltipValue: 'text-slate-800 font-medium',
+    legendText: 'text-xs text-slate-500',
+    legendDot: 'w-3 h-3 rounded shadow-sm',
+    emptyText: 'text-slate-400',
+    loader: 'text-slate-400',
+  },
+
+  // ========== AURORA (Glassmorphism Theme) ==========
+  aurora: {
+    container: 'min-h-screen text-white p-6 relative overflow-hidden',
+    background: `
+      background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    `,
+    headerTitle: 'text-2xl font-bold text-white tracking-tight drop-shadow-lg',
+    headerSubtitle: 'text-sm text-purple-200/70 mt-1.5',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-lg',
+    countdownText: 'text-cyan-300 font-mono font-semibold',
+    countdownLabel: 'text-purple-200/60',
+    card: 'bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-5 shadow-xl transition-all duration-500',
+    cardHover: 'hover:bg-white/15 hover:border-white/30 hover:shadow-2xl hover:shadow-purple-500/10',
+    modelName: 'font-semibold text-white truncate max-w-md drop-shadow',
+    statsText: 'text-sm text-purple-200/70',
+    statsValue: 'text-white font-semibold',
+    statusGreen: 'bg-gradient-to-t from-emerald-600 to-emerald-400',
+    statusYellow: 'bg-gradient-to-t from-amber-600 to-amber-400',
+    statusRed: 'bg-gradient-to-t from-rose-600 to-rose-400',
+    statusHover: 'hover:shadow-lg hover:shadow-current/50 hover:scale-y-125 origin-bottom',
+    badgeGreen: 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 backdrop-blur',
+    badgeYellow: 'bg-amber-500/20 text-amber-300 border border-amber-400/30 backdrop-blur',
+    badgeRed: 'bg-rose-500/20 text-rose-300 border border-rose-400/30 backdrop-blur',
+    timeLabel: 'text-xs text-purple-300/50 font-mono',
+    tooltip: 'bg-slate-900/80 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl p-4',
+    tooltipTitle: 'font-semibold text-white mb-3 pb-2 border-b border-white/10',
+    tooltipLabel: 'text-purple-200/60',
+    tooltipValue: 'text-white font-medium',
+    legendText: 'text-xs text-purple-200/50',
+    legendDot: 'w-3 h-3 rounded shadow-lg',
+    emptyText: 'text-purple-200/50',
+    loader: 'text-purple-300',
+  },
+
+  // ========== MINIMAL (Ultra Simple Theme) ==========
+  minimal: {
+    container: 'min-h-screen bg-white text-gray-900 p-4',
+    headerTitle: 'text-lg font-medium text-gray-900',
+    headerSubtitle: 'text-xs text-gray-400 mt-0.5',
+    countdownBox: 'flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400',
+    countdownText: 'text-gray-600 font-mono',
+    countdownLabel: 'text-gray-400',
+    card: 'border-b border-gray-100 py-3 transition-colors',
+    cardHover: 'hover:bg-gray-50',
+    modelName: 'font-medium text-gray-800 truncate max-w-md text-sm',
+    statsText: 'text-xs text-gray-400',
+    statsValue: 'text-gray-700 font-medium',
+    statusGreen: 'bg-gray-900',
+    statusYellow: 'bg-gray-400',
+    statusRed: 'bg-gray-200',
+    statusHover: 'hover:opacity-70',
+    badgeGreen: 'text-[10px] text-gray-500 font-normal',
+    badgeYellow: 'text-[10px] text-gray-400 font-normal',
+    badgeRed: 'text-[10px] text-gray-300 font-normal',
+    timeLabel: 'text-[10px] text-gray-300',
+    tooltip: 'bg-gray-900 text-white rounded-lg shadow-lg p-3',
+    tooltipTitle: 'font-medium text-white text-xs mb-2',
+    tooltipLabel: 'text-gray-400 text-xs',
+    tooltipValue: 'text-white text-xs',
+    legendText: 'text-[10px] text-gray-400',
+    legendDot: 'w-2 h-2 rounded-sm',
+    emptyText: 'text-gray-300 text-sm',
+    loader: 'text-gray-300',
+  },
+
+  // ========== NEON (Cyberpunk Theme) ==========
+  neon: {
+    container: 'min-h-screen bg-black text-white p-6 relative',
+    background: `
+      background:
+        radial-gradient(ellipse at 20% 80%, rgba(236, 72, 153, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(34, 211, 238, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(168, 85, 247, 0.1) 0%, transparent 70%),
+        linear-gradient(180deg, #0a0a0a 0%, #000 100%);
+    `,
+    headerTitle: 'text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 tracking-tight uppercase',
+    headerSubtitle: 'text-sm text-gray-500 mt-1.5 font-mono',
+    countdownBox: 'flex items-center gap-2 px-4 py-2.5 text-sm bg-black/50 border border-cyan-500/50 rounded-lg shadow-[0_0_15px_rgba(34,211,238,0.3)]',
+    countdownText: 'text-cyan-400 font-mono font-bold animate-pulse',
+    countdownLabel: 'text-gray-500 font-mono',
+    card: 'bg-black/40 border border-purple-500/30 rounded-lg p-5 transition-all duration-300 relative overflow-hidden',
+    cardHover: 'hover:border-pink-500/50 hover:shadow-[0_0_30px_rgba(236,72,153,0.2)]',
+    modelName: 'font-bold text-white truncate max-w-md tracking-wide',
+    statsText: 'text-sm text-gray-500 font-mono',
+    statsValue: 'text-cyan-400 font-bold font-mono',
+    statusGreen: 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
+    statusYellow: 'bg-gradient-to-t from-yellow-600 to-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]',
+    statusRed: 'bg-gradient-to-t from-pink-600 to-pink-400 shadow-[0_0_10px_rgba(236,72,153,0.5)]',
+    statusHover: 'hover:shadow-[0_0_20px_currentColor] hover:scale-y-150 origin-bottom',
+    badgeGreen: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]',
+    badgeYellow: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.3)]',
+    badgeRed: 'bg-pink-500/20 text-pink-400 border border-pink-500/50 shadow-[0_0_10px_rgba(236,72,153,0.3)]',
+    timeLabel: 'text-xs text-gray-600 font-mono uppercase tracking-wider',
+    tooltip: 'bg-black/90 border border-purple-500/50 rounded-lg shadow-[0_0_30px_rgba(168,85,247,0.3)] p-4 backdrop-blur',
+    tooltipTitle: 'font-bold text-cyan-400 mb-3 pb-2 border-b border-purple-500/30 font-mono',
+    tooltipLabel: 'text-gray-500 font-mono text-xs uppercase',
+    tooltipValue: 'text-white font-mono',
+    legendText: 'text-xs text-gray-600 font-mono uppercase tracking-wider',
+    legendDot: 'w-3 h-3 rounded shadow-[0_0_8px_currentColor]',
+    emptyText: 'text-gray-600 font-mono',
+    loader: 'text-purple-500',
+  },
 }
 
+// Status labels
 const STATUS_LABELS = {
-  green: '正常运转',
-  yellow: '性能波动',
-  red: '服务异常',
+  green: '正常',
+  yellow: '警告',
+  red: '异常',
 }
 
-const STATUS_STYLES = {
-  green: {
-    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    text: 'text-emerald-400',
-    icon: 'text-emerald-500'
-  },
-  yellow: {
-    badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    text: 'text-amber-400',
-    icon: 'text-amber-500'
-  },
-  red: {
-    badge: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-    text: 'text-rose-400',
-    icon: 'text-rose-500'
-  }
+// Time window options
+const TIME_WINDOWS = [
+  { value: '1h', label: '1小时' },
+  { value: '6h', label: '6小时' },
+  { value: '12h', label: '12小时' },
+  { value: '24h', label: '24小时' },
+]
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+function formatTime(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
-
-
 
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString('zh-CN', {
@@ -76,29 +297,49 @@ function formatCountdown(seconds: number): string {
   return mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`
 }
 
-// Time window options
-const TIME_WINDOWS = [
-  { value: '1h', label: '1小时', slots: 60 },
-  { value: '6h', label: '6小时', slots: 24 },
-  { value: '12h', label: '12小时', slots: 24 },
-  { value: '24h', label: '24小时', slots: 24 },
-]
+function getStatusColor(status: 'green' | 'yellow' | 'red', styles: typeof themeStyles.obsidian) {
+  return status === 'green' ? styles.statusGreen :
+         status === 'yellow' ? styles.statusYellow : styles.statusRed
+}
+
+function getBadgeColor(status: 'green' | 'yellow' | 'red', styles: typeof themeStyles.obsidian) {
+  return status === 'green' ? styles.badgeGreen :
+         status === 'yellow' ? styles.badgeYellow : styles.badgeRed
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 interface ModelStatusEmbedProps {
-  refreshInterval?: number  // in seconds, default 60
+  refreshInterval?: number
+  defaultTheme?: ThemeId
 }
 
 export function ModelStatusEmbed({
-  refreshInterval = 60,
+  refreshInterval: defaultRefreshInterval = 60,
+  defaultTheme,
 }: ModelStatusEmbedProps) {
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
-  const [countdown, setCountdown] = useState(refreshInterval)
+  const [refreshInterval, setRefreshInterval] = useState(defaultRefreshInterval)
+  const [countdown, setCountdown] = useState(defaultRefreshInterval)
   const [timeWindow, setTimeWindow] = useState('24h')
+  const [theme, setTheme] = useState<ThemeId>(defaultTheme || 'daylight')
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
+  const styles = themeStyles[theme]
+
+  // Parse URL params for theme override
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlTheme = urlParams.get('theme') as ThemeId
+    if (urlTheme && THEMES.find(t => t.id === urlTheme)) {
+      setTheme(urlTheme)
+    }
+  }, [])
 
   // Load config from backend
   const loadConfig = useCallback(async () => {
@@ -112,6 +353,16 @@ export function ModelStatusEmbed({
         if (data.time_window) {
           setTimeWindow(data.time_window)
         }
+        // Load refresh interval from backend
+        if (data.refresh_interval !== undefined && data.refresh_interval !== null) {
+          setRefreshInterval(data.refresh_interval)
+          setCountdown(data.refresh_interval)
+        }
+        // Load theme from backend if not overridden by URL
+        const urlParams = new URLSearchParams(window.location.search)
+        if (!urlParams.get('theme') && data.theme) {
+          setTheme(data.theme)
+        }
         return data.data || []
       }
     } catch (error) {
@@ -120,7 +371,6 @@ export function ModelStatusEmbed({
     return []
   }, [apiUrl])
 
-  // Initial load
   useEffect(() => {
     loadConfig()
   }, [loadConfig])
@@ -151,7 +401,6 @@ export function ModelStatusEmbed({
     }
   }, [apiUrl, selectedModels, timeWindow])
 
-  // Fetch on selection change
   useEffect(() => {
     if (selectedModels.length > 0) {
       fetchModelStatuses()
@@ -175,102 +424,122 @@ export function ModelStatusEmbed({
     return () => clearInterval(timer)
   }, [refreshInterval, fetchModelStatuses])
 
+  // Loading state
   if (loading && modelStatuses.length === 0) {
     return (
-      <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-zinc-600" />
+      <div
+        className={cn("min-h-screen flex items-center justify-center", styles.container)}
+        style={styles.background ? { background: styles.background.replace(/\s+/g, ' ') } : undefined}
+      >
+        <Loader2 className={cn("h-8 w-8 animate-spin", styles.loader)} />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-sans selection:bg-indigo-500/30">
-      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/10 via-[#09090b] to-[#09090b] pointer-events-none" />
+    <div
+      className={styles.container}
+      style={styles.background ? { background: styles.background.replace(/\s+/g, ' ') } : undefined}
+    >
+      {/* Aurora theme decorative elements */}
+      {theme === 'aurora' && (
+        <>
+          <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-[120px] pointer-events-none" />
+          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/20 rounded-full blur-[120px] pointer-events-none" />
+        </>
+      )}
 
-      <div className="relative max-w-6xl mx-auto space-y-6">
+      {/* Neon theme scan line effect */}
+      {theme === 'neon' && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.1)_50%)] bg-[length:100%_4px]" />
+        </div>
+      )}
+
+      <div className="relative max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 text-indigo-400 ring-1 ring-white/5">
-                <Activity className="h-5 w-5" />
-              </div>
-              <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
-                模型状态监控
+            <div className="flex items-center gap-3">
+              {theme !== 'minimal' && <Activity className="h-5 w-5 opacity-60" />}
+              <h1 className={styles.headerTitle}>
+                {theme === 'minimal' ? 'Status' : '模型状态监控'}
               </h1>
             </div>
-            <div className="flex items-center gap-3 text-sm text-zinc-500">
-              <span className="px-2 py-0.5 rounded-full bg-zinc-800/50 border border-zinc-800 text-zinc-400 text-xs font-mono">
-                {TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'}
-              </span>
-              <span className="w-1 h-1 rounded-full bg-zinc-700" />
-              <span>监控 {selectedModels.length} 个模型</span>
-              {lastUpdate && (
-                <>
-                  <span className="w-1 h-1 rounded-full bg-zinc-700" />
-                  <span className="text-zinc-500">
-                    更新于 {lastUpdate.toLocaleTimeString('zh-CN')}
-                  </span>
-                </>
+            <p className={styles.headerSubtitle}>
+              {TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'}
+              {theme !== 'minimal' && ' 滑动窗口'} · {selectedModels.length} {theme === 'minimal' ? 'models' : '个模型'}
+              {lastUpdate && theme !== 'minimal' && (
+                <span className="ml-2">· 更新于 {lastUpdate.toLocaleTimeString('zh-CN')}</span>
               )}
-            </div>
+            </p>
           </div>
 
           {/* Countdown */}
           {refreshInterval > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 text-sm bg-zinc-900/40 backdrop-blur-md border border-white/5 rounded-full shadow-lg">
-              <Timer className="h-4 w-4 text-zinc-500" />
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-indigo-400 font-mono font-bold w-6 text-center">
-                  {formatCountdown(countdown)}
-                </span>
-                <span className="text-zinc-600 text-xs">后刷新</span>
-              </div>
+            <div className={styles.countdownBox}>
+              <Timer className="h-4 w-4 opacity-60" />
+              <span className={styles.countdownText}>{formatCountdown(countdown)}</span>
+              {theme !== 'minimal' && <span className={styles.countdownLabel}>后刷新</span>}
             </div>
           )}
         </div>
 
         {/* Model Status Cards */}
         {modelStatuses.length > 0 ? (
-          <div className="grid gap-4">
+          <div className={theme === 'minimal' ? 'divide-y divide-gray-100' : 'space-y-4'}>
             {modelStatuses.map(model => (
-              <EmbedModelCard key={model.model_name} model={model} />
+              <EmbedModelCard
+                key={model.model_name}
+                model={model}
+                theme={theme}
+                styles={styles}
+              />
             ))}
           </div>
         ) : (
-          <div className="text-center py-32 rounded-2xl border border-dashed border-zinc-800/50 bg-zinc-900/20">
-            <Server className="h-12 w-12 text-zinc-800 mx-auto mb-4" />
-            <p className="text-zinc-500 font-medium">
-              {selectedModels.length === 0 ? '暂无监控模型' : '暂无数据'}
-            </p>
+          <div className={cn("text-center py-16", styles.emptyText)}>
+            {selectedModels.length === 0 ? '请在管理界面选择要监控的模型' : '暂无模型状态数据'}
           </div>
         )}
 
         {/* Legend */}
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-8 py-4 opacity-50 hover:opacity-100 transition-opacity duration-300">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
-            <span className="text-xs text-zinc-500">健康 (≥95%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
-            <span className="text-xs text-zinc-500">波动 (80-95%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" />
-            <span className="text-xs text-zinc-500">异常 (&lt;80%)</span>
-          </div>
+        <div className={cn(
+          "mt-8 flex items-center justify-center gap-6",
+          theme === 'minimal' && 'mt-4 gap-4'
+        )}>
+          {['green', 'yellow', 'red'].map((status) => (
+            <div key={status} className="flex items-center gap-2">
+              <span className={cn(
+                styles.legendDot,
+                status === 'green' ? styles.statusGreen :
+                status === 'yellow' ? styles.statusYellow : styles.statusRed
+              )} />
+              <span className={styles.legendText}>
+                {theme === 'minimal'
+                  ? (status === 'green' ? '≥95%' : status === 'yellow' ? '80-95%' : '<80%')
+                  : (status === 'green' ? '成功率 ≥ 95%' : status === 'yellow' ? '成功率 80-95%' : '成功率 < 80%')
+                }
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
   )
 }
 
+// ============================================================================
+// Model Card Component
+// ============================================================================
+
 interface EmbedModelCardProps {
   model: ModelStatus
+  theme: ThemeId
+  styles: typeof themeStyles.obsidian
 }
 
-function EmbedModelCard({ model }: EmbedModelCardProps) {
+function EmbedModelCard({ model, theme, styles }: EmbedModelCardProps) {
   const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
@@ -278,14 +547,14 @@ function EmbedModelCard({ model }: EmbedModelCardProps) {
     const rect = event.currentTarget.getBoundingClientRect()
     setTooltipPosition({
       x: rect.left + rect.width / 2,
-      y: rect.top - 12,
+      y: rect.top - 10,
     })
     setHoveredSlot(slot)
   }
 
   const getTimeLabels = () => {
     switch (model.time_window) {
-      case '1h': return ['1小时前', '30分钟前', '现在']
+      case '1h': return ['60分钟前', '30分钟前', '现在']
       case '6h': return ['6小时前', '3小时前', '现在']
       case '12h': return ['12小时前', '6小时前', '现在']
       default: return ['24小时前', '12小时前', '现在']
@@ -293,139 +562,113 @@ function EmbedModelCard({ model }: EmbedModelCardProps) {
   }
 
   const timeLabels = getTimeLabels()
-  const StatusIcon = STATUS_ICONS[model.current_status]
-  const styles = STATUS_STYLES[model.current_status]
+  const isMinimal = theme === 'minimal'
 
   return (
-    <div className="group relative overflow-hidden bg-zinc-900/40 backdrop-blur-md border border-zinc-800/50 rounded-xl p-5 hover:border-zinc-700/60 transition-all duration-300 hover:shadow-xl hover:shadow-black/20 hover:bg-zinc-900/60">
+    <div className={cn(styles.card, styles.cardHover)}>
+      {/* Neon theme glow line */}
+      {theme === 'neon' && (
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-500 to-transparent" />
+      )}
+
+      {/* Header */}
       <div className={cn(
-        "absolute left-0 top-0 bottom-0 w-[2px] transition-all duration-300 opacity-0 group-hover:opacity-100",
-        model.current_status === 'green' ? "bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]" :
-          model.current_status === 'yellow' ? "bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]" :
-            "bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.5)]"
-      )} />
-
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-          <div className="flex items-start gap-4 min-w-0">
-            <div className={cn(
-              "flex items-center justify-center w-10 h-10 rounded-xl shrink-0 transition-colors duration-300 shadow-inner",
-              styles.badge
+        "flex items-center justify-between",
+        isMinimal ? 'mb-2' : 'mb-4'
+      )}>
+        <div className="flex items-center gap-3 min-w-0">
+          <h3 className={styles.modelName} title={model.model_name}>
+            {model.model_name}
+          </h3>
+          {!isMinimal && (
+            <span className={cn(
+              "px-2 py-0.5 text-xs rounded-full font-medium",
+              getBadgeColor(model.current_status, styles)
             )}>
-              <StatusIcon className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-zinc-200 truncate hover:text-white transition-colors" title={model.model_name}>
-                  {model.model_name}
-                </h3>
-                <span className={cn(
-                  "px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold rounded-full border border-current/20",
-                  styles.badge
-                )}>
-                  {STATUS_LABELS[model.current_status]}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
-                <Activity className="h-3 w-3" />
-                ID: {model.display_name}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-8 pl-14 sm:pl-0">
-            <div className="flex flex-col items-end">
-              <span className={cn(
-                "text-2xl font-bold font-mono tabular-nums leading-none",
-                styles.text
-              )}>
-                {model.success_rate}%
-              </span>
-              <span className="text-[10px] text-zinc-500 font-medium mt-1">成功率</span>
-            </div>
-            <div className="w-px h-8 bg-zinc-800" />
-            <div className="flex flex-col items-end">
-              <span className="text-2xl font-bold font-mono text-zinc-300 tabular-nums leading-none">
-                {model.total_requests > 1000 ? `${(model.total_requests / 1000).toFixed(1)}k` : model.total_requests}
-              </span>
-              <span className="text-[10px] text-zinc-500 font-medium mt-1">总请求</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative pl-14 sm:pl-0 pt-2">
-          <div className="h-12 flex items-end gap-[3px]">
-            {model.slot_data.map((slot, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "relative flex-1 min-w-[2px] rounded-sm transition-all duration-300 hover:scale-y-110 origin-bottom hover:brightness-125",
-                  STATUS_COLORS[slot.status],
-                  slot.total_requests === 0
-                    ? "h-[2px] bg-zinc-800/50 hover:bg-zinc-700/80 cursor-default"
-                    : "opacity-80 hover:opacity-100 cursor-help"
-                )}
-                style={{
-                  height: slot.total_requests === 0 ? '4px' : `${Math.max(15, Math.min(100, (slot.total_requests / (Math.max(...model.slot_data.map(s => s.total_requests)) || 1)) * 100))}%`
-                }}
-                onMouseEnter={(e) => slot.total_requests > 0 && handleMouseEnter(slot, e)}
-                onMouseLeave={() => setHoveredSlot(null)}
-              />
-            ))}
-          </div>
-
-          <div className="flex justify-between mt-3 border-t border-zinc-800/50 pt-2">
-            <span className="text-[10px] text-zinc-600 font-mono">{timeLabels[0]}</span>
-            <span className="text-[10px] text-zinc-600 font-mono">{timeLabels[1]}</span>
-            <span className="text-[10px] text-zinc-600 font-mono">{timeLabels[2]}</span>
-          </div>
-
-          {hoveredSlot && (
-            <div
-              className="fixed z-[9999] pointer-events-none transform transition-all duration-200"
-              style={{
-                left: tooltipPosition.x,
-                top: tooltipPosition.y,
-                transform: 'translate(-50%, -100%)',
-              }}
-            >
-              <div className="bg-zinc-900/95 backdrop-blur-xl border border-white/10 p-3 rounded-xl shadow-2xl ring-1 ring-white/5 min-w-[160px]">
-                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/5">
-                  <div className={cn("w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]",
-                    hoveredSlot.status === 'green' ? "bg-emerald-500 text-emerald-500" :
-                      hoveredSlot.status === 'yellow' ? "bg-amber-500 text-amber-500" :
-                        "bg-rose-500 text-rose-500"
-                  )} />
-                  <span className="font-medium text-zinc-300 text-xs font-mono">
-                    {formatDateTime(hoveredSlot.start_time)}
-                  </span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-zinc-500">请求</span>
-                    <span className="font-mono text-zinc-200">{hoveredSlot.total_requests}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-zinc-500">成功</span>
-                    <span className="font-mono text-emerald-400">{hoveredSlot.success_count}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs pt-1 border-t border-white/5 mt-1">
-                    <span className="text-zinc-500">率</span>
-                    <span className={cn(
-                      "font-mono font-bold",
-                      hoveredSlot.status === 'green' ? 'text-emerald-400' :
-                        hoveredSlot.status === 'yellow' ? 'text-amber-400' : 'text-rose-400'
-                    )}>
-                      {hoveredSlot.success_rate}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="w-2 h-2 bg-zinc-900/95 border-r border-b border-white/10 transform rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2 shadow-lg" />
-            </div>
+              {STATUS_LABELS[model.current_status]}
+            </span>
+          )}
+          {isMinimal && (
+            <span className={getBadgeColor(model.current_status, styles)}>
+              {model.current_status === 'green' ? '●' : model.current_status === 'yellow' ? '◐' : '○'}
+            </span>
           )}
         </div>
+        <div className={styles.statsText}>
+          <span className={styles.statsValue}>{model.success_rate}%</span>
+          {!isMinimal && ' 成功率'}
+          <span className={isMinimal ? 'mx-1' : 'mx-2 opacity-30'}>·</span>
+          <span>{model.total_requests.toLocaleString()}</span>
+          {!isMinimal && ' 请求'}
+        </div>
+      </div>
+
+      {/* Status Timeline */}
+      <div className="relative">
+        <div className={cn(
+          "flex",
+          isMinimal ? 'gap-px h-4' : 'gap-0.5 h-7'
+        )}>
+          {model.slot_data.map((slot, index) => (
+            <div
+              key={index}
+              className={cn(
+                "flex-1 rounded-sm cursor-pointer transition-all duration-200",
+                getStatusColor(slot.status, styles),
+                styles.statusHover,
+                slot.total_requests === 0 && 'opacity-30'
+              )}
+              onMouseEnter={(e) => handleMouseEnter(slot, e)}
+              onMouseLeave={() => setHoveredSlot(null)}
+            />
+          ))}
+        </div>
+
+        {/* Time labels */}
+        <div className={cn(
+          "flex justify-between mt-2",
+          styles.timeLabel
+        )}>
+          <span>{isMinimal ? timeLabels[0].replace('分钟前', 'm').replace('小时前', 'h') : timeLabels[0]}</span>
+          <span>{isMinimal ? timeLabels[1].replace('分钟前', 'm').replace('小时前', 'h') : timeLabels[1]}</span>
+          <span>{isMinimal ? 'now' : timeLabels[2]}</span>
+        </div>
+
+        {/* Tooltip */}
+        {hoveredSlot && (
+          <div
+            className={cn("fixed z-50 pointer-events-none text-sm", styles.tooltip)}
+            style={{
+              left: tooltipPosition.x,
+              top: tooltipPosition.y,
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            <div className={styles.tooltipTitle}>
+              {formatDateTime(hoveredSlot.start_time)} - {formatTime(hoveredSlot.end_time)}
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex justify-between gap-6">
+                <span className={styles.tooltipLabel}>总请求</span>
+                <span className={styles.tooltipValue}>{hoveredSlot.total_requests}</span>
+              </div>
+              <div className="flex justify-between gap-6">
+                <span className={styles.tooltipLabel}>成功数</span>
+                <span className={cn(styles.tooltipValue, 'text-emerald-400')}>{hoveredSlot.success_count}</span>
+              </div>
+              <div className="flex justify-between gap-6">
+                <span className={styles.tooltipLabel}>成功率</span>
+                <span className={cn(
+                  styles.tooltipValue,
+                  hoveredSlot.status === 'green' ? 'text-emerald-400' :
+                  hoveredSlot.status === 'yellow' ? 'text-amber-400' : 'text-rose-400'
+                )}>
+                  {hoveredSlot.success_rate}%
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -16,6 +16,16 @@ router = APIRouter(prefix="/api/model-status", tags=["Model Status"])
 # Redis keys for config
 SELECTED_MODELS_CACHE_KEY = "model_status:selected_models"
 TIME_WINDOW_CACHE_KEY = "model_status:time_window"
+THEME_CACHE_KEY = "model_status:theme"
+REFRESH_INTERVAL_CACHE_KEY = "model_status:refresh_interval"
+
+# Available themes
+AVAILABLE_THEMES = ["daylight", "obsidian", "aurora", "minimal", "neon"]
+DEFAULT_THEME = "daylight"
+
+# Available refresh intervals (in seconds)
+AVAILABLE_REFRESH_INTERVALS = [0, 30, 60, 120, 300]  # 0 = disabled
+DEFAULT_REFRESH_INTERVAL = 60
 
 
 # Response Models
@@ -81,6 +91,8 @@ class SelectedModelsResponse(BaseModel):
     success: bool
     data: List[str]
     time_window: Optional[str] = None
+    theme: Optional[str] = None
+    refresh_interval: Optional[int] = None
     message: Optional[str] = None
 
 
@@ -371,13 +383,13 @@ def _set_time_window_to_cache(window: str) -> bool:
     """Save time window to Redis/SQLite cache."""
     import time
     from .cache_manager import get_cache_manager
-    
+
     cache = get_cache_manager()
     now = int(time.time())
     expires_at = now + 86400 * 365  # 1 year
-    
+
     success = False
-    
+
     # Save to Redis
     if cache._redis_available and cache._redis:
         try:
@@ -385,7 +397,7 @@ def _set_time_window_to_cache(window: str) -> bool:
             success = True
         except Exception as e:
             logger.warn(f"Failed to save time window to Redis: {e}")
-    
+
     # Always save to SQLite as backup
     try:
         with cache._get_sqlite() as conn:
@@ -398,7 +410,142 @@ def _set_time_window_to_cache(window: str) -> bool:
             success = True
     except Exception as e:
         logger.warn(f"Failed to save time window to SQLite: {e}")
-    
+
+    return success
+
+
+def _get_theme_from_cache() -> str:
+    """Get theme from Redis/SQLite cache."""
+    from .cache_manager import get_cache_manager
+
+    cache = get_cache_manager()
+
+    # Try Redis first
+    if cache._redis_available and cache._redis:
+        try:
+            data = cache._redis.get(THEME_CACHE_KEY)
+            if data:
+                return data.decode() if isinstance(data, bytes) else data
+        except Exception as e:
+            logger.warn(f"Failed to get theme from Redis: {e}")
+
+    # Fallback to SQLite
+    try:
+        with cache._get_sqlite() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT data FROM generic_cache WHERE key = ?",
+                (THEME_CACHE_KEY,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+    except Exception as e:
+        logger.warn(f"Failed to get theme from SQLite: {e}")
+
+    return DEFAULT_THEME
+
+
+def _set_theme_to_cache(theme: str) -> bool:
+    """Save theme to Redis/SQLite cache."""
+    import time
+    from .cache_manager import get_cache_manager
+
+    cache = get_cache_manager()
+    now = int(time.time())
+    expires_at = now + 86400 * 365  # 1 year
+
+    success = False
+
+    # Save to Redis
+    if cache._redis_available and cache._redis:
+        try:
+            cache._redis.set(THEME_CACHE_KEY, theme)
+            success = True
+        except Exception as e:
+            logger.warn(f"Failed to save theme to Redis: {e}")
+
+    # Always save to SQLite as backup
+    try:
+        with cache._get_sqlite() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO generic_cache (key, data, snapshot_time, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (THEME_CACHE_KEY, theme, now, expires_at))
+            conn.commit()
+            success = True
+    except Exception as e:
+        logger.warn(f"Failed to save theme to SQLite: {e}")
+
+    return success
+
+
+def _get_refresh_interval_from_cache() -> int:
+    """Get refresh interval from Redis/SQLite cache."""
+    from .cache_manager import get_cache_manager
+
+    cache = get_cache_manager()
+
+    # Try Redis first
+    if cache._redis_available and cache._redis:
+        try:
+            data = cache._redis.get(REFRESH_INTERVAL_CACHE_KEY)
+            if data:
+                value = data.decode() if isinstance(data, bytes) else data
+                return int(value)
+        except Exception as e:
+            logger.warn(f"Failed to get refresh interval from Redis: {e}")
+
+    # Fallback to SQLite
+    try:
+        with cache._get_sqlite() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT data FROM generic_cache WHERE key = ?",
+                (REFRESH_INTERVAL_CACHE_KEY,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return int(row[0])
+    except Exception as e:
+        logger.warn(f"Failed to get refresh interval from SQLite: {e}")
+
+    return DEFAULT_REFRESH_INTERVAL
+
+
+def _set_refresh_interval_to_cache(interval: int) -> bool:
+    """Save refresh interval to Redis/SQLite cache."""
+    import time
+    from .cache_manager import get_cache_manager
+
+    cache = get_cache_manager()
+    now = int(time.time())
+    expires_at = now + 86400 * 365  # 1 year
+
+    success = False
+
+    # Save to Redis
+    if cache._redis_available and cache._redis:
+        try:
+            cache._redis.set(REFRESH_INTERVAL_CACHE_KEY, str(interval))
+            success = True
+        except Exception as e:
+            logger.warn(f"Failed to save refresh interval to Redis: {e}")
+
+    # Always save to SQLite as backup
+    try:
+        with cache._get_sqlite() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO generic_cache (key, data, snapshot_time, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (REFRESH_INTERVAL_CACHE_KEY, str(interval), now, expires_at))
+            conn.commit()
+            success = True
+    except Exception as e:
+        logger.warn(f"Failed to save refresh interval to SQLite: {e}")
+
     return success
 
 
@@ -407,7 +554,7 @@ def _set_selected_models_to_cache(models: List[str]) -> bool:
     import json
     import time
     from .cache_manager import get_cache_manager
-    
+
     cache = get_cache_manager()
     data = json.dumps(models)
     now = int(time.time())
@@ -443,11 +590,15 @@ def _set_selected_models_to_cache(models: List[str]) -> bool:
 @router.get("/config/selected", response_model=SelectedModelsResponse)
 async def get_selected_models(_: str = Depends(verify_auth)):
     """
-    Get the list of selected models and time window for monitoring.
+    Get the list of selected models, time window, theme and refresh interval for monitoring.
     """
     models = _get_selected_models_from_cache()
     time_window = _get_time_window_from_cache()
-    return SelectedModelsResponse(success=True, data=models, time_window=time_window)
+    theme = _get_theme_from_cache()
+    refresh_interval = _get_refresh_interval_from_cache()
+    return SelectedModelsResponse(
+        success=True, data=models, time_window=time_window, theme=theme, refresh_interval=refresh_interval
+    )
 
 
 class UpdateConfigRequest(BaseModel):
@@ -467,12 +618,16 @@ async def set_selected_models(
     """
     success = _set_selected_models_to_cache(request.models)
     time_window = _get_time_window_from_cache()
-    
+    theme = _get_theme_from_cache()
+    refresh_interval = _get_refresh_interval_from_cache()
+
     if success:
         return SelectedModelsResponse(
             success=True,
             data=request.models,
             time_window=time_window,
+            theme=theme,
+            refresh_interval=refresh_interval,
             message=f"已保存 {len(request.models)} 个模型配置",
         )
     else:
@@ -480,6 +635,8 @@ async def set_selected_models(
             success=False,
             data=request.models,
             time_window=time_window,
+            theme=theme,
+            refresh_interval=refresh_interval,
             message="保存配置失败",
         )
 
@@ -519,9 +676,9 @@ async def set_time_window_config(
             time_window=_get_time_window_from_cache(),
             message=f"无效的时间窗口: {request.time_window}",
         )
-    
+
     success = _set_time_window_to_cache(request.time_window)
-    
+
     if success:
         return TimeWindowResponse(
             success=True,
@@ -536,14 +693,128 @@ async def set_time_window_config(
         )
 
 
+# ==================== Theme Config Endpoints ====================
+
+class ThemeRequest(BaseModel):
+    """Request for updating theme."""
+    theme: str
+
+
+class ThemeResponse(BaseModel):
+    """Response for theme endpoint."""
+    success: bool
+    theme: str
+    available_themes: List[str] = AVAILABLE_THEMES
+    message: Optional[str] = None
+
+
+@router.get("/config/theme", response_model=ThemeResponse)
+async def get_theme_config(_: str = Depends(verify_auth)):
+    """
+    Get the current theme setting and available themes.
+    """
+    theme = _get_theme_from_cache()
+    return ThemeResponse(success=True, theme=theme)
+
+
+@router.post("/config/theme", response_model=ThemeResponse)
+async def set_theme_config(
+    request: ThemeRequest,
+    _: str = Depends(verify_auth),
+):
+    """
+    Update the theme setting for embed page.
+    """
+    if request.theme not in AVAILABLE_THEMES:
+        return ThemeResponse(
+            success=False,
+            theme=_get_theme_from_cache(),
+            message=f"无效的主题: {request.theme}",
+        )
+
+    success = _set_theme_to_cache(request.theme)
+
+    if success:
+        return ThemeResponse(
+            success=True,
+            theme=request.theme,
+            message=f"已保存主题: {request.theme}",
+        )
+    else:
+        return ThemeResponse(
+            success=False,
+            theme=request.theme,
+            message="保存配置失败",
+        )
+
+
+# ==================== Refresh Interval Config Endpoints ====================
+
+class RefreshIntervalRequest(BaseModel):
+    """Request for updating refresh interval."""
+    refresh_interval: int
+
+
+class RefreshIntervalResponse(BaseModel):
+    """Response for refresh interval endpoint."""
+    success: bool
+    refresh_interval: int
+    available_intervals: List[int] = AVAILABLE_REFRESH_INTERVALS
+    message: Optional[str] = None
+
+
+@router.get("/config/refresh", response_model=RefreshIntervalResponse)
+async def get_refresh_interval_config(_: str = Depends(verify_auth)):
+    """
+    Get the current refresh interval setting and available options.
+    """
+    refresh_interval = _get_refresh_interval_from_cache()
+    return RefreshIntervalResponse(success=True, refresh_interval=refresh_interval)
+
+
+@router.post("/config/refresh", response_model=RefreshIntervalResponse)
+async def set_refresh_interval_config(
+    request: RefreshIntervalRequest,
+    _: str = Depends(verify_auth),
+):
+    """
+    Update the refresh interval setting for embed page.
+    """
+    if request.refresh_interval not in AVAILABLE_REFRESH_INTERVALS:
+        return RefreshIntervalResponse(
+            success=False,
+            refresh_interval=_get_refresh_interval_from_cache(),
+            message=f"无效的刷新间隔: {request.refresh_interval}",
+        )
+
+    success = _set_refresh_interval_to_cache(request.refresh_interval)
+
+    if success:
+        return RefreshIntervalResponse(
+            success=True,
+            refresh_interval=request.refresh_interval,
+            message=f"已保存刷新间隔: {request.refresh_interval}秒",
+        )
+    else:
+        return RefreshIntervalResponse(
+            success=False,
+            refresh_interval=request.refresh_interval,
+            message="保存配置失败",
+        )
+
+
 # ==================== Public Embed Config Endpoint ====================
 
 @router.get("/embed/config/selected", response_model=SelectedModelsResponse)
 async def get_embed_selected_models():
     """
-    [Public] Get the list of selected models and time window for embed view.
+    [Public] Get the list of selected models, time window, theme and refresh interval for embed view.
     No authentication required for iframe embedding.
     """
     models = _get_selected_models_from_cache()
     time_window = _get_time_window_from_cache()
-    return SelectedModelsResponse(success=True, data=models, time_window=time_window)
+    theme = _get_theme_from_cache()
+    refresh_interval = _get_refresh_interval_from_cache()
+    return SelectedModelsResponse(
+        success=True, data=models, time_window=time_window, theme=theme, refresh_interval=refresh_interval
+    )
