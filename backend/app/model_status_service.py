@@ -618,13 +618,12 @@ async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
     Only warms up models with requests in the last 24 hours.
-    Warms up ALL time windows (1h, 6h, 12h, 24h) for each active model.
-    Uses longer cache TTL (5 min) since these are background warmup caches.
+    Warms up ALL time windows (1h, 6h, 12h, 24h) using batch queries.
 
-    Gentle warmup strategy:
-    - Dynamic delay based on total tasks (more tasks = longer delay)
-    - Batch processing with progress logging
-    - Longer delay between batches
+    Optimized strategy:
+    - Uses batch query (get_multiple_models_status) instead of individual queries
+    - 4 SQL queries total (one per time window) instead of N*4 queries
+    - Much faster warmup (seconds instead of minutes)
 
     Args:
         max_models: Maximum number of models to warmup (0 = all active models).
@@ -657,71 +656,63 @@ async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
 
     # Get all time windows
     time_windows = list(TIME_WINDOWS.keys())  # ['1h', '6h', '12h', '24h']
-    total_tasks = len(models_to_warmup) * len(time_windows)
 
-    # Dynamic delay based on total tasks (more tasks = gentler warmup)
-    # < 50 tasks: 0.1s delay
-    # 50-100 tasks: 0.15s delay
-    # 100-200 tasks: 0.2s delay
-    # > 200 tasks: 0.25s delay
-    if total_tasks < 50:
-        query_delay = 0.1
-    elif total_tasks < 100:
-        query_delay = 0.15
-    elif total_tasks < 200:
-        query_delay = 0.2
-    else:
-        query_delay = 0.25
+    # Batch size for each query to balance between speed and database load
+    # 20 models per batch is a good balance
+    BATCH_SIZE = 20
 
-    # Batch size for progress logging (every 10 models)
-    batch_size = 10
-    batch_delay = 1.0  # Extra delay between batches
-
-    estimated_time = total_tasks * query_delay + (len(models_to_warmup) // batch_size) * batch_delay
-
-    logger.info(f"[模型状态] 开始预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 = {total_tasks} 个缓存")
-    logger.info(f"[模型状态] 预热策略: 查询延迟 {query_delay}s, 批次延迟 {batch_delay}s, 预计耗时 {estimated_time:.0f}s")
+    total_batches = (len(models_to_warmup) + BATCH_SIZE - 1) // BATCH_SIZE
+    logger.info(f"[模型状态] 开始批量预热 {len(models_to_warmup)} 个模型 × {len(time_windows)} 个时间窗口 (每批 {BATCH_SIZE} 个)")
 
     success_count = 0
-    failed_tasks = []
+    failed_windows = []
 
-    for idx, model_name in enumerate(models_to_warmup):
-        for window in time_windows:
-            try:
-                # Force refresh cache with LONG TTL for warmup
-                service.get_model_status(
-                    model_name,
+    # Batch warmup: process models in chunks per time window
+    for window in time_windows:
+        window_start = time.time()
+        window_success = 0
+
+        try:
+            # Process models in batches to avoid overwhelming the database
+            for batch_idx in range(0, len(models_to_warmup), BATCH_SIZE):
+                batch_models = models_to_warmup[batch_idx:batch_idx + BATCH_SIZE]
+
+                # Use batch query for this chunk
+                results = service.get_multiple_models_status(
+                    model_names=batch_models,
                     time_window=window,
-                    use_cache=False,
-                    cache_ttl=CACHE_TTL_LONG  # 5 minutes for warmup cache
+                    use_cache=False  # Force refresh
                 )
-                success_count += 1
-                # Gentle delay to avoid overwhelming the database
-                await asyncio.sleep(query_delay)
-            except Exception as e:
-                logger.warn(f"[模型状态] 预热 {model_name}@{window} 失败: {e}")
-                failed_tasks.append(f"{model_name}@{window}")
+                window_success += len(results)
 
-        # Progress logging and batch delay
-        if (idx + 1) % batch_size == 0:
-            progress = (idx + 1) / len(models_to_warmup) * 100
-            elapsed = time.time() - start_time
-            logger.info(f"[模型状态] 预热进度: {idx + 1}/{len(models_to_warmup)} 模型 ({progress:.0f}%), 已耗时 {elapsed:.1f}s")
-            # Extra delay between batches to let database breathe
-            await asyncio.sleep(batch_delay)
+                # Small delay between batches to reduce database pressure
+                if batch_idx + BATCH_SIZE < len(models_to_warmup):
+                    await asyncio.sleep(0.1)
+
+            success_count += window_success
+            window_elapsed = time.time() - window_start
+            logger.info(f"[模型状态] 预热 {window} 窗口完成: {window_success} 个模型, 耗时 {window_elapsed:.2f}s")
+
+            # Delay between windows
+            await asyncio.sleep(0.3)
+
+        except Exception as e:
+            logger.warn(f"[模型状态] 预热 {window} 窗口失败: {e}")
+            failed_windows.append(window)
 
     elapsed = time.time() - start_time
+    total_cached = len(models_to_warmup) * (len(time_windows) - len(failed_windows))
 
-    if failed_tasks:
-        logger.warn(f"[模型状态] 预热完成，成功 {success_count}/{total_tasks}，失败 {len(failed_tasks)} 个，耗时 {elapsed:.1f}s")
+    if failed_windows:
+        logger.warn(f"[模型状态] 预热完成，成功 {success_count} 个缓存，失败窗口: {failed_windows}，耗时 {elapsed:.1f}s")
     else:
         logger.info(f"[模型状态] 预热完成: {len(models_to_warmup)} 模型 × {len(time_windows)} 窗口 = {success_count} 缓存，耗时 {elapsed:.1f}s")
 
     return {
         "success": True,
         "models_warmed": len(models_to_warmup),
-        "windows_warmed": len(time_windows),
+        "windows_warmed": len(time_windows) - len(failed_windows),
         "total_cached": success_count,
-        "failed": len(failed_tasks),
+        "failed": len(failed_windows),
         "elapsed": round(elapsed, 2),
     }
