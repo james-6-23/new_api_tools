@@ -193,6 +193,71 @@ class ModelStatusService:
             logger.db_error(f"获取可用模型列表失败: {e}")
             return []
 
+    def get_available_models_with_stats(self, use_cache: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get list of all models with 24h request counts for sorting.
+        Models are sorted by request count (descending), models with no requests at the end.
+
+        Args:
+            use_cache: Whether to use cached data (default: True).
+
+        Returns:
+            List of dicts with model_name and request_count_24h.
+        """
+        cache_key = "available_models_with_stats"
+        if use_cache:
+            cached = self._get_cache(cache_key)
+            if cached:
+                return cached.get("models", [])
+
+        # First get all available models
+        all_models = self.get_available_models(use_cache=use_cache)
+        if not all_models:
+            return []
+
+        # Query 24h request counts for all models
+        now = int(time.time())
+        start_24h = now - 86400
+
+        sql = """
+            SELECT model_name, COUNT(*) as request_count
+            FROM logs
+            WHERE created_at >= :start_time
+              AND created_at < :now
+              AND type IN (:type_success, :type_failure)
+            GROUP BY model_name
+        """
+
+        request_counts = {}
+        try:
+            self._db.connect()
+            result = self._db.execute(sql, {
+                "start_time": start_24h,
+                "now": now,
+                "type_success": LOG_TYPE_CONSUMPTION,
+                "type_failure": LOG_TYPE_FAILURE,
+            })
+            for row in result:
+                model_name = row.get("model_name")
+                if model_name:
+                    request_counts[model_name] = int(row.get("request_count") or 0)
+        except Exception as e:
+            logger.db_error(f"获取模型请求统计失败: {e}")
+
+        # Build result list with request counts
+        models_with_stats = []
+        for model in all_models:
+            models_with_stats.append({
+                "model_name": model,
+                "request_count_24h": request_counts.get(model, 0),
+            })
+
+        # Sort: models with requests first (by count desc), then models without requests (alphabetically)
+        models_with_stats.sort(key=lambda x: (-x["request_count_24h"], x["model_name"]))
+
+        self._set_cache(cache_key, {"models": models_with_stats}, ttl=300)  # 5 min cache
+        return models_with_stats
+
     def get_model_status(
         self,
         model_name: str,
@@ -427,6 +492,11 @@ async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
 
     service = get_model_status_service()
     start_time = time.time()
+
+    # First, warmup available_models_with_stats (for model selector sorting)
+    models_with_stats = service.get_available_models_with_stats(use_cache=False)
+    active_models = [m["model_name"] for m in models_with_stats if m["request_count_24h"] > 0]
+    logger.info(f"[模型状态] 模型统计预热完成: {len(models_with_stats)} 个模型, {len(active_models)} 个有请求")
 
     # Get available models (force refresh to get latest list)
     models = service.get_available_models(use_cache=False)

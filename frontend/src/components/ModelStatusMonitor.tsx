@@ -94,6 +94,12 @@ const REFRESH_INTERVALS = [
   { value: 300, label: '5分钟' },
 ]
 
+// Model with stats interface
+interface ModelWithStats {
+  model_name: string
+  request_count_24h: number
+}
+
 // Storage keys
 const SELECTED_MODELS_KEY = 'model_status_selected_models'
 const REFRESH_INTERVAL_KEY = 'model_status_refresh_interval'
@@ -104,7 +110,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const { token } = useAuth()
   const { showToast } = useToast()
 
-  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [availableModels, setAvailableModels] = useState<ModelWithStats[]>([])
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -283,12 +289,20 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       })
       const data = await response.json()
       if (data.success) {
+        // data.data is now an array of { model_name, request_count_24h }
         setAvailableModels(data.data)
         // Load config from backend
         const savedModels = await loadConfigFromBackend()
-        // Auto-select first 5 models if none selected
+        // Auto-select models with requests in last 24h if none selected
         if (savedModels.length === 0 && data.data.length > 0) {
-          const defaultModels = data.data.slice(0, 5)
+          // Filter models that have requests in the last 24 hours
+          const activeModels = data.data
+            .filter((m: ModelWithStats) => m.request_count_24h > 0)
+            .map((m: ModelWithStats) => m.model_name)
+          // If no active models, fall back to first 5
+          const defaultModels = activeModels.length > 0 
+            ? activeModels 
+            : data.data.slice(0, 5).map((m: ModelWithStats) => m.model_name)
           setSelectedModels(defaultModels)
           saveSelectedModelsToBackend(defaultModels)
         }
@@ -411,8 +425,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   }
 
   const selectAllModels = () => {
-    setSelectedModels(availableModels)
-    saveSelectedModelsToBackend(availableModels)
+    const allModelNames = availableModels.map(m => m.model_name)
+    setSelectedModels(allModelNames)
+    saveSelectedModelsToBackend(allModelNames)
   }
 
   const clearAllModels = () => {
@@ -568,17 +583,31 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                     <div className="p-1 max-h-72 overflow-y-auto">
                       {availableModels.map(model => (
                         <button
-                          key={model}
-                          onClick={() => toggleModelSelection(model)}
+                          key={model.model_name}
+                          onClick={() => toggleModelSelection(model.model_name)}
                           className={cn(
                             "w-full text-left px-3 py-2 text-sm rounded hover:bg-accent transition-colors flex items-center justify-between",
-                            selectedModels.includes(model) && "bg-accent"
+                            selectedModels.includes(model.model_name) && "bg-accent"
                           )}
                         >
-                          <span className="truncate">{model}</span>
-                          {selectedModels.includes(model) && (
-                            <Check className="h-4 w-4 text-primary flex-shrink-0" />
-                          )}
+                          <span className={cn(
+                            "truncate",
+                            model.request_count_24h === 0 && "text-muted-foreground"
+                          )}>
+                            {model.model_name}
+                          </span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {model.request_count_24h > 0 ? (
+                              <span className="text-xs text-muted-foreground">
+                                {model.request_count_24h.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-orange-400">无请求</span>
+                            )}
+                            {selectedModels.includes(model.model_name) && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </div>
                         </button>
                       ))}
                       {availableModels.length === 0 && (

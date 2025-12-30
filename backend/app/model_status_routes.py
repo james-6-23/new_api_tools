@@ -59,6 +59,18 @@ class AvailableModelsResponse(BaseModel):
     data: List[str]
 
 
+class ModelWithStats(BaseModel):
+    """Model with 24h request stats."""
+    model_name: str
+    request_count_24h: int
+
+
+class AvailableModelsWithStatsResponse(BaseModel):
+    """Response for available models with stats endpoint."""
+    success: bool
+    data: List[ModelWithStats]
+
+
 class TimeWindowsResponse(BaseModel):
     """Response for available time windows."""
     success: bool
@@ -140,14 +152,18 @@ async def get_time_windows(_: str = Depends(verify_auth)):
     )
 
 
-@router.get("/models", response_model=AvailableModelsResponse)
+@router.get("/models", response_model=AvailableModelsWithStatsResponse)
 async def get_available_models(_: str = Depends(verify_auth)):
     """
-    Get list of all models with logs in the last 24 hours.
+    Get list of all models with 24h request counts.
+    Models are sorted by request count (descending), models with no requests at the end.
     """
     service = get_model_status_service()
-    models = service.get_available_models()
-    return AvailableModelsResponse(success=True, data=models)
+    models_with_stats = service.get_available_models_with_stats()
+    return AvailableModelsWithStatsResponse(
+        success=True,
+        data=[ModelWithStats(**m) for m in models_with_stats]
+    )
 
 
 @router.get("/status/{model_name}", response_model=ModelStatusResponse)
@@ -235,15 +251,19 @@ async def get_embed_time_windows():
     )
 
 
-@router.get("/embed/models", response_model=AvailableModelsResponse)
+@router.get("/embed/models", response_model=AvailableModelsWithStatsResponse)
 async def get_embed_available_models():
     """
-    [Public] Get list of all models for embed view.
+    [Public] Get list of all models with 24h request counts for embed view.
+    Models are sorted by request count (descending), models with no requests at the end.
     No authentication required for iframe embedding.
     """
     service = get_model_status_service()
-    models = service.get_available_models()
-    return AvailableModelsResponse(success=True, data=models)
+    models_with_stats = service.get_available_models_with_stats()
+    return AvailableModelsWithStatsResponse(
+        success=True,
+        data=[ModelWithStats(**m) for m in models_with_stats]
+    )
 
 
 @router.get("/embed/status/{model_name}", response_model=ModelStatusResponse)
