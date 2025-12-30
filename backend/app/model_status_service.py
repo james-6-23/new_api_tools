@@ -474,7 +474,8 @@ def get_model_status_service() -> ModelStatusService:
 async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
     """
     Warmup model status data for faster frontend loading.
-    Warms up ALL time windows (1h, 6h, 12h, 24h) for each model.
+    Only warms up models with requests in the last 24 hours.
+    Warms up ALL time windows (1h, 6h, 12h, 24h) for each active model.
     Uses longer cache TTL (5 min) since these are background warmup caches.
 
     Gentle warmup strategy:
@@ -483,7 +484,7 @@ async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
     - Longer delay between batches
 
     Args:
-        max_models: Maximum number of models to warmup (0 = all models).
+        max_models: Maximum number of models to warmup (0 = all active models).
 
     Returns:
         Warmup result with success count and timing.
@@ -495,12 +496,12 @@ async def warmup_model_status(max_models: int = 0) -> Dict[str, Any]:
 
     # First, warmup available_models_with_stats (for model selector sorting)
     models_with_stats = service.get_available_models_with_stats(use_cache=False)
+    # Only warmup models with requests in the last 24 hours
     active_models = [m["model_name"] for m in models_with_stats if m["request_count_24h"] > 0]
     logger.info(f"[模型状态] 模型统计预热完成: {len(models_with_stats)} 个模型, {len(active_models)} 个有请求")
 
-    # Get available models (force refresh to get latest list)
-    models = service.get_available_models(use_cache=False)
-    models_to_warmup = models[:max_models] if max_models > 0 else models
+    # Only warmup active models (those with requests in last 24h)
+    models_to_warmup = active_models[:max_models] if max_models > 0 else active_models
 
     if not models_to_warmup:
         logger.info("[模型状态] 无可用模型，跳过预热")
