@@ -74,31 +74,99 @@ class DBConfig:
 # 1. 最关键的排行榜索引放最前面（影响预热速度）
 # 2. 精简冗余索引，避免重复覆盖
 # 3. 索引列顺序：过滤条件 > 分组条件 > 排序条件
+# 注意：MySQL OneAPI 可能已有部分索引，PostgreSQL 通常缺少复合索引
 RECOMMENDED_INDEXES = [
     # === 最高优先级：排行榜查询（影响3d预热从858s降到<10s）===
     # Query: WHERE created_at >= x AND type IN (2,5) GROUP BY user_id ORDER BY count DESC
-    # 索引顺序：created_at(范围) -> type(等值) -> user_id(分组)
     ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),
 
     # === 高优先级：大窗口/稳定性补充（避免 3d/7d 走全表扫描）===
-    # 对于部分数据库/数据分布，type 放前面会更容易命中索引（type 等值 -> created_at 范围）
+    # 对于部分数据库/数据分布，type 放前面会更容易命中索引
     ("idx_logs_type_created_user", "logs", ["type", "created_at", "user_id"]),
 
-    # === 高优先级：Dashboard 活跃 Token 统计（JOIN tokens + COUNT(DISTINCT token_id)）===
-    # Query: logs WHERE created_at >= x AND type = 2 GROUP BY token_id / DISTINCT token_id
+    # === 高优先级：Dashboard 活跃 Token 统计 ===
+    # Query: logs WHERE created_at >= x AND type = 2 GROUP BY token_id
     ("idx_logs_type_created_token", "logs", ["type", "created_at", "token_id"]),
-    
-    # === 高优先级：增量日志处理 ===
-    ("idx_logs_id_type", "logs", ["id", "type"]),
-    
-    # === 中优先级：IP 监控查询 ===
+
+    # === 中优先级：Dashboard 模型统计 ===
+    # Query: WHERE created_at >= x AND type = 2 GROUP BY model_name
+    ("idx_logs_type_created_model", "logs", ["type", "created_at", "model_name"]),
+
+    # === IP 监控索引 ===
     # IP 切换分析: WHERE user_id = x AND created_at >= y ORDER BY created_at
     ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
     # 多 IP Token 检测: WHERE created_at >= x GROUP BY token_id HAVING COUNT(DISTINCT ip) > 1
     ("idx_logs_created_token_ip", "logs", ["created_at", "token_id", "ip"]),
     # IP 分布统计: WHERE created_at >= x AND ip <> '' GROUP BY ip
     ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
+
+    # === 其他表索引（通常很小，创建很快）===
+    ("idx_users_deleted_status", "users", ["deleted_at", "status"]),
+    ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),
 ]
+
+# ============================================================================
+# OneAPI 系统自带索引白名单 - 绝对不能删除！
+# 来源: mysql_schema_export/all_indexes.txt 和 pgsql_schema_export/all_indexes.txt
+# ============================================================================
+
+# MySQL 系统自带的 logs 表索引（来自 mysql_schema_export）
+# 共 13 个索引
+SYSTEM_LOGS_INDEXES_MYSQL = {
+    "PRIMARY",                    # 主键 (id)
+    "idx_created_at_id",          # (id, created_at)
+    "idx_created_at_type",        # (created_at, type)
+    "idx_logs_channel_id",        # (channel_id)
+    "idx_logs_group",             # (group)
+    "idx_logs_ip",                # (ip)
+    "idx_logs_model_name",        # (model_name)
+    "idx_logs_token_id",          # (token_id)
+    "idx_logs_token_name",        # (token_name)
+    "idx_logs_type_created_id",   # (type, created_at, id)
+    "idx_logs_user_id",           # (user_id)
+    "idx_logs_username",          # (username)
+    "index_username_model_name",  # (model_name, username)
+}
+
+# PostgreSQL 系统自带的 logs 表索引（来自 pgsql_schema_export）
+# 共 11 个索引
+SYSTEM_LOGS_INDEXES_PGSQL = {
+    "logs_pkey",                  # 主键 (id)
+    "idx_created_at_id",          # (id, created_at)
+    "idx_created_at_type",        # (created_at, type)
+    "idx_logs_channel_id",        # (channel_id)
+    "idx_logs_group",             # (group)
+    "idx_logs_ip",                # (ip)
+    "idx_logs_model_name",        # (model_name)
+    "idx_logs_token_id",          # (token_id)
+    "idx_logs_token_name",        # (token_name)
+    "idx_logs_user_id",           # (user_id)
+    "idx_logs_username",          # (username)
+    "index_username_model_name",  # (model_name, username)
+}
+
+# 我们工具创建的索引（需要保留）
+OUR_LOGS_INDEXES = {idx[0] for idx in RECOMMENDED_INDEXES if idx[1] == "logs"}
+
+# ============================================================================
+# 可以安全删除的冗余索引
+# 这些是由旧版本工具或手动创建的重复/冗余索引
+# 注意：只有在这个列表中且不在系统白名单中的索引才会被删除
+# ============================================================================
+REDUNDANT_LOGS_INDEXES = {
+    # 列顺序不同的重复索引
+    "idx_logs_type_time_user",    # 与 idx_logs_type_created_user 重复
+    "idx_logs_type_time_model",   # 与 idx_logs_type_created_model 重复
+    "idx_logs_created_user_type", # 列顺序不同的重复
+    "idx_logs_created_user_ip",   # 与 idx_logs_user_created_ip 重复
+    "idx_logs_user_type_created", # 重复
+    "idx_logs_ip_created",        # 被 idx_logs_created_ip_token 覆盖
+    "idx_logs_token_created_ip",  # 被 idx_logs_created_token_ip 覆盖
+    "idx_logs_id_type",           # 几乎无用
+    # 旧版本工具可能创建的索引
+    "idx_logs_user_created",      # 被 idx_logs_user_created_ip 覆盖
+    "idx_logs_type_created",      # 被 idx_logs_type_created_user 覆盖
+}
 
 
 class DatabaseManager:
@@ -331,6 +399,103 @@ class DatabaseManager:
             logger.warning(f"Failed to get existing indexes for {table_name}: {e}")
             return set()
 
+    def cleanup_redundant_indexes(self, log_progress: bool = True) -> dict[str, Any]:
+        """
+        Clean up redundant indexes on logs table.
+        
+        安全策略（最高优先级）：
+        1. 系统白名单中的索引 **绝对不会被删除**
+        2. 我们工具创建的索引不会被删除
+        3. 只删除明确在 REDUNDANT_LOGS_INDEXES 列表中的索引
+        4. 删除前会再次验证不在白名单中
+        
+        Args:
+            log_progress: If True, log each deletion.
+            
+        Returns:
+            Dictionary with cleanup results.
+        """
+        from .logger import logger as app_logger
+        
+        is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
+        system_indexes = SYSTEM_LOGS_INDEXES_PGSQL if is_pg else SYSTEM_LOGS_INDEXES_MYSQL
+        
+        # Get all existing indexes on logs table
+        existing_indexes = self.get_existing_indexes("logs")
+        
+        # 白名单：系统索引 + 我们的索引（绝对不能删除）
+        whitelist = system_indexes | OUR_LOGS_INDEXES
+        
+        # 只删除：存在 + 在冗余列表中 + 不在白名单中
+        to_delete = []
+        for idx in existing_indexes:
+            # 安全检查1：白名单中的索引绝对不删除
+            if idx in whitelist:
+                continue
+            # 安全检查2：只删除明确标记为冗余的索引
+            if idx in REDUNDANT_LOGS_INDEXES:
+                # 安全检查3：再次确认不在系统白名单中
+                if idx not in system_indexes:
+                    to_delete.append(idx)
+        
+        if not to_delete:
+            if log_progress:
+                app_logger.system(f"索引检查完成，无冗余索引需要清理 (共 {len(existing_indexes)} 个索引)")
+            return {
+                "checked": len(existing_indexes),
+                "deleted": 0,
+                "deleted_indexes": [],
+                "kept": len(existing_indexes),
+                "whitelist_count": len(whitelist & existing_indexes),
+            }
+        
+        if log_progress:
+            app_logger.system(f"发现 {len(to_delete)} 个冗余索引，开始清理: {to_delete}")
+        
+        deleted = []
+        failed = []
+        skipped = []
+        
+        for idx_name in to_delete:
+            # 最终安全检查：删除前再次验证
+            if idx_name in system_indexes:
+                skipped.append(idx_name)
+                if log_progress:
+                    app_logger.warning(f"跳过系统索引: {idx_name}", category="数据库")
+                continue
+                
+            try:
+                if is_pg:
+                    drop_sql = f'DROP INDEX IF EXISTS "{idx_name}"'
+                else:
+                    drop_sql = f'ALTER TABLE logs DROP INDEX `{idx_name}`'
+                
+                self.execute(drop_sql, {})
+                deleted.append(idx_name)
+                
+                if log_progress:
+                    app_logger.system(f"已删除冗余索引: {idx_name}")
+                    
+            except Exception as e:
+                failed.append(idx_name)
+                if log_progress:
+                    app_logger.warning(f"删除索引失败 {idx_name}: {e}", category="数据库")
+        
+        if log_progress:
+            if deleted:
+                app_logger.system(f"索引清理完成，删除 {len(deleted)} 个冗余索引")
+            if failed:
+                app_logger.warning(f"索引清理部分失败: {failed}", category="数据库")
+        
+        return {
+            "checked": len(existing_indexes),
+            "deleted": len(deleted),
+            "deleted_indexes": deleted,
+            "failed": failed,
+            "skipped": skipped,
+            "kept": len(existing_indexes) - len(deleted),
+        }
+
     def create_index(self, index_name: str, table_name: str, columns: list[str]) -> bool:
         """
         Create an index if it doesn't exist.
@@ -401,54 +566,34 @@ class DatabaseManager:
         """
         self._do_ensure_indexes(log_progress=True, delay_between=1.0)
 
-    def _do_ensure_indexes(self, log_progress: bool = False, delay_between: float = 0) -> None:
+    def _do_ensure_indexes(self, log_progress: bool = False, delay_between: float = 0, cleanup_first: bool = True) -> None:
         """
         Internal method to create indexes.
         
         Args:
             log_progress: If True, log each index creation attempt.
             delay_between: Seconds to wait between index creations (reduces DB load).
+            cleanup_first: If True, cleanup redundant indexes before creating new ones.
         """
         import time as time_module
         from .logger import logger as app_logger
         
         is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
         
-        # Define indexes: (index_name, table_name, columns)
-        # 优化后的索引列表 - 按优先级排序，精简冗余
-        indexes = [
-            # === 最高优先级：排行榜查询（3d预热从858s降到<10s）===
-            # Query: WHERE created_at >= x AND type IN (2,5) GROUP BY user_id
-            # 这是最关键的索引，直接影响预热速度
-            ("idx_logs_created_type_user", "logs", ["created_at", "type", "user_id"]),
-
-            # === 高优先级：大窗口/稳定性补充（避免 3d/7d 走全表扫描）===
-            # Query: WHERE type IN (2,5) AND created_at >= x GROUP BY user_id
-            ("idx_logs_type_created_user", "logs", ["type", "created_at", "user_id"]),
-
-            # === 高优先级：Dashboard 活跃 Token 统计 ===
-            # Query: logs JOIN tokens WHERE type = 2 AND created_at >= x COUNT(DISTINCT token_id)
-            ("idx_logs_type_created_token", "logs", ["type", "created_at", "token_id"]),
-
-            # === 高优先级：增量日志处理 ===
-            ("idx_logs_id_type", "logs", ["id", "type"]),
-
-            # === 中优先级：Dashboard 模型统计 ===
-            # Query: WHERE created_at >= x AND type = 2 GROUP BY model_name
-            ("idx_logs_type_created_model", "logs", ["type", "created_at", "model_name"]),
-
-            # === IP 监控索引（精简版）===
-            # IP 切换分析: WHERE user_id = x AND created_at >= y ORDER BY created_at
-            ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
-            # 多 IP Token 检测: WHERE created_at >= x GROUP BY token_id
-            ("idx_logs_created_token_ip", "logs", ["created_at", "token_id", "ip"]),
-            # IP 分布统计: WHERE created_at >= x AND ip <> '' GROUP BY ip
-            ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),
-
-            # === 其他表索引（通常很小，创建很快）===
-            ("idx_users_deleted_status", "users", ["deleted_at", "status"]),
-            ("idx_tokens_user_deleted", "tokens", ["user_id", "deleted_at"]),
-        ]
+        # Step 1: Cleanup redundant indexes first (if enabled)
+        if cleanup_first:
+            try:
+                cleanup_result = self.cleanup_redundant_indexes(log_progress=log_progress)
+                if cleanup_result.get("deleted", 0) > 0:
+                    # Small delay after cleanup
+                    time_module.sleep(1.0)
+            except Exception as e:
+                if log_progress:
+                    app_logger.warning(f"索引清理失败: {e}", category="数据库")
+        
+        # Step 2: Create recommended indexes
+        # Use the module-level RECOMMENDED_INDEXES constant
+        indexes = RECOMMENDED_INDEXES
         
         created_count = 0
         skipped_count = 0
@@ -540,24 +685,8 @@ class DatabaseManager:
         """
         is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
         
-        # 精简后的索引列表（与 _do_ensure_indexes 保持一致）
-        indexes = [
-            # 最关键：排行榜查询优化
-            ("idx_logs_created_type_user", "logs"),
-            ("idx_logs_type_created_user", "logs"),
-            ("idx_logs_type_created_token", "logs"),
-            # 增量日志处理
-            ("idx_logs_id_type", "logs"),
-            # Dashboard 模型统计
-            ("idx_logs_type_created_model", "logs"),
-            # IP 监控
-            ("idx_logs_user_created_ip", "logs"),
-            ("idx_logs_created_token_ip", "logs"),
-            ("idx_logs_created_ip_token", "logs"),
-            # 其他表
-            ("idx_users_deleted_status", "users"),
-            ("idx_tokens_user_deleted", "tokens"),
-        ]
+        # Use RECOMMENDED_INDEXES constant (extract index_name and table_name)
+        indexes = [(idx[0], idx[1]) for idx in RECOMMENDED_INDEXES]
         
         status = {}
         existing_count = 0
@@ -594,6 +723,46 @@ class DatabaseManager:
             "existing": existing_count,
             "missing": missing_count,
             "all_ready": missing_count == 0,
+        }
+
+    def get_logs_index_analysis(self) -> dict[str, Any]:
+        """
+        Get detailed analysis of logs table indexes.
+        Shows which indexes are system, ours, redundant, or unknown.
+        
+        Returns:
+            Dictionary with detailed index analysis.
+        """
+        is_pg = self.config.engine == DatabaseEngine.POSTGRESQL
+        system_indexes = SYSTEM_LOGS_INDEXES_PGSQL if is_pg else SYSTEM_LOGS_INDEXES_MYSQL
+        
+        existing_indexes = self.get_existing_indexes("logs")
+        
+        analysis = {
+            "system": [],      # OneAPI 系统自带
+            "ours": [],        # 我们工具创建的
+            "redundant": [],   # 冗余可删除
+            "unknown": [],     # 未知索引
+        }
+        
+        for idx in existing_indexes:
+            if idx in system_indexes:
+                analysis["system"].append(idx)
+            elif idx in OUR_LOGS_INDEXES:
+                analysis["ours"].append(idx)
+            elif idx in REDUNDANT_LOGS_INDEXES:
+                analysis["redundant"].append(idx)
+            else:
+                analysis["unknown"].append(idx)
+        
+        return {
+            "total": len(existing_indexes),
+            "system_count": len(analysis["system"]),
+            "ours_count": len(analysis["ours"]),
+            "redundant_count": len(analysis["redundant"]),
+            "unknown_count": len(analysis["unknown"]),
+            "details": analysis,
+            "can_cleanup": len(analysis["redundant"]) > 0,
         }
 
 
