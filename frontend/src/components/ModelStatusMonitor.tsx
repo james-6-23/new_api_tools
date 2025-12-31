@@ -586,6 +586,15 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                         <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={selectAllModels}>
                           全选
                         </Button>
+                        <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
+                          const activeModels = availableModels
+                            .filter(m => m.request_count_24h > 0)
+                            .map(m => m.model_name)
+                          setSelectedModels(activeModels)
+                          saveSelectedModelsToBackend(activeModels)
+                        }}>
+                          有记录
+                        </Button>
                         <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearAllModels}>
                           清空
                         </Button>
