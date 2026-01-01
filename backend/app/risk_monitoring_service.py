@@ -539,7 +539,7 @@ class RiskMonitoringService:
 
         # Query 1: User info
         user_sql = f"""
-            SELECT id, username, display_name, email, status, {group_col}, remark
+            SELECT id, username, display_name, email, status, {group_col}, remark, linux_do_id
             FROM users
             WHERE id = :user_id AND deleted_at IS NULL
             LIMIT 1
@@ -742,6 +742,7 @@ class RiskMonitoringService:
                 "status": int(user.get("status")) if user and user.get("status") is not None else 0,
                 "group": (user.get("group") if user else None),
                 "remark": (user.get("remark") if user else None),
+                "linux_do_id": (user.get("linux_do_id") if user else None),
                 "in_whitelist": in_whitelist,
             },
             "summary": {
