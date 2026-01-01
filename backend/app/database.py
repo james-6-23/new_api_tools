@@ -60,14 +60,14 @@ class DBConfig:
                     database=parsed.path.lstrip("/") or "newapi",
                 )
             else:
-                # MySQL format: user:pass@tcp(host:port)/dbname
+                # MySQL format: user:pass@tcp(host[:port])/dbname
                 import re
-                match = re.match(r"([^:]+):([^@]*)@tcp\(([^:]+):(\d+)\)/(.+)", sql_dsn)
+                match = re.match(r"([^:]+):([^@]*)@tcp\(([^:)]+)(?::(\d+))?\)/(.+)", sql_dsn)
                 if match:
                     return cls(
                         engine=DatabaseEngine.MYSQL,
                         host=match.group(3),
-                        port=int(match.group(4)),
+                        port=int(match.group(4)) if match.group(4) else 3306,
                         user=match.group(1),
                         password=match.group(2),
                         database=match.group(5),
@@ -94,18 +94,23 @@ class DBConfig:
 
     def get_connection_url(self) -> str:
         """Generate SQLAlchemy connection URL."""
+        from urllib.parse import quote_plus
+
         # 处理 IPv6 地址格式 - 需要用方括号包裹
         host = self.host
         if ':' in host and not host.startswith('['):
             # IPv6 地址需要用方括号包裹
             host = f'[{host}]'
-        
+
+        # URL encode password to handle special characters
+        encoded_password = quote_plus(self.password) if self.password else ""
+
         if self.engine == DatabaseEngine.POSTGRESQL:
-            return f"postgresql+psycopg2://{self.user}:{self.password}@{host}:{self.port}/{self.database}"
+            return f"postgresql+psycopg2://{self.user}:{encoded_password}@{host}:{self.port}/{self.database}"
         else:
             # MySQL 连接参数
             # charset=utf8mb4 支持完整 Unicode
-            return f"mysql+pymysql://{self.user}:{self.password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
+            return f"mysql+pymysql://{self.user}:{encoded_password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
 
 
 # Recommended indexes for performance optimization

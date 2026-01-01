@@ -198,16 +198,18 @@ class CacheManager:
             import redis
 
             if redis_conn_string:
-                # Parse REDIS_CONN_STRING: redis://[:password@]host[:port][/db]
+                # Parse REDIS_CONN_STRING: redis://[user:password@]host[:port][/db]
                 parsed = urlparse(redis_conn_string)
                 host = parsed.hostname or 'localhost'
                 port = parsed.port or 6379
+                username = parsed.username or None  # Support Redis ACL
                 password = parsed.password or None
                 db = int(parsed.path.lstrip('/') or 0) if parsed.path else 0
 
                 self._redis = redis.Redis(
                     host=host,
                     port=port,
+                    username=username,
                     password=password,
                     db=db,
                     decode_responses=True,
