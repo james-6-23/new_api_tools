@@ -18,6 +18,7 @@ class TopUpStatus(str, Enum):
     PENDING = "pending"
     SUCCESS = "success"
     FAILED = "failed"
+    REFUNDED = "refunded"
 
 
 @dataclass
@@ -43,6 +44,8 @@ class TopUpRecord:
             status = TopUpStatus.SUCCESS
         elif status_str in ("failed", "-1", "error"):
             status = TopUpStatus.FAILED
+        elif status_str == "refunded":
+            status = TopUpStatus.REFUNDED
         else:
             status = TopUpStatus.PENDING
 
@@ -85,6 +88,9 @@ class TopUpStatistics:
     failed_count: int
     failed_amount: int
     failed_money: float
+    refunded_count: int
+    refunded_amount: int
+    refunded_money: float
 
 
 @dataclass
@@ -154,8 +160,10 @@ class TopUpService:
                 where_clauses.append("(LOWER(t.status) = 'success' OR t.status = '1' OR LOWER(t.status) = 'completed')")
             elif params.status == TopUpStatus.FAILED:
                 where_clauses.append("(LOWER(t.status) = 'failed' OR t.status = '-1' OR LOWER(t.status) = 'error')")
+            elif params.status == TopUpStatus.REFUNDED:
+                where_clauses.append("LOWER(t.status) = 'refunded'")
             else:
-                where_clauses.append("(LOWER(t.status) NOT IN ('success', 'failed', 'completed', 'error') AND t.status NOT IN ('1', '-1'))")
+                where_clauses.append("(LOWER(t.status) NOT IN ('success', 'failed', 'completed', 'error', 'refunded') AND t.status NOT IN ('1', '-1'))")
 
         if params.payment_method:
             where_clauses.append("t.payment_method = :payment_method")
@@ -251,7 +259,10 @@ class TopUpService:
                 SUM(CASE WHEN LOWER(status) IN ('success', 'completed') OR status = '1' THEN money ELSE 0 END) as success_money,
                 SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN 1 ELSE 0 END) as failed_count,
                 SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN amount ELSE 0 END) as failed_amount,
-                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN money ELSE 0 END) as failed_money
+                SUM(CASE WHEN LOWER(status) IN ('failed', 'error') OR status = '-1' THEN money ELSE 0 END) as failed_money,
+                SUM(CASE WHEN LOWER(status) = 'refunded' THEN 1 ELSE 0 END) as refunded_count,
+                SUM(CASE WHEN LOWER(status) = 'refunded' THEN amount ELSE 0 END) as refunded_amount,
+                SUM(CASE WHEN LOWER(status) = 'refunded' THEN money ELSE 0 END) as refunded_money
             FROM top_ups
             WHERE {where_sql}
         """
@@ -262,17 +273,20 @@ class TopUpService:
         total_count = int(row.get("total_count", 0) or 0)
         success_count = int(row.get("success_count", 0) or 0)
         failed_count = int(row.get("failed_count", 0) or 0)
-        pending_count = total_count - success_count - failed_count
-        
+        refunded_count = int(row.get("refunded_count", 0) or 0)
+        pending_count = total_count - success_count - failed_count - refunded_count
+
         total_amount = int(row.get("total_amount", 0) or 0)
         success_amount = int(row.get("success_amount", 0) or 0)
         failed_amount = int(row.get("failed_amount", 0) or 0)
-        pending_amount = total_amount - success_amount - failed_amount
-        
+        refunded_amount = int(row.get("refunded_amount", 0) or 0)
+        pending_amount = total_amount - success_amount - failed_amount - refunded_amount
+
         total_money = float(row.get("total_money", 0) or 0)
         success_money = float(row.get("success_money", 0) or 0)
         failed_money = float(row.get("failed_money", 0) or 0)
-        pending_money = total_money - success_money - failed_money
+        refunded_money = float(row.get("refunded_money", 0) or 0)
+        pending_money = total_money - success_money - failed_money - refunded_money
 
         return TopUpStatistics(
             total_count=total_count,
@@ -287,6 +301,9 @@ class TopUpService:
             failed_count=failed_count,
             failed_amount=failed_amount,
             failed_money=failed_money,
+            refunded_count=refunded_count,
+            refunded_amount=refunded_amount,
+            refunded_money=refunded_money,
         )
 
     def get_payment_methods(self) -> List[str]:
@@ -328,6 +345,55 @@ class TopUpService:
             return None
 
         return TopUpRecord.from_db_row(rows[0])
+
+    def refund_record(self, id: int) -> TopUpRecord:
+        """
+        Refund a top up record.
+
+        Args:
+            id: Top up record ID.
+
+        Returns:
+            Updated TopUpRecord.
+
+        Raises:
+            ValueError: If record not found or not in success status.
+        """
+        # Get record for validation and quota calculation
+        record = self.get_record_by_id(id)
+        if not record:
+            raise ValueError(f"充值记录 {id} 不存在")
+
+        if record.status != TopUpStatus.SUCCESS:
+            raise ValueError(f"只能退款成功状态的订单，当前状态: {record.status.value}")
+
+        # Calculate quota to deduct (amount * QuotaPerUnit, same as new-api)
+        from .quota_calculator import TOKENS_PER_USD
+        quota_to_deduct = record.amount * TOKENS_PER_USD
+
+        # Execute atomic update in a single transaction with row-level locking
+        from sqlalchemy import text
+        with self.db.engine.connect() as conn:
+            # Atomic update: only update if status is still 'success' (prevents double refund)
+            result = conn.execute(
+                text("UPDATE top_ups SET status = 'refunded' WHERE id = :id AND LOWER(status) IN ('success', 'completed', '1')"),
+                {"id": id}
+            )
+            if result.rowcount == 0:
+                conn.rollback()
+                raise ValueError("退款失败：订单状态已变更或已被退款")
+
+            # Deduct user quota (use GREATEST to prevent negative quota)
+            conn.execute(
+                text("UPDATE users SET quota = GREATEST(0, quota - :quota) WHERE id = :user_id"),
+                {"quota": quota_to_deduct, "user_id": record.user_id}
+            )
+            conn.commit()
+
+        logger.info(f"Refunded top up {id}, user {record.user_id}, quota deducted: {quota_to_deduct}")
+
+        # Return updated record
+        return self.get_record_by_id(id)
 
     def _parse_date_to_timestamp(self, date_str: str, end_of_day: bool = False) -> int:
         """Parse date string to Unix timestamp."""

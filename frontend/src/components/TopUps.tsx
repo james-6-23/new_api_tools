@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { CreditCard, Loader2, RefreshCw, Copy, ExternalLink, CheckCircle2, Clock, XCircle, Search, Calendar, Filter } from 'lucide-react'
+import { CreditCard, Loader2, RefreshCw, Copy, ExternalLink, CheckCircle2, Clock, XCircle, Search, Calendar, Filter, Undo2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -37,6 +37,9 @@ interface TopUpStatistics {
   failed_count: number
   failed_amount: number
   failed_money: number
+  refunded_count: number
+  refunded_amount: number
+  refunded_money: number
 }
 
 interface PaginatedResponse {
@@ -47,7 +50,7 @@ interface PaginatedResponse {
   total_pages: number
 }
 
-type StatusFilter = '' | 'pending' | 'success' | 'failed'
+type StatusFilter = '' | 'pending' | 'success' | 'failed' | 'refunded'
 
 export function TopUps() {
   const { showToast } = useToast()
@@ -68,6 +71,9 @@ export function TopUps() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [refundingId, setRefundingId] = useState<number | null>(null)
+  const [showRefundModal, setShowRefundModal] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<TopUpRecord | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -136,6 +142,36 @@ export function TopUps() {
     showToast('success', '数据已刷新')
   }
 
+  const openRefundModal = (record: TopUpRecord) => {
+    setSelectedRecord(record)
+    setShowRefundModal(true)
+  }
+
+  const handleRefund = async () => {
+    if (!selectedRecord) return
+
+    setRefundingId(selectedRecord.id)
+    try {
+      const response = await fetch(`${apiUrl}/api/top-ups/${selectedRecord.id}/refund`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      })
+      const data = await response.json()
+      if (response.ok && data.success) {
+        showToast('success', '退款成功')
+        setShowRefundModal(false)
+        fetchRecords()
+        fetchStatistics()
+      } else {
+        showToast('error', data.error?.message || '退款失败')
+      }
+    } catch {
+      showToast('error', '网络错误，请重试')
+    } finally {
+      setRefundingId(null)
+    }
+  }
+
   const formatTimestamp = (ts: number) => ts ? new Date(ts * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'
   const formatAmount = (amount: number) => amount.toFixed(2)
   const formatMoney = (money: number) => `¥${money.toFixed(2)}`
@@ -161,33 +197,42 @@ export function TopUps() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard 
-          title="成功充值" 
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <StatCard
+          title="成功充值"
           value={statsLoading ? '-' : `${statistics?.success_count || 0} 笔`}
           subValue={statsLoading ? '-' : `${formatMoney(statistics?.success_money || 0)}`}
-          icon={CheckCircle2} 
-          color="green" 
+          icon={CheckCircle2}
+          color="green"
           className="border-l-4 border-l-green-500"
           onClick={() => setStatusFilter('success')}
         />
-        <StatCard 
-          title="待处理" 
+        <StatCard
+          title="待处理"
           value={statsLoading ? '-' : `${statistics?.pending_count || 0} 笔`}
           subValue={statsLoading ? '-' : `${formatMoney(statistics?.pending_money || 0)}`}
-          icon={Clock} 
-          color="yellow" 
+          icon={Clock}
+          color="yellow"
           className="border-l-4 border-l-yellow-500"
           onClick={() => setStatusFilter('pending')}
         />
-        <StatCard 
-          title="充值失败" 
+        <StatCard
+          title="充值失败"
           value={statsLoading ? '-' : `${statistics?.failed_count || 0} 笔`}
           subValue={statsLoading ? '-' : `${formatMoney(statistics?.failed_money || 0)}`}
-          icon={XCircle} 
-          color="red" 
+          icon={XCircle}
+          color="red"
           className="border-l-4 border-l-red-500"
           onClick={() => setStatusFilter('failed')}
+        />
+        <StatCard
+          title="已退款"
+          value={statsLoading ? '-' : `${statistics?.refunded_count || 0} 笔`}
+          subValue={statsLoading ? '-' : `${formatMoney(statistics?.refunded_money || 0)}`}
+          icon={Undo2}
+          color="gray"
+          className="border-l-4 border-l-gray-500"
+          onClick={() => setStatusFilter('refunded')}
         />
       </div>
 
@@ -226,6 +271,7 @@ export function TopUps() {
                 <option value="success">成功</option>
                 <option value="pending">待处理</option>
                 <option value="failed">失败</option>
+                <option value="refunded">已退款</option>
               </Select>
             </div>
             <div className="space-y-1">
@@ -303,6 +349,7 @@ export function TopUps() {
                     <TableHead>支付方式</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>时间</TableHead>
+                    <TableHead className="w-[80px]">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -354,8 +401,8 @@ export function TopUps() {
                         <Badge variant="outline" className="font-normal">{record.payment_method}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={record.status === 'success' ? 'success' : record.status === 'pending' ? 'warning' : 'destructive'}>
-                          {record.status === 'success' ? '成功' : record.status === 'pending' ? '待处理' : '失败'}
+                        <Badge variant={record.status === 'success' ? 'success' : record.status === 'pending' ? 'warning' : record.status === 'refunded' ? 'secondary' : 'destructive'}>
+                          {record.status === 'success' ? '成功' : record.status === 'pending' ? '待处理' : record.status === 'refunded' ? '已退款' : '失败'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -363,6 +410,20 @@ export function TopUps() {
                           <span>创建: {formatTimestamp(record.create_time)}</span>
                           {record.complete_time > 0 && <span>完成: {formatTimestamp(record.complete_time)}</span>}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {record.status === 'success' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                            onClick={() => openRefundModal(record)}
+                            disabled={refundingId === record.id}
+                          >
+                            {refundingId === record.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3 mr-1" />}
+                            退款
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -392,6 +453,49 @@ export function TopUps() {
           )}
         </CardContent>
       </Card>
+
+      {/* Refund Modal */}
+      {showRefundModal && selectedRecord && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowRefundModal(false)}>
+          <Card className="w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-lg">确认退款</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-muted/50 p-3 rounded-md space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">用户</span>
+                  <span className="font-medium">{selectedRecord.username || '未知用户'} (ID: {selectedRecord.user_id})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">充值额度</span>
+                  <span className="font-medium text-green-600">{formatAmount(selectedRecord.amount)} USD</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">支付金额</span>
+                  <span className="font-medium">{formatMoney(selectedRecord.money)}</span>
+                </div>
+              </div>
+
+              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-md">
+                退款后将自动扣减用户对应额度，此操作不可撤销。
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setShowRefundModal(false)}>取消</Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleRefund}
+                  disabled={refundingId !== null}
+                >
+                  {refundingId !== null ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  确认退款
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

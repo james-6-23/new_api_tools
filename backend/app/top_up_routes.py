@@ -65,6 +65,8 @@ class PaymentMethodsResponse(BaseModel):
     data: List[str]
 
 
+
+
 # API Endpoints
 
 @router.get("", response_model=TopUpListResponse)
@@ -72,7 +74,7 @@ async def list_top_ups(
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     user_id: Optional[int] = Query(default=None, description="用户ID筛选"),
-    status: Optional[TopUpStatus] = Query(default=None, description="状态筛选"),
+    status: Optional[TopUpStatus] = Query(default=None, description="状态筛选 (pending/success/failed/refunded)"),
     payment_method: Optional[str] = Query(default=None, description="支付方式筛选"),
     trade_no: Optional[str] = Query(default=None, description="交易号搜索"),
     start_date: Optional[str] = Query(default=None, description="创建时间起始 (ISO 8601)"),
@@ -166,6 +168,9 @@ async def get_top_up_statistics(
                 "failed_count": stats.failed_count,
                 "failed_amount": stats.failed_amount,
                 "failed_money": stats.failed_money,
+                "refunded_count": stats.refunded_count,
+                "refunded_amount": stats.refunded_amount,
+                "refunded_money": stats.refunded_money,
             },
         )
 
@@ -222,3 +227,36 @@ async def get_top_up_record(
             status=record.status.value,
         ),
     }
+
+
+@router.post("/{id}/refund", response_model=dict)
+async def refund_top_up(
+    id: int,
+    _: str = Depends(verify_auth),
+):
+    """
+    退款充值记录。
+
+    - **id**: 充值记录 ID
+    """
+    try:
+        service = get_top_up_service()
+        record = service.refund_record(id)
+
+        return {
+            "success": True,
+            "data": TopUpRecordResponse(
+                id=record.id,
+                user_id=record.user_id,
+                username=record.username,
+                amount=record.amount,
+                money=record.money,
+                trade_no=record.trade_no,
+                payment_method=record.payment_method,
+                create_time=record.create_time,
+                complete_time=record.complete_time,
+                status=record.status.value,
+            ),
+        }
+    except ValueError as e:
+        raise InvalidParamsError(message=str(e))
