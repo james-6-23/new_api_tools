@@ -54,6 +54,7 @@ class UserInfo:
     group: Optional[str]
     last_request_time: Optional[int]  # Unix timestamp
     activity_level: ActivityLevel
+    linux_do_id: Optional[str] = None  # Linux.do 用户 ID
 
 
 @dataclass
@@ -112,9 +113,13 @@ class UserManagementService:
         except Exception as e:
             logger.warning(f"[缓存] 清除活跃度列表缓存失败: {e}")
 
-    def get_activity_stats(self) -> ActivityStats:
+    def get_activity_stats(self, quick: bool = False) -> ActivityStats:
         """
         获取用户活跃度统计（带缓存）
+
+        Args:
+            quick: 快速模式，只返回总用户数和从未请求数（不 JOIN logs 表）
+                   用于大型系统首次加载时快速显示基础数据
 
         缓存 5 分钟减少数据库压力。
         """
@@ -129,7 +134,11 @@ class UserManagementService:
                 never_requested=cached.get("never_requested", 0),
             )
 
-        # 缓存未命中，执行查询
+        # 快速模式：只返回基础统计（不 JOIN logs）
+        if quick:
+            return self._fetch_quick_stats()
+
+        # 缓存未命中，执行完整查询
         stats = self._fetch_activity_stats()
 
         # 存入缓存
@@ -143,13 +152,57 @@ class UserManagementService:
 
         return stats
 
+    def _fetch_quick_stats(self) -> ActivityStats:
+        """
+        快速获取基础统计（只查 users 表，毫秒级）
+        
+        用于大型系统在缓存未命中时快速返回基础数据，
+        活跃度详细分布显示为 0，提示用户数据正在加载。
+        """
+        try:
+            self._db.connect()
+            sql = """
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN request_count = 0 THEN 1 ELSE 0 END) as never_count,
+                    SUM(CASE WHEN request_count > 0 THEN 1 ELSE 0 END) as has_requests
+                FROM users
+                WHERE deleted_at IS NULL
+            """
+            result = self._db.execute(sql, {})
+            if result and result[0]:
+                row = result[0]
+                total = int(row.get("total") or 0)
+                never = int(row.get("never_count") or 0)
+                has_requests = int(row.get("has_requests") or 0)
+                return ActivityStats(
+                    total_users=total,
+                    active_users=0,  # 快速模式不计算
+                    inactive_users=0,
+                    very_inactive_users=0,
+                    never_requested=never,
+                )
+        except Exception as e:
+            logger.db_error(f"快速统计失败: {e}")
+        
+        return ActivityStats(
+            total_users=0,
+            active_users=0,
+            inactive_users=0,
+            very_inactive_users=0,
+            never_requested=0,
+        )
+
+        return stats
+
     def _fetch_activity_stats(self) -> ActivityStats:
         """
         从数据库获取用户活跃度统计
 
-        使用高效的单次查询统计所有活跃度级别。
-        - 活跃/不活跃/非常不活跃：通过 JOIN logs 表获取最后请求时间判断
-        - 从未请求：使用 users.request_count = 0 判断（与用户列表逻辑一致）
+        性能优化策略（针对大型系统 3万+ 用户）：
+        1. 先快速获取总用户数和从未请求数（只查 users 表）
+        2. 使用 EXISTS 子查询代替 GROUP BY 统计活跃用户（更高效）
+        3. 分步查询避免单个大查询超时
         """
         now = int(time.time())
         active_cutoff = now - ACTIVE_THRESHOLD
@@ -158,45 +211,71 @@ class UserManagementService:
         try:
             self._db.connect()
 
-            # 先统计从未请求的用户数（使用 request_count 字段，与用户列表一致）
-            never_sql = """
-                SELECT COUNT(*) as cnt FROM users
-                WHERE deleted_at IS NULL AND request_count = 0
-            """
-            never_result = self._db.execute(never_sql, {})
-            never_count = int(never_result[0]["cnt"]) if never_result else 0
-
-            # 统计有请求的用户的活跃度分布
-            stats_sql = """
-                SELECT
+            # 1. 快速统计总用户数和从未请求数（只查 users 表，毫秒级）
+            basic_sql = """
+                SELECT 
                     COUNT(*) as total,
-                    SUM(CASE WHEN last_req >= :active_cutoff THEN 1 ELSE 0 END) as active,
-                    SUM(CASE WHEN last_req < :active_cutoff AND last_req >= :inactive_cutoff THEN 1 ELSE 0 END) as inactive,
-                    SUM(CASE WHEN last_req < :inactive_cutoff THEN 1 ELSE 0 END) as very_inactive
-                FROM (
-                    SELECT u.id, MAX(l.created_at) as last_req
-                    FROM users u
-                    INNER JOIN logs l ON u.id = l.user_id AND l.type = 2
-                    WHERE u.deleted_at IS NULL
-                    GROUP BY u.id
-                ) user_activity
+                    SUM(CASE WHEN request_count = 0 THEN 1 ELSE 0 END) as never_count
+                FROM users
+                WHERE deleted_at IS NULL
             """
+            basic_result = self._db.execute(basic_sql, {})
+            total_users = int(basic_result[0]["total"]) if basic_result else 0
+            never_count = int(basic_result[0]["never_count"]) if basic_result else 0
 
-            result = self._db.execute(stats_sql, {
+            # 2. 统计活跃用户（7天内有请求）- 使用 EXISTS 更高效
+            active_sql = """
+                SELECT COUNT(*) as cnt FROM users u
+                WHERE u.deleted_at IS NULL 
+                  AND u.request_count > 0
+                  AND EXISTS (
+                    SELECT 1 FROM logs l 
+                    WHERE l.user_id = u.id 
+                      AND l.type = 2 
+                      AND l.created_at >= :active_cutoff
+                    LIMIT 1
+                  )
+            """
+            active_result = self._db.execute(active_sql, {"active_cutoff": active_cutoff})
+            active_count = int(active_result[0]["cnt"]) if active_result else 0
+
+            # 3. 统计不活跃用户（7-30天内有请求）
+            inactive_sql = """
+                SELECT COUNT(*) as cnt FROM users u
+                WHERE u.deleted_at IS NULL 
+                  AND u.request_count > 0
+                  AND NOT EXISTS (
+                    SELECT 1 FROM logs l 
+                    WHERE l.user_id = u.id 
+                      AND l.type = 2 
+                      AND l.created_at >= :active_cutoff
+                    LIMIT 1
+                  )
+                  AND EXISTS (
+                    SELECT 1 FROM logs l 
+                    WHERE l.user_id = u.id 
+                      AND l.type = 2 
+                      AND l.created_at >= :inactive_cutoff
+                    LIMIT 1
+                  )
+            """
+            inactive_result = self._db.execute(inactive_sql, {
                 "active_cutoff": active_cutoff,
                 "inactive_cutoff": inactive_cutoff,
             })
+            inactive_count = int(inactive_result[0]["cnt"]) if inactive_result else 0
 
-            if result and result[0]:
-                row = result[0]
-                active_count = int(row.get("total") or 0)
-                return ActivityStats(
-                    total_users=active_count + never_count,
-                    active_users=int(row.get("active") or 0),
-                    inactive_users=int(row.get("inactive") or 0),
-                    very_inactive_users=int(row.get("very_inactive") or 0),
-                    never_requested=never_count,
-                )
+            # 4. 非常不活跃 = 有请求记录的用户 - 活跃 - 不活跃
+            has_requests = total_users - never_count
+            very_inactive_count = has_requests - active_count - inactive_count
+
+            return ActivityStats(
+                total_users=total_users,
+                active_users=active_count,
+                inactive_users=inactive_count,
+                very_inactive_users=max(0, very_inactive_count),  # 防止负数
+                never_requested=never_count,
+            )
         except Exception as e:
             logger.db_error(f"获取活跃度统计失败: {e}")
 
@@ -343,7 +422,7 @@ class UserManagementService:
             SELECT
                 id, username, display_name, email,
                 role, status, quota, used_quota,
-                request_count, {group_col}
+                request_count, {group_col}, linux_do_id
             FROM users
             WHERE deleted_at IS NULL
         """
@@ -355,9 +434,9 @@ class UserManagementService:
 
         where_clauses = []
 
-        # 搜索条件（支持用户名、显示名、邮箱）
+        # 搜索条件（支持用户名、显示名、邮箱、linux_do_id、aff_code）
         if search:
-            where_clauses.append("(username LIKE :search OR COALESCE(display_name, '') LIKE :search OR COALESCE(email, '') LIKE :search)")
+            where_clauses.append("(username LIKE :search OR COALESCE(display_name, '') LIKE :search OR COALESCE(email, '') LIKE :search OR COALESCE(linux_do_id, '') LIKE :search OR COALESCE(aff_code, '') LIKE :search)")
             params["search"] = f"%{search}%"
 
         # 从未请求筛选
@@ -413,6 +492,7 @@ class UserManagementService:
                     group=row.get("group"),
                     last_request_time=None,  # 快速模式不获取精确时间
                     activity_level=activity,
+                    linux_do_id=row.get("linux_do_id"),
                 ))
 
             return {
@@ -470,6 +550,7 @@ class UserManagementService:
                             group=item.get("group"),
                             last_request_time=item.get("last_request_time"),
                             activity_level=ActivityLevel(item.get("activity_level", "never")),
+                            linux_do_id=item.get("linux_do_id"),
                         ))
                     logger.debug(f"[缓存命中] 用户活跃度列表 filter={activity_filter.value} page={page}")
                     return {
@@ -496,7 +577,7 @@ class UserManagementService:
             SELECT
                 u.id, u.username, u.display_name, u.email,
                 u.role, u.status, u.quota, u.used_quota,
-                u.request_count, {group_col},
+                u.request_count, {group_col}, u.linux_do_id,
                 MAX(l.created_at) as last_request_time
             FROM users u
             LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
@@ -512,14 +593,14 @@ class UserManagementService:
 
         where_clauses = []
         if search:
-            where_clauses.append("(u.username LIKE :search OR COALESCE(u.display_name, '') LIKE :search OR COALESCE(u.email, '') LIKE :search)")
+            where_clauses.append("(u.username LIKE :search OR COALESCE(u.display_name, '') LIKE :search OR COALESCE(u.email, '') LIKE :search OR COALESCE(u.linux_do_id, '') LIKE :search OR COALESCE(u.aff_code, '') LIKE :search)")
             params["search"] = f"%{search}%"
 
         where_sql = ""
         if where_clauses:
             where_sql = " AND " + " AND ".join(where_clauses)
 
-        group_by = f" GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, {group_col}"
+        group_by = f" GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, {group_col}, u.linux_do_id"
 
         # 活跃度筛选
         having_clause = ""
@@ -587,6 +668,7 @@ class UserManagementService:
                     group=row.get("group"),
                     last_request_time=int(last_req) if last_req else None,
                     activity_level=activity,
+                    linux_do_id=row.get("linux_do_id"),
                 ))
 
             result_data = {
@@ -617,6 +699,7 @@ class UserManagementService:
                                 "group": u.group,
                                 "last_request_time": u.last_request_time,
                                 "activity_level": u.activity_level.value,
+                                "linux_do_id": u.linux_do_id,
                             }
                             for u in users
                         ],
