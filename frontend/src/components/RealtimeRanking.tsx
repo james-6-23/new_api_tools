@@ -50,7 +50,7 @@ interface IPSwitchAnalysis {
 
 interface UserAnalysis {
   range: { start_time: number; end_time: number; window_seconds: number }
-  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null; in_whitelist?: boolean }
+  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null; in_whitelist?: boolean; linux_do_id?: string | null }
   summary: {
     total_requests: number
     success_requests: number
@@ -4238,9 +4238,21 @@ export function RealtimeRanking() {
             <div className="flex justify-between items-start pr-6">
               <div>
                 <DialogTitle className="text-xl">用户行为分析</DialogTitle>
-                <DialogDescription className="mt-1.5 flex items-center gap-2">
+                <DialogDescription className="mt-1.5 flex items-center gap-2 flex-wrap">
                   <Badge variant="outline">{selected ? WINDOW_LABELS[selected.window] : '-'}</Badge>
                   <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
+                  {analysis?.user.linux_do_id && (
+                    <a
+                      href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${analysis.user.linux_do_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
+                      title="查看 Linux.do 证书"
+                    >
+                      <span>Linux.do:</span>
+                      <span>{analysis.user.linux_do_id}</span>
+                    </a>
+                  )}
                 </DialogDescription>
               </div>
             </div>
