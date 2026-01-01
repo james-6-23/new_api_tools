@@ -36,7 +36,7 @@ STATS_CACHE_TTL = 300  # 5 分钟
 
 # 活跃度筛选缓存配置
 ACTIVITY_LIST_CACHE_PREFIX = "user_activity_list"
-ACTIVITY_LIST_CACHE_TTL = 120  # 2 分钟（活跃度筛选查询较慢，缓存时间适中）
+ACTIVITY_LIST_CACHE_TTL = 600  # 10 分钟（大型系统查询较慢，延长缓存时间）
 
 
 @dataclass
@@ -603,13 +603,16 @@ class UserManagementService:
         group_by = f" GROUP BY u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, {group_col}, u.linux_do_id"
 
         # 活跃度筛选
+        # 注意：LEFT JOIN 后，没有匹配日志的用户 MAX(l.created_at) 为 NULL
         having_clause = ""
         if activity_filter == ActivityLevel.ACTIVE:
             having_clause = " HAVING MAX(l.created_at) >= :active_cutoff"
         elif activity_filter == ActivityLevel.INACTIVE:
             having_clause = " HAVING MAX(l.created_at) < :active_cutoff AND MAX(l.created_at) >= :inactive_cutoff"
         elif activity_filter == ActivityLevel.VERY_INACTIVE:
-            having_clause = " HAVING MAX(l.created_at) < :inactive_cutoff"
+            # 非常不活跃：最后请求时间超过30天
+            # 包括：1) 有日志但超过30天  2) 有 request_count 但日志被清理了(NULL)
+            having_clause = " HAVING MAX(l.created_at) < :inactive_cutoff OR (MAX(l.created_at) IS NULL AND u.request_count > 0)"
 
         # 排序 - 根据数据库类型选择 NULL 排序语法
         order_column = "last_request_time"
@@ -635,14 +638,14 @@ class UserManagementService:
             full_sql = base_sql + where_sql + group_by + having_clause + order_clause + limit_clause
             result = self._db.execute(full_sql, params)
 
-            # 总数
+            # 总数 - 需要包含 request_count 以支持 HAVING 条件
             count_sql = f"""
                 SELECT COUNT(*) as cnt FROM (
-                    SELECT u.id, MAX(l.created_at) as last_req
+                    SELECT u.id, u.request_count, MAX(l.created_at) as last_req
                     FROM users u
                     LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
                     WHERE u.deleted_at IS NULL{where_sql}
-                    GROUP BY u.id
+                    GROUP BY u.id, u.request_count
                     {having_clause}
                 ) sub
             """
