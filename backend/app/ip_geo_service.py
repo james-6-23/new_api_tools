@@ -12,7 +12,6 @@ import time
 import asyncio
 import ipaddress
 import httpx
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -128,7 +127,14 @@ class IPGeoService:
         self._city_reader: Optional["geoip2.database.Reader"] = None
         self._asn_reader: Optional["geoip2.database.Reader"] = None
         self._db_available = False
+        self._db_checked = False  # 延迟加载标志
+
+    def _ensure_databases(self):
+        """延迟加载数据库（首次查询时）"""
+        if self._db_checked and self._db_available:
+            return
         self._init_databases()
+        self._db_checked = True
     
     def _init_databases(self):
         """初始化 GeoIP 数据库"""
@@ -140,9 +146,9 @@ class IPGeoService:
         if os.path.exists(GEOIP_CITY_DB):
             try:
                 self._city_reader = geoip2.database.Reader(GEOIP_CITY_DB)
-                logger.success(f"GeoLite2-City 数据库已加载", path=GEOIP_CITY_DB)
+                logger.success("GeoLite2-City 数据库已加载", path=GEOIP_CITY_DB)
             except Exception as e:
-                logger.fail(f"GeoLite2-City 数据库加载失败", error=str(e))
+                logger.fail("GeoLite2-City 数据库加载失败", error=str(e))
         else:
             logger.warn(f"GeoLite2-City 数据库不存在: {GEOIP_CITY_DB}")
 
@@ -150,9 +156,9 @@ class IPGeoService:
         if os.path.exists(GEOIP_ASN_DB):
             try:
                 self._asn_reader = geoip2.database.Reader(GEOIP_ASN_DB)
-                logger.success(f"GeoLite2-ASN 数据库已加载", path=GEOIP_ASN_DB)
+                logger.success("GeoLite2-ASN 数据库已加载", path=GEOIP_ASN_DB)
             except Exception as e:
-                logger.fail(f"GeoLite2-ASN 数据库加载失败", error=str(e))
+                logger.fail("GeoLite2-ASN 数据库加载失败", error=str(e))
         else:
             logger.warn(f"GeoLite2-ASN 数据库不存在: {GEOIP_ASN_DB}")
         
@@ -166,6 +172,7 @@ class IPGeoService:
     
     def is_available(self) -> bool:
         """检查 GeoIP 服务是否可用"""
+        self._ensure_databases()
         return self._db_available
     
     def _get_cached(self, ip: str) -> Optional[IPGeoInfo]:
@@ -295,13 +302,16 @@ class IPGeoService:
         cached = self._get_cached(ip)
         if cached:
             return cached
-        
+
         # 私有 IP 不查询
         if is_private_ip(ip):
             info = self._create_private_ip_info(ip)
             self._set_cached(info)
             return info
-        
+
+        # 延迟加载数据库
+        self._ensure_databases()
+
         # 检查数据库是否可用
         if not self._db_available:
             return self._create_failed_info(ip, "GeoIP DB Not Available")
@@ -329,7 +339,10 @@ class IPGeoService:
         
         if total == 0:
             return results
-        
+
+        # 延迟加载数据库
+        self._ensure_databases()
+
         # 进度日志间隔（每处理 500 个 IP 输出一次）
         progress_interval = 500
         last_progress = 0

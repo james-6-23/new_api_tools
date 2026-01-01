@@ -149,10 +149,8 @@ class CacheManager:
         '''
         
         try:
-            conn = sqlite3.connect(str(self._sqlite_path))
-            conn.executescript(schema)
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(str(self._sqlite_path)) as conn:
+                conn.executescript(schema)
             logger.debug("[缓存] SQLite 初始化完成")
         except Exception as e:
             logger.error(f"[缓存] SQLite 初始化失败: {e}")

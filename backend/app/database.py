@@ -249,8 +249,8 @@ class DatabaseManager:
         return create_engine(
             connection_url,
             poolclass=QueuePool,
-            pool_size=3,  # Reduced: keep minimal connections
-            max_overflow=5,  # Reduced: limit max connections to 8 total
+            pool_size=1,  # Minimal: single persistent connection
+            max_overflow=2,  # Allow up to 3 total connections under load
             pool_timeout=30,
             pool_recycle=1800,  # Recycle connections after 30 minutes
             pool_pre_ping=True,  # Verify connection before use

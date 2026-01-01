@@ -45,12 +45,32 @@ class CacheEntry:
 
 
 class SimpleCache:
-    """Thread-safe in-memory cache with TTL."""
-    
+    """Thread-safe in-memory cache with TTL and capacity limit."""
+    MAX_ENTRIES = 1000
+    CLEANUP_INTERVAL = 300  # 5 minutes
+
     def __init__(self):
         self._cache: Dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
-    
+        self._last_cleanup = 0.0
+
+    def _maybe_cleanup(self):
+        """Cleanup expired entries and enforce capacity limit."""
+        now = time.time()
+        # 定期清理过期条目
+        if now - self._last_cleanup >= self.CLEANUP_INTERVAL:
+            self._last_cleanup = now
+            expired = [k for k, v in self._cache.items() if now > v.expires_at]
+            for k in expired:
+                del self._cache[k]
+        # 每次 set 都检查容量限制（插入前检查，确保不超限）
+        if len(self._cache) >= self.MAX_ENTRIES:
+            sorted_keys = sorted(self._cache.keys(), key=lambda k: self._cache[k].expires_at)
+            # 至少删除 1 条，为新条目腾出空间
+            to_remove = max(1, len(self._cache) - self.MAX_ENTRIES + 1)
+            for k in sorted_keys[:to_remove]:
+                del self._cache[k]
+
     def get(self, key: str) -> Optional[Any]:
         """Get value from cache if not expired."""
         with self._lock:
@@ -61,12 +81,13 @@ class SimpleCache:
                 del self._cache[key]
                 return None
             return entry.data
-    
+
     def set(self, key: str, value: Any, ttl: float):
         """Set value in cache with TTL."""
         with self._lock:
+            self._maybe_cleanup()
             self._cache[key] = CacheEntry(data=value, expires_at=time.time() + ttl)
-    
+
     def clear(self):
         """Clear all cache entries."""
         with self._lock:
@@ -1100,7 +1121,7 @@ class RiskMonitoringService:
             ttl = _get_cache_ttl()
             _cache.set(cache_key, result, ttl)
             logger.success(
-                f"风控 缓存更新: token_rotation",
+                "风控 缓存更新: token_rotation",
                 users=len(items),
                 min_tokens=min_tokens,
                 TTL=f"{ttl}s"
@@ -1282,7 +1303,7 @@ class RiskMonitoringService:
             ttl = _get_cache_ttl()
             _cache.set(cache_key, result, ttl)
             logger.success(
-                f"风控 缓存更新: affiliated_accounts",
+                "风控 缓存更新: affiliated_accounts",
                 groups=len(items),
                 min_invited=min_invited,
                 TTL=f"{ttl}s"
@@ -1450,7 +1471,7 @@ class RiskMonitoringService:
             ttl = _get_cache_ttl()
             _cache.set(cache_key, result, ttl)
             logger.success(
-                f"风控 缓存更新: same_ip_registrations",
+                "风控 缓存更新: same_ip_registrations",
                 ips=len(items),
                 min_users=min_users,
                 TTL=f"{ttl}s"
