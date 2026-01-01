@@ -177,28 +177,60 @@ class CacheManager:
             raise
 
     # ==================== Redis 初始化（可选）====================
-    
+
     def _init_redis(self):
-        """初始化 Redis 连接（可选）"""
+        """初始化 Redis 连接（可选）
+
+        Supports two formats (REDIS_CONN_STRING takes priority):
+        1. REDIS_CONN_STRING: redis://[:password@]host[:port][/db]
+        2. Separate variables: REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB
+        """
+        from urllib.parse import urlparse
+
+        redis_conn_string = os.getenv('REDIS_CONN_STRING', '').strip()
         redis_host = os.getenv('REDIS_HOST', '').strip()
-        if not redis_host:
+
+        if not redis_conn_string and not redis_host:
             logger.system("[缓存] Redis 未配置，使用纯 SQLite 模式")
             return
-        
+
         try:
             import redis
-            self._redis = redis.Redis(
-                host=redis_host,
-                port=int(os.getenv('REDIS_PORT', 6379)),
-                password=os.getenv('REDIS_PASSWORD', '').strip() or None,
-                db=int(os.getenv('REDIS_DB', 0)),
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-            )
-            self._redis.ping()
-            self._redis_available = True
-            logger.success("Redis 连接成功", host=redis_host)
+
+            if redis_conn_string:
+                # Parse REDIS_CONN_STRING: redis://[:password@]host[:port][/db]
+                parsed = urlparse(redis_conn_string)
+                host = parsed.hostname or 'localhost'
+                port = parsed.port or 6379
+                password = parsed.password or None
+                db = int(parsed.path.lstrip('/') or 0) if parsed.path else 0
+
+                self._redis = redis.Redis(
+                    host=host,
+                    port=port,
+                    password=password,
+                    db=db,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                )
+                self._redis.ping()
+                self._redis_available = True
+                logger.success("Redis 连接成功", host=host)
+            else:
+                # Use separate environment variables
+                self._redis = redis.Redis(
+                    host=redis_host,
+                    port=int(os.getenv('REDIS_PORT', 6379)),
+                    password=os.getenv('REDIS_PASSWORD', '').strip() or None,
+                    db=int(os.getenv('REDIS_DB', 0)),
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                )
+                self._redis.ping()
+                self._redis_available = True
+                logger.success("Redis 连接成功", host=redis_host)
         except ImportError:
             logger.bullet("redis 库未安装，使用纯 SQLite 模式")
             self._redis_available = False

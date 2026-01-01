@@ -34,16 +34,55 @@ class DBConfig:
 
     @classmethod
     def from_env(cls) -> "DBConfig":
-        """Create DBConfig from environment variables."""
+        """Create DBConfig from environment variables.
+
+        Supports two formats (SQL_DSN takes priority):
+        1. SQL_DSN connection string (compatible with NewAPI):
+           - PostgreSQL: postgresql://user:pass@host:port/dbname
+           - MySQL: user:pass@tcp(host:port)/dbname
+        2. Separate environment variables: DB_ENGINE, DB_DNS, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+        """
+        from urllib.parse import urlparse, unquote
+
+        sql_dsn = os.getenv("SQL_DSN", "").strip()
+
+        if sql_dsn:
+            # Parse SQL_DSN connection string
+            if sql_dsn.startswith(("postgresql://", "postgres://")):
+                # PostgreSQL format: postgresql://user:pass@host:port/dbname
+                parsed = urlparse(sql_dsn)
+                return cls(
+                    engine=DatabaseEngine.POSTGRESQL,
+                    host=parsed.hostname or "localhost",
+                    port=parsed.port or 5432,
+                    user=unquote(parsed.username or "root"),
+                    password=unquote(parsed.password or ""),
+                    database=parsed.path.lstrip("/") or "newapi",
+                )
+            else:
+                # MySQL format: user:pass@tcp(host:port)/dbname
+                import re
+                match = re.match(r"([^:]+):([^@]*)@tcp\(([^:]+):(\d+)\)/(.+)", sql_dsn)
+                if match:
+                    return cls(
+                        engine=DatabaseEngine.MYSQL,
+                        host=match.group(3),
+                        port=int(match.group(4)),
+                        user=match.group(1),
+                        password=match.group(2),
+                        database=match.group(5),
+                    )
+
+        # Fallback to separate environment variables
         engine_str = os.getenv("DB_ENGINE", "mysql").lower()
-        
+
         if engine_str in ("postgresql", "postgres", "pgsql"):
             engine = DatabaseEngine.POSTGRESQL
             default_port = 5432
         else:
             engine = DatabaseEngine.MYSQL
             default_port = 3306
-        
+
         return cls(
             engine=engine,
             host=os.getenv("DB_DNS", "localhost"),
