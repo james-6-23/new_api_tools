@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/service"
+	"github.com/ketches/new-api-tools/internal/tasks"
 	"go.uber.org/zap"
 )
 
@@ -337,7 +338,8 @@ func GetTimeWindowHandler(c *gin.Context) {
 
 // GetSystemScaleHandler 获取系统规模
 func GetSystemScaleHandler(c *gin.Context) {
-	data, err := systemService.GetSystemScale()
+	// 使用新的 DetectScale 方法
+	data, err := systemService.DetectScale(false)
 	if err != nil {
 		logger.Error("获取系统规模失败", zap.Error(err))
 		Error(c, 500, "获取失败")
@@ -349,7 +351,8 @@ func GetSystemScaleHandler(c *gin.Context) {
 
 // RefreshSystemScaleHandler 刷新系统规模
 func RefreshSystemScaleHandler(c *gin.Context) {
-	data, err := systemService.RefreshSystemScale()
+	// 强制刷新
+	data, err := systemService.DetectScale(true)
 	if err != nil {
 		logger.Error("刷新系统规模失败", zap.Error(err))
 		Error(c, 500, "刷新失败")
@@ -361,11 +364,24 @@ func RefreshSystemScaleHandler(c *gin.Context) {
 
 // GetWarmupStatusHandler 获取预热状态
 func GetWarmupStatusHandler(c *gin.Context) {
-	data, err := systemService.GetWarmupStatus()
-	if err != nil {
-		logger.Error("获取预热状态失败", zap.Error(err))
-		Error(c, 500, "获取失败")
-		return
+	// 从 tasks 包获取预热状态
+	warmupStatus := tasks.GetWarmupStatus()
+
+	// 获取系统内存状态
+	sysStatus, _ := systemService.GetWarmupStatus()
+
+	// 合并状态
+	data := gin.H{
+		"is_warmed_up":     warmupStatus.Completed,
+		"warmup_progress":  warmupStatus.Progress,
+		"warmup_total":     warmupStatus.Total,
+		"warmup_phase":     warmupStatus.Phase,
+		"current_task":     warmupStatus.CurrentTask,
+		"started_at":       warmupStatus.StartTime.Format("2006-01-02 15:04:05"),
+		"cache_stats":      sysStatus.CacheStats,
+		"database_stats":   sysStatus.DatabaseStats,
+		"memory_stats":     sysStatus.MemoryStats,
+		"task_manager":     tasks.GetManager().GetStatus(),
 	}
 
 	Success(c, data)
