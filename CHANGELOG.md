@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
   - 预期性能提升 3-5x，内存占用降低 50%+
 
 ### Changed
+- **Docker 配置切换到 Go 后端**：根目录 Dockerfile 和 docker-compose.yml 现在使用 Go 后端
+  - 最终镜像基于 Alpine Linux，体积更小
+  - 环境变量格式调整以匹配 Go 后端配置
 - GeoIP 数据库优化：从 City 切换到 Country 数据库，内存占用从 ~70MB 降至 ~4MB
   - 不再提供城市和区域级别的地理位置信息，仅保留国家级别
   - 适用于只需要国家级别 IP 归属地判断的场景

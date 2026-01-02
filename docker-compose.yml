@@ -15,21 +15,31 @@ services:
     ports:
       - "${FRONTEND_PORT:-1145}:80"
     environment:
-      - DB_ENGINE=${DB_ENGINE}
-      - DB_DNS=${DB_DNS}
-      - DB_PORT=${DB_PORT}
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - API_KEY=${API_KEY}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - JWT_SECRET_KEY=${JWT_SECRET}
-      - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
-      # Redis 缓存配置
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      # 服务器配置
+      - SERVER_MODE=${SERVER_MODE:-release}
+      - SERVER_PORT=8000
+      # 数据库配置 (SQL_DSN 优先)
+      - SQL_DSN=${SQL_DSN}
+      - DATABASE_ENGINE=${DB_ENGINE:-postgres}
+      - DATABASE_HOST=${DB_DNS:-postgres}
+      - DATABASE_PORT=${DB_PORT:-5432}
+      - DATABASE_NAME=${DB_NAME:-new-api}
+      - DATABASE_USER=${DB_USER:-postgres}
+      - DATABASE_PASSWORD=${DB_PASSWORD}
+      - DATABASE_LOCAL_DB_PATH=/app/data/local.db
+      # Redis 配置 (REDIS_CONN_STRING 优先)
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING:-redis://redis:6379}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_DB=0
+      - REDIS_DB=${REDIS_DB:-0}
+      # 认证配置
+      - AUTH_API_KEY=${API_KEY}
+      - AUTH_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - AUTH_JWT_SECRET=${JWT_SECRET}
+      - AUTH_JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
+      # GeoIP 配置
+      - GEOIP_DB_PATH=/app/data/GeoLite2-Country.mmdb
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -56,9 +66,9 @@ services:
     image: redis:7-alpine
     container_name: newapi-tools-redis
     command: >
-      redis-server 
-      --appendonly yes 
-      --maxmemory 256mb 
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
