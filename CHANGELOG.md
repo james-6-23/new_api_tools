@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- GeoIP 数据库优化：从 City 切换到 Country 数据库，内存占用从 ~70MB 降至 ~4MB
+  - 不再提供城市和区域级别的地理位置信息，仅保留国家级别
+  - 适用于只需要国家级别 IP 归属地判断的场景
 - 内存优化：启动内存从 ~140MB 降至 ~40-60MB
   - GeoIP 数据库延迟加载：首次 IP 查询时才加载 mmdb 文件（节省 60-100MB）
   - SimpleCache 添加容量限制（1000 条）和 5 分钟自动清理，防止内存泄漏
