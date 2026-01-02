@@ -10,6 +10,7 @@ import (
 )
 
 var dashboardService = service.NewDashboardService()
+var ipDistributionService = service.NewIPDistributionService()
 
 // GetDashboardOverview 获取系统概览
 func GetDashboardOverview(c *gin.Context) {
@@ -67,8 +68,19 @@ func GetDailyTrends(c *gin.Context) {
 
 // GetHourlyTrends 获取每小时趋势
 func GetHourlyTrends(c *gin.Context) {
-	// TODO: 实现每小时趋势
-	Success(c, []interface{}{})
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	if hours <= 0 || hours > 168 { // 最多 7 天
+		hours = 24
+	}
+
+	data, err := dashboardService.GetHourlyTrends(hours)
+	if err != nil {
+		logger.Error("获取每小时趋势失败", zap.Error(err))
+		Error(c, 500, "获取每小时趋势失败")
+		return
+	}
+
+	Success(c, data)
 }
 
 // GetTopUsers 获取用户排行
@@ -100,11 +112,16 @@ func GetChannelStatus(c *gin.Context) {
 
 // GetIPDistribution 获取 IP 分布
 func GetIPDistribution(c *gin.Context) {
-	// TODO: 实现 IP 分布统计
-	Success(c, gin.H{
-		"countries": []interface{}{},
-		"provinces": []interface{}{},
-	})
+	window := c.DefaultQuery("window", "24h")
+
+	data, err := ipDistributionService.GetDistribution(window)
+	if err != nil {
+		logger.Error("获取 IP 分布失败", zap.Error(err))
+		Error(c, 500, "获取 IP 分布失败")
+		return
+	}
+
+	Success(c, data)
 }
 
 // ==================== Top-Ups ====================

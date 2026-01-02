@@ -16,6 +16,8 @@ import (
 	"github.com/ketches/new-api-tools/internal/handler"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/middleware"
+	"github.com/ketches/new-api-tools/internal/tasks"
+	"github.com/ketches/new-api-tools/pkg/geoip"
 	"github.com/ketches/new-api-tools/pkg/jwt"
 	"go.uber.org/zap"
 )
@@ -52,13 +54,25 @@ func main() {
 	// 5. 初始化 JWT
 	jwt.Init(cfg)
 
-	// 6. 设置 Gin 模式
+	// 6. 初始化 GeoIP
+	if err := geoip.Init(); err != nil {
+		logger.Warn("GeoIP 初始化失败，IP 地理查询将不可用", zap.Error(err))
+	}
+	defer geoip.Close()
+
+	// 7. 初始化并启动后台任务
+	tasks.InitTasks()
+	taskManager := tasks.GetManager()
+	taskManager.Start()
+	defer taskManager.Stop()
+
+	// 8. 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
-	// 7. 创建路由
+	// 9. 创建路由
 	router := setupRouter(cfg)
 
-	// 8. 创建 HTTP 服务器
+	// 10. 创建 HTTP 服务器
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      router,
@@ -66,7 +80,7 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
-	// 9. 启动服务器（优雅关闭）
+	// 11. 启动服务器（优雅关闭）
 	go func() {
 		logger.Info("服务器启动",
 			zap.Int("port", cfg.Server.Port),
@@ -77,14 +91,14 @@ func main() {
 		}
 	}()
 
-	// 10. 等待中断信号
+	// 12. 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("服务器正在关闭...")
 
-	// 11. 优雅关闭（5秒超时）
+	// 13. 优雅关闭（5秒超时）
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

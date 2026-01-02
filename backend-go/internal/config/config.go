@@ -70,6 +70,7 @@ type GeoIPConfig struct {
 	DBPath       string
 	UpdateURL    string
 	UpdatePeriod time.Duration
+	LicenseKey   string
 }
 
 // CacheConfig 缓存配置
@@ -120,13 +121,25 @@ func Load() (*Config, error) {
 	// Redis 配置
 	cfg.Redis = parseRedisConfig()
 
-	// 认证配置
+	// 认证配置 - 支持多种环境变量名
 	cfg.Auth.AdminPassword = viper.GetString("auth.admin_password")
+	if cfg.Auth.AdminPassword == "" {
+		cfg.Auth.AdminPassword = viper.GetString("admin_password")
+	}
 	cfg.Auth.APIKey = viper.GetString("auth.api_key")
+	if cfg.Auth.APIKey == "" {
+		cfg.Auth.APIKey = viper.GetString("api_key")
+	}
 	cfg.Auth.JWTSecret = viper.GetString("auth.jwt_secret")
+	if cfg.Auth.JWTSecret == "" {
+		cfg.Auth.JWTSecret = viper.GetString("jwt_secret")
+	}
 	cfg.Auth.JWTExpireHours = viper.GetInt("auth.jwt_expire_hours")
 
-	// 自动生成密钥
+	// 自动生成密钥（如果未设置）
+	if cfg.Auth.AdminPassword == "" {
+		cfg.Auth.AdminPassword = "admin123" // 默认密码，生产环境应设置 ADMIN_PASSWORD
+	}
 	if cfg.Auth.APIKey == "" {
 		cfg.Auth.APIKey = generateRandomKey(32)
 	}
@@ -138,6 +151,10 @@ func Load() (*Config, error) {
 	cfg.GeoIP.DBPath = viper.GetString("geoip.db_path")
 	cfg.GeoIP.UpdateURL = viper.GetString("geoip.update_url")
 	cfg.GeoIP.UpdatePeriod = viper.GetDuration("geoip.update_period")
+	cfg.GeoIP.LicenseKey = viper.GetString("geoip.license_key")
+	if cfg.GeoIP.LicenseKey == "" {
+		cfg.GeoIP.LicenseKey = viper.GetString("geoip_license_key")
+	}
 
 	// 缓存配置
 	cfg.Cache.DefaultTTL = viper.GetDuration("cache.default_ttl")
@@ -285,12 +302,13 @@ func parseRedisConfig() RedisConfig {
 
 // Validate 验证配置
 func (c *Config) Validate() error {
-	if c.Auth.AdminPassword == "" {
-		return fmt.Errorf("ADMIN_PASSWORD 未设置")
+	// AdminPassword 已有默认值，这里只做警告
+	if c.Auth.AdminPassword == "admin123" {
+		fmt.Println("⚠️  警告: 使用默认密码 admin123，生产环境请设置 ADMIN_PASSWORD 环境变量")
 	}
 
 	if c.Database.DSN == "" {
-		return fmt.Errorf("数据库配置不完整")
+		return fmt.Errorf("数据库配置不完整，请设置 SQL_DSN 环境变量")
 	}
 
 	return nil

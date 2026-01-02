@@ -396,6 +396,15 @@ func (s *DashboardService) fetchTopUsers(limit int, orderBy string) ([]TopUser, 
 	return data, nil
 }
 
+// HourlyTrendData 每小时趋势数据
+type HourlyTrendData struct {
+	Hour        string `json:"hour"`
+	Timestamp   int64  `json:"timestamp"`
+	Requests    int64  `json:"request_count"`
+	Quota       int64  `json:"quota_used"`
+	UniqueUsers int64  `json:"unique_users"`
+}
+
 // ChannelStatus 渠道状态
 type ChannelStatus struct {
 	ID           int     `json:"id"`
@@ -406,6 +415,97 @@ type ChannelStatus struct {
 	UsedQuota    int64   `json:"used_quota"`
 	Balance      float64 `json:"balance"`
 	TestAt       string  `json:"test_at"`
+}
+
+// GetHourlyTrends 获取每小时趋势
+func (s *DashboardService) GetHourlyTrends(hours int) ([]HourlyTrendData, error) {
+	cacheKey := cache.CacheKey("dashboard", "trends", "hourly", fmt.Sprintf("%d", hours))
+
+	var data []HourlyTrendData
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 5 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchHourlyTrends(hours)
+	})
+
+	return data, err
+}
+
+// fetchHourlyTrends 获取每小时趋势数据
+func (s *DashboardService) fetchHourlyTrends(hours int) ([]HourlyTrendData, error) {
+	db := database.GetMainDB()
+
+	// 计算时间范围，向下取整到小时
+	now := time.Now()
+	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, now.Location())
+
+	// 生成所有小时的时间戳列表
+	hourTimestamps := make([]int64, hours)
+	for i := 0; i < hours; i++ {
+		hourTimestamps[hours-1-i] = currentHour.Add(-time.Duration(i) * time.Hour).Unix()
+	}
+
+	startTime := time.Unix(hourTimestamps[0], 0).Format("2006-01-02 15:04:05")
+
+	// 根据数据库类型使用不同的小时格式化
+	var hourFormat string
+	if database.GetMainDB().Dialector.Name() == "postgres" {
+		hourFormat = "EXTRACT(EPOCH FROM DATE_TRUNC('hour', created_at))::bigint"
+	} else {
+		// MySQL
+		hourFormat = "UNIX_TIMESTAMP(DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00'))"
+	}
+
+	var results []struct {
+		HourTS   int64
+		Requests int64
+		Quota    int64
+		Users    int64
+	}
+
+	err := db.Model(&models.Log{}).
+		Select(fmt.Sprintf("%s as hour_ts, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota, COUNT(DISTINCT user_id) as users", hourFormat)).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Group("hour_ts").
+		Order("hour_ts ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 构建结果映射
+	dataByHour := make(map[int64]HourlyTrendData)
+	for _, r := range results {
+		dataByHour[r.HourTS] = HourlyTrendData{
+			Hour:        time.Unix(r.HourTS, 0).Format("15:04"),
+			Timestamp:   r.HourTS,
+			Requests:    r.Requests,
+			Quota:       r.Quota,
+			UniqueUsers: r.Users,
+		}
+	}
+
+	// 填充所有小时（包括无数据的小时）
+	data := make([]HourlyTrendData, hours)
+	for i, ts := range hourTimestamps {
+		if d, ok := dataByHour[ts]; ok {
+			data[i] = d
+		} else {
+			data[i] = HourlyTrendData{
+				Hour:        time.Unix(ts, 0).Format("15:04"),
+				Timestamp:   ts,
+				Requests:    0,
+				Quota:       0,
+				UniqueUsers: 0,
+			}
+		}
+	}
+
+	return data, nil
 }
 
 // GetChannelStatus 获取渠道状态
