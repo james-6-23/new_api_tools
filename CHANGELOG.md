@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Golang 后端重写** (`backend-go/`)：使用 Gin + GORM 完全重写 Python/FastAPI 后端
+  - 核心基础设施：配置管理、MySQL/SQLite 双数据库、Redis 缓存、Zap 日志
+  - 认证中间件：JWT + API Key 双模式认证
+  - Dashboard 模块：系统概览、使用统计、模型统计、趋势分析
+  - Top-Up 充值模块：充值记录查询、统计、支付方式分析、退款功能
+  - Redemption 兑换码模块：批量生成、查询、统计、删除
+  - User Management 用户管理：用户列表、统计、封禁/解封、批量删除
+  - Risk Monitoring 风控监控：排行榜、用户风险分析、关联账户检测
+  - IP Monitoring IP 监控：IP 统计、共享 IP 检测、多 IP 用户/令牌、GeoIP 地理定位
+  - AI Auto Ban 自动封禁：风险评估、可疑用户扫描、白名单管理
+  - Log Analytics 日志分析：请求/额度排行、模型统计、分析摘要
+  - Model Status 模型状态：可用模型列表、状态监控、渠道统计
+  - System Management 系统管理：系统规模、预热状态、索引管理
+  - Storage Management 存储管理：配置管理、缓存清理
+  - Docker 多阶段构建：生产镜像约 20MB，支持 docker-compose 部署
+  - 预期性能提升 3-5x，内存占用降低 50%+
+
 ### Changed
 - GeoIP 数据库优化：从 City 切换到 Country 数据库，内存占用从 ~70MB 降至 ~4MB
   - 不再提供城市和区域级别的地理位置信息，仅保留国家级别

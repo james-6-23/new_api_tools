@@ -1,0 +1,455 @@
+package service
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/ketches/new-api-tools/internal/cache"
+	"github.com/ketches/new-api-tools/internal/database"
+	"github.com/ketches/new-api-tools/internal/models"
+)
+
+// DashboardService Dashboard 服务
+type DashboardService struct{}
+
+// NewDashboardService 创建 Dashboard 服务
+func NewDashboardService() *DashboardService {
+	return &DashboardService{}
+}
+
+// OverviewData 概览数据
+type OverviewData struct {
+	TotalUsers     int64   `json:"total_users"`
+	ActiveUsers    int64   `json:"active_users"`
+	TotalTokens    int64   `json:"total_tokens"`
+	ActiveTokens   int64   `json:"active_tokens"`
+	TotalChannels  int64   `json:"total_channels"`
+	ActiveChannels int64   `json:"active_channels"`
+	TodayRequests  int64   `json:"today_requests"`
+	TodayQuota     int64   `json:"today_quota"`
+	TotalQuota     int64   `json:"total_quota"`
+	TotalUsedQuota int64   `json:"total_used_quota"`
+	QuotaUsageRate float64 `json:"quota_usage_rate"`
+}
+
+// GetOverview 获取系统概览
+func (s *DashboardService) GetOverview() (*OverviewData, error) {
+	cacheKey := cache.CacheKey("dashboard", "overview")
+
+	// 尝试从缓存获取
+	var data OverviewData
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 5 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchOverviewData()
+	})
+
+	return &data, err
+}
+
+// fetchOverviewData 获取概览数据
+func (s *DashboardService) fetchOverviewData() (*OverviewData, error) {
+	db := database.GetMainDB()
+	data := &OverviewData{}
+
+	// 总用户数
+	db.Model(&models.User{}).Where("deleted_at IS NULL").Count(&data.TotalUsers)
+
+	// 活跃用户数（状态为启用）
+	db.Model(&models.User{}).Where("deleted_at IS NULL AND status = ?", models.UserStatusEnabled).Count(&data.ActiveUsers)
+
+	// 总令牌数
+	db.Model(&models.Token{}).Where("deleted_at IS NULL").Count(&data.TotalTokens)
+
+	// 活跃令牌数
+	db.Model(&models.Token{}).Where("deleted_at IS NULL AND status = ?", models.TokenStatusEnabled).Count(&data.ActiveTokens)
+
+	// 总渠道数
+	db.Model(&models.Channel{}).Where("deleted_at IS NULL").Count(&data.TotalChannels)
+
+	// 活跃渠道数
+	db.Model(&models.Channel{}).Where("deleted_at IS NULL AND status = ?", models.ChannelStatusEnabled).Count(&data.ActiveChannels)
+
+	// 今日请求数和额度消耗
+	today := time.Now().Format("2006-01-02")
+	todayStart := today + " 00:00:00"
+
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", todayStart, models.LogTypeConsume).
+		Count(&data.TodayRequests)
+
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", todayStart, models.LogTypeConsume).
+		Select("COALESCE(SUM(quota), 0)").
+		Scan(&data.TodayQuota)
+
+	// 总额度和已用额度
+	db.Model(&models.User{}).
+		Where("deleted_at IS NULL").
+		Select("COALESCE(SUM(quota), 0)").
+		Scan(&data.TotalQuota)
+
+	db.Model(&models.User{}).
+		Where("deleted_at IS NULL").
+		Select("COALESCE(SUM(used_quota), 0)").
+		Scan(&data.TotalUsedQuota)
+
+	// 计算额度使用率
+	if data.TotalQuota > 0 {
+		data.QuotaUsageRate = float64(data.TotalUsedQuota) / float64(data.TotalQuota) * 100
+	}
+
+	return data, nil
+}
+
+// UsageData 使用统计数据
+type UsageData struct {
+	Period        string  `json:"period"`
+	TotalRequests int64   `json:"total_requests"`
+	TotalQuota    int64   `json:"total_quota"`
+	AvgQuota      float64 `json:"avg_quota"`
+	UniqueUsers   int64   `json:"unique_users"`
+	UniqueTokens  int64   `json:"unique_tokens"`
+}
+
+// GetUsage 获取使用统计
+func (s *DashboardService) GetUsage(period string) (*UsageData, error) {
+	cacheKey := cache.CacheKey("dashboard", "usage", period)
+
+	var data UsageData
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 5 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchUsageData(period)
+	})
+
+	return &data, err
+}
+
+// fetchUsageData 获取使用统计数据
+func (s *DashboardService) fetchUsageData(period string) (*UsageData, error) {
+	db := database.GetMainDB()
+	data := &UsageData{Period: period}
+
+	// 计算时间范围
+	var startTime string
+	switch period {
+	case "today":
+		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+	case "week":
+		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+	case "month":
+		startTime = time.Now().AddDate(0, -1, 0).Format("2006-01-02 15:04:05")
+	default:
+		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+	}
+
+	// 总请求数
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Count(&data.TotalRequests)
+
+	// 总额度消耗
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Select("COALESCE(SUM(quota), 0)").
+		Scan(&data.TotalQuota)
+
+	// 平均额度
+	if data.TotalRequests > 0 {
+		data.AvgQuota = float64(data.TotalQuota) / float64(data.TotalRequests)
+	}
+
+	// 唯一用户数
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Distinct("user_id").
+		Count(&data.UniqueUsers)
+
+	// 唯一令牌数
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Distinct("token_id").
+		Count(&data.UniqueTokens)
+
+	return data, nil
+}
+
+// ModelUsage 模型使用统计
+type ModelUsage struct {
+	ModelName  string  `json:"model_name"`
+	Requests   int64   `json:"requests"`
+	Quota      int64   `json:"quota"`
+	Percentage float64 `json:"percentage"`
+}
+
+// GetModelUsage 获取模型使用统计
+func (s *DashboardService) GetModelUsage(limit int) ([]ModelUsage, error) {
+	cacheKey := cache.CacheKey("dashboard", "models", fmt.Sprintf("%d", limit))
+
+	var data []ModelUsage
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 5 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchModelUsage(limit)
+	})
+
+	return data, err
+}
+
+// fetchModelUsage 获取模型使用数据
+func (s *DashboardService) fetchModelUsage(limit int) ([]ModelUsage, error) {
+	db := database.GetMainDB()
+
+	// 获取今日数据
+	today := time.Now().Format("2006-01-02") + " 00:00:00"
+
+	var results []struct {
+		ModelName string
+		Requests  int64
+		Quota     int64
+	}
+
+	err := db.Model(&models.Log{}).
+		Select("model_name, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota").
+		Where("created_at >= ? AND type = ? AND model_name != ''", today, models.LogTypeConsume).
+		Group("model_name").
+		Order("requests DESC").
+		Limit(limit).
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 计算总请求数
+	var totalRequests int64
+	for _, r := range results {
+		totalRequests += r.Requests
+	}
+
+	// 转换为返回格式
+	data := make([]ModelUsage, len(results))
+	for i, r := range results {
+		data[i] = ModelUsage{
+			ModelName: r.ModelName,
+			Requests:  r.Requests,
+			Quota:     r.Quota,
+		}
+		if totalRequests > 0 {
+			data[i].Percentage = float64(r.Requests) / float64(totalRequests) * 100
+		}
+	}
+
+	return data, nil
+}
+
+// TrendData 趋势数据
+type TrendData struct {
+	Time     string `json:"time"`
+	Requests int64  `json:"requests"`
+	Quota    int64  `json:"quota"`
+	Users    int64  `json:"users"`
+}
+
+// GetDailyTrends 获取每日趋势（最近30天）
+func (s *DashboardService) GetDailyTrends(days int) ([]TrendData, error) {
+	cacheKey := cache.CacheKey("dashboard", "trends", "daily", fmt.Sprintf("%d", days))
+
+	var data []TrendData
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 10 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchDailyTrends(days)
+	})
+
+	return data, err
+}
+
+// fetchDailyTrends 获取每日趋势数据
+func (s *DashboardService) fetchDailyTrends(days int) ([]TrendData, error) {
+	db := database.GetMainDB()
+
+	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+
+	var results []struct {
+		Date     string
+		Requests int64
+		Quota    int64
+		Users    int64
+	}
+
+	// 根据数据库类型使用不同的日期格式化函数
+	dateFormat := "DATE(created_at)"
+	if database.GetMainDB().Dialector.Name() == "postgres" {
+		dateFormat = "DATE(created_at)"
+	}
+
+	err := db.Model(&models.Log{}).
+		Select(fmt.Sprintf("%s as date, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota, COUNT(DISTINCT user_id) as users", dateFormat)).
+		Where("created_at >= ? AND type = ?", startDate, models.LogTypeConsume).
+		Group("date").
+		Order("date ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换为返回格式
+	data := make([]TrendData, len(results))
+	for i, r := range results {
+		data[i] = TrendData{
+			Time:     r.Date,
+			Requests: r.Requests,
+			Quota:    r.Quota,
+			Users:    r.Users,
+		}
+	}
+
+	return data, nil
+}
+
+// TopUser 用户排行
+type TopUser struct {
+	UserID      int    `json:"user_id"`
+	Username    string `json:"username"`
+	Requests    int64  `json:"requests"`
+	Quota       int64  `json:"quota"`
+	LastRequest string `json:"last_request"`
+}
+
+// GetTopUsers 获取用户排行
+func (s *DashboardService) GetTopUsers(limit int, orderBy string) ([]TopUser, error) {
+	cacheKey := cache.CacheKey("dashboard", "top-users", orderBy, fmt.Sprintf("%d", limit))
+
+	var data []TopUser
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 2 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchTopUsers(limit, orderBy)
+	})
+
+	return data, err
+}
+
+// fetchTopUsers 获取用户排行数据
+func (s *DashboardService) fetchTopUsers(limit int, orderBy string) ([]TopUser, error) {
+	db := database.GetMainDB()
+
+	// 获取今日数据
+	today := time.Now().Format("2006-01-02") + " 00:00:00"
+
+	orderClause := "requests DESC"
+	if orderBy == "quota" {
+		orderClause = "quota DESC"
+	}
+
+	var results []struct {
+		UserID      int
+		Username    string
+		Requests    int64
+		Quota       int64
+		LastRequest time.Time
+	}
+
+	err := db.Table("logs").
+		Select("logs.user_id, users.username, COUNT(*) as requests, COALESCE(SUM(logs.quota), 0) as quota, MAX(logs.created_at) as last_request").
+		Joins("LEFT JOIN users ON logs.user_id = users.id").
+		Where("logs.created_at >= ? AND logs.type = ?", today, models.LogTypeConsume).
+		Group("logs.user_id, users.username").
+		Order(orderClause).
+		Limit(limit).
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// 转换为返回格式
+	data := make([]TopUser, len(results))
+	for i, r := range results {
+		data[i] = TopUser{
+			UserID:      r.UserID,
+			Username:    r.Username,
+			Requests:    r.Requests,
+			Quota:       r.Quota,
+			LastRequest: r.LastRequest.Format("2006-01-02 15:04:05"),
+		}
+	}
+
+	return data, nil
+}
+
+// ChannelStatus 渠道状态
+type ChannelStatus struct {
+	ID           int     `json:"id"`
+	Name         string  `json:"name"`
+	Type         int     `json:"type"`
+	Status       int     `json:"status"`
+	ResponseTime int     `json:"response_time"`
+	UsedQuota    int64   `json:"used_quota"`
+	Balance      float64 `json:"balance"`
+	TestAt       string  `json:"test_at"`
+}
+
+// GetChannelStatus 获取渠道状态
+func (s *DashboardService) GetChannelStatus() ([]ChannelStatus, error) {
+	cacheKey := cache.CacheKey("dashboard", "channels")
+
+	var data []ChannelStatus
+	wrapper := &cache.CacheWrapper{
+		Key: cacheKey,
+		TTL: 5 * time.Minute,
+	}
+
+	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
+		return s.fetchChannelStatus()
+	})
+
+	return data, err
+}
+
+// fetchChannelStatus 获取渠道状态数据
+func (s *DashboardService) fetchChannelStatus() ([]ChannelStatus, error) {
+	db := database.GetMainDB()
+
+	var channels []models.Channel
+	err := db.Where("deleted_at IS NULL").Order("id ASC").Find(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+
+	data := make([]ChannelStatus, len(channels))
+	for i, ch := range channels {
+		data[i] = ChannelStatus{
+			ID:           ch.ID,
+			Name:         ch.Name,
+			Type:         ch.Type,
+			Status:       ch.Status,
+			ResponseTime: ch.ResponseTime,
+			UsedQuota:    ch.UsedQuota,
+			Balance:      ch.Balance,
+		}
+		if ch.TestAt != nil {
+			data[i].TestAt = ch.TestAt.Format("2006-01-02 15:04:05")
+		}
+	}
+
+	return data, nil
+}

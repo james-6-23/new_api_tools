@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  newapi-tools-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: newapi-tools-go
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-1145}:80"
+    environment:
+      # 数据库配置（支持 SQL_DSN 或分离配置）
+      - SQL_DSN=${SQL_DSN:-}
+      - DB_ENGINE=${DB_ENGINE:-mysql}
+      - DB_DNS=${DB_DNS:-}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_NAME=${DB_NAME:-new-api}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-}
+
+      # Redis 配置（支持 REDIS_CONN_STRING 或分离配置）
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING:-redis://redis:6379}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+
+      # 认证配置
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - API_KEY=${API_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
+
+      # 服务器配置
+      - SERVER_PORT=8000
+      - SERVER_MODE=${SERVER_MODE:-release}
+
+      # GeoIP 配置
+      - GEOIP_DB_PATH=/app/data/GeoLite2-Country.mmdb
+
+    volumes:
+      - ./data:/app/data
+    networks:
+      - default
+      - newapi-network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: newapi-tools-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  default:
+    name: newapi-tools-network
+  newapi-network:
+    external: true
+    name: ${NEWAPI_NETWORK:-new-api_default}
+
+volumes:
+  redis-data:
+    driver: local
