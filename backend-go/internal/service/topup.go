@@ -26,8 +26,9 @@ type TopUpRecord struct {
 	Money         float64 `json:"money"`
 	TradeNo       string  `json:"trade_no"`
 	PaymentMethod string  `json:"payment_method"`
-	Status        int     `json:"status"`
-	CreatedAt     string  `json:"created_at"`
+	Status        string  `json:"status"`
+	CreateTime    int64   `json:"create_time"`
+	CompleteTime  int64   `json:"complete_time"`
 }
 
 // TopUpStatistics 充值统计
@@ -51,7 +52,7 @@ type TopUpQuery struct {
 	Username      string `form:"username"`
 	TradeNo       string `form:"trade_no"`
 	PaymentMethod string `form:"payment_method"`
-	Status        int    `form:"status"`
+	Status        string `form:"status"`
 	StartDate     string `form:"start_date"`
 	EndDate       string `form:"end_date"`
 }
@@ -95,14 +96,22 @@ func (s *TopUpService) GetTopUps(query *TopUpQuery) (*TopUpListResult, error) {
 	if query.PaymentMethod != "" {
 		tx = tx.Where("top_ups.payment_method = ?", query.PaymentMethod)
 	}
-	if query.Status > 0 {
-		tx = tx.Where("top_ups.status = ?", query.Status)
+	if query.Status != "" {
+		tx = tx.Where("LOWER(top_ups.status) = LOWER(?)", query.Status)
 	}
 	if query.StartDate != "" {
-		tx = tx.Where("top_ups.created_at >= ?", query.StartDate)
+		// 将日期转换为 Unix 时间戳
+		startTime, err := time.Parse("2006-01-02", query.StartDate)
+		if err == nil {
+			tx = tx.Where("top_ups.create_time >= ?", startTime.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		tx = tx.Where("top_ups.created_at <= ?", query.EndDate+" 23:59:59")
+		// 将日期转换为 Unix 时间戳（当天结束）
+		endTime, err := time.Parse("2006-01-02", query.EndDate)
+		if err == nil {
+			tx = tx.Where("top_ups.create_time <= ?", endTime.Add(24*time.Hour-time.Second).Unix())
+		}
 	}
 
 	// 获取总数
@@ -118,7 +127,7 @@ func (s *TopUpService) GetTopUps(query *TopUpQuery) (*TopUpListResult, error) {
 		Username string
 	}
 
-	if err := tx.Order("top_ups.created_at DESC").
+	if err := tx.Order("top_ups.create_time DESC").
 		Offset(offset).
 		Limit(query.PageSize).
 		Scan(&results).Error; err != nil {
@@ -133,12 +142,13 @@ func (s *TopUpService) GetTopUps(query *TopUpQuery) (*TopUpListResult, error) {
 			UserID:        r.UserID,
 			Username:      r.Username,
 			Amount:        r.Amount,
-			Money:         float64(r.Amount) / 500000, // 额度转换为金额
+			Money:         r.Money,
 			TradeNo:       r.TradeNo,
 			PaymentMethod: r.Method,
 			Status:        r.Status,
+			CreateTime:    r.CreateTime,
+			CompleteTime:  r.CompleteTime,
 		}
-		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
 	}
 
 	// 计算总页数
@@ -177,38 +187,40 @@ func (s *TopUpService) fetchTopUpStatistics() (*TopUpStatistics, error) {
 		PaymentMethodMap: make(map[string]int64),
 	}
 
-	// 成功状态
-	successStatus := 3 // 假设 3 是成功状态
+	// 成功状态 (字符串类型，与 Python 版本一致)
+	// 注意：需要用括号包裹，避免 AND/OR 优先级问题
+	successCondition := "(LOWER(status) IN ('success', 'completed') OR status = '1')"
 
 	// 总统计
 	db.Model(&models.TopUp{}).
-		Where("status = ?", successStatus).
+		Where(successCondition).
 		Count(&data.TotalCount)
 
 	db.Model(&models.TopUp{}).
-		Where("status = ?", successStatus).
+		Where(successCondition).
 		Select("COALESCE(SUM(amount), 0)").
 		Scan(&data.TotalAmount)
 
 	db.Model(&models.TopUp{}).
-		Where("status = ?", successStatus).
+		Where(successCondition).
 		Select("COALESCE(SUM(money), 0)").
 		Scan(&data.TotalMoney)
 
-	// 今日统计
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	// 今日统计 (使用本地时区午夜的 Unix 时间戳)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	db.Model(&models.TopUp{}).
-		Where("status = ? AND created_at >= ?", successStatus, today).
+		Where(successCondition+" AND create_time >= ?", todayStart).
 		Count(&data.TodayCount)
 
 	db.Model(&models.TopUp{}).
-		Where("status = ? AND created_at >= ?", successStatus, today).
+		Where(successCondition+" AND create_time >= ?", todayStart).
 		Select("COALESCE(SUM(amount), 0)").
 		Scan(&data.TodayAmount)
 
 	db.Model(&models.TopUp{}).
-		Where("status = ? AND created_at >= ?", successStatus, today).
+		Where(successCondition+" AND create_time >= ?", todayStart).
 		Select("COALESCE(SUM(money), 0)").
 		Scan(&data.TodayMoney)
 
@@ -227,44 +239,24 @@ func (s *TopUpService) fetchTopUpStatistics() (*TopUpStatistics, error) {
 	return data, nil
 }
 
-// GetPaymentMethods 获取支付方式统计
-func (s *TopUpService) GetPaymentMethods() ([]map[string]interface{}, error) {
+// GetPaymentMethods 获取支付方式列表
+func (s *TopUpService) GetPaymentMethods() ([]string, error) {
 	db := database.GetMainDB()
 
-	var results []struct {
-		PaymentMethod string
-		Count         int64
-		TotalAmount   int64
-		TotalMoney    float64
-	}
+	var methods []string
 
-	// 注意：这里假设 top_ups 表有 payment_method 字段
-	// 如果没有，需要根据实际表结构调整
+	// 与 Python 版本一致：获取去重的支付方式列表
 	err := db.Table("top_ups").
-		Select("'' as payment_method, COUNT(*) as count, COALESCE(SUM(amount), 0) as total_amount, COALESCE(SUM(money), 0) as total_money").
-		Where("status = ?", 3).
-		Group("payment_method").
-		Scan(&results).Error
+		Select("DISTINCT payment_method").
+		Where("payment_method IS NOT NULL AND payment_method != ''").
+		Order("payment_method").
+		Pluck("payment_method", &methods).Error
 
 	if err != nil {
 		return nil, err
 	}
 
-	data := make([]map[string]interface{}, len(results))
-	for i, r := range results {
-		method := r.PaymentMethod
-		if method == "" {
-			method = "unknown"
-		}
-		data[i] = map[string]interface{}{
-			"method":       method,
-			"count":        r.Count,
-			"total_amount": r.TotalAmount,
-			"total_money":  r.TotalMoney,
-		}
-	}
-
-	return data, nil
+	return methods, nil
 }
 
 // RefundTopUp 退款
@@ -286,8 +278,8 @@ func (s *TopUpService) RefundTopUp(topUpID int) error {
 		return fmt.Errorf("充值记录不存在")
 	}
 
-	// 检查状态
-	if topUp.Status != 3 {
+	// 检查状态 (字符串类型)
+	if !topUp.IsSuccess() {
 		tx.Rollback()
 		return fmt.Errorf("只能退款成功的充值记录")
 	}
@@ -295,13 +287,13 @@ func (s *TopUpService) RefundTopUp(topUpID int) error {
 	// 扣除用户额度
 	if err := tx.Model(&models.User{}).
 		Where("id = ?", topUp.UserID).
-		Update("quota", database.GetMainDB().Raw("quota - ?", topUp.Amount)).Error; err != nil {
+		Update("quota", database.GetMainDB().Raw("GREATEST(0, quota - ?)", topUp.Amount)).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("扣除额度失败: %v", err)
 	}
 
 	// 更新充值记录状态
-	if err := tx.Model(&topUp).Update("status", 4).Error; err != nil { // 4 = 已退款
+	if err := tx.Model(&topUp).Update("status", models.TopUpStatusRefunded).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("更新充值状态失败: %v", err)
 	}
@@ -318,10 +310,10 @@ type TopUpDetail struct {
 	Money         float64 `json:"money"`
 	TradeNo       string  `json:"trade_no"`
 	PaymentMethod string  `json:"payment_method"`
-	Status        int     `json:"status"`
+	Status        string  `json:"status"`
 	StatusText    string  `json:"status_text"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	CreateTime    int64   `json:"create_time"`
+	CompleteTime  int64   `json:"complete_time"`
 }
 
 // GetTopUpByID 获取单个充值记录
@@ -336,9 +328,9 @@ func (s *TopUpService) GetTopUpByID(id int) (*TopUpDetail, error) {
 		Money         float64
 		TradeNo       string
 		PaymentMethod string
-		Status        int
-		CreatedAt     time.Time
-		UpdatedAt     time.Time
+		Status        string
+		CreateTime    int64
+		CompleteTime  int64
 	}
 
 	err := db.Table("top_ups").
@@ -351,12 +343,13 @@ func (s *TopUpService) GetTopUpByID(id int) (*TopUpDetail, error) {
 		return nil, fmt.Errorf("充值记录不存在")
 	}
 
-	statusText := map[int]string{
-		1: "待支付",
-		2: "支付中",
-		3: "成功",
-		4: "已退款",
-		5: "失败",
+	statusText := map[string]string{
+		"pending":   "待支付",
+		"success":   "成功",
+		"completed": "成功",
+		"failed":    "失败",
+		"error":     "失败",
+		"refunded":  "已退款",
 	}
 
 	return &TopUpDetail{
@@ -369,7 +362,7 @@ func (s *TopUpService) GetTopUpByID(id int) (*TopUpDetail, error) {
 		PaymentMethod: result.PaymentMethod,
 		Status:        result.Status,
 		StatusText:    statusText[result.Status],
-		CreatedAt:     result.CreatedAt.Format("2006-01-02 15:04:05"),
-		UpdatedAt:     result.UpdatedAt.Format("2006-01-02 15:04:05"),
+		CreateTime:    result.CreateTime,
+		CompleteTime:  result.CompleteTime,
 	}, nil
 }

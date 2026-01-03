@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 )
 
@@ -120,16 +121,17 @@ func (Redemption) TableName() string {
 }
 
 // TopUp NewAPI 充值记录表
+// 注意：数据库中 create_time/complete_time 是 Unix 时间戳，status 是字符串类型
 type TopUp struct {
-	ID        int       `gorm:"column:id;primaryKey" json:"id"`
-	UserID    int       `gorm:"column:user_id" json:"user_id"`
-	Amount    int64     `gorm:"column:amount" json:"amount"`
-	Quota     int64     `gorm:"column:quota" json:"quota"`
-	Method    string    `gorm:"column:method" json:"method"`
-	TradeNo   string    `gorm:"column:trade_no" json:"trade_no"`
-	Status    int       `gorm:"column:status" json:"status"`
-	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
+	ID           int    `gorm:"column:id;primaryKey" json:"id"`
+	UserID       int    `gorm:"column:user_id" json:"user_id"`
+	Amount       int64  `gorm:"column:amount" json:"amount"`
+	Money        float64 `gorm:"column:money" json:"money"`
+	Method       string `gorm:"column:payment_method" json:"payment_method"`
+	TradeNo      string `gorm:"column:trade_no" json:"trade_no"`
+	Status       string `gorm:"column:status" json:"status"`
+	CreateTime   int64  `gorm:"column:create_time" json:"create_time"`
+	CompleteTime int64  `gorm:"column:complete_time" json:"complete_time"`
 }
 
 func (TopUp) TableName() string {
@@ -210,12 +212,12 @@ const (
 	RedemptionStatusUsed     = 3
 )
 
-// 充值状态
+// 充值状态 (字符串类型，与数据库一致)
 const (
-	TopUpStatusPending  = 1
-	TopUpStatusSuccess  = 2
-	TopUpStatusFailed   = 3
-	TopUpStatusRefunded = 4
+	TopUpStatusPending  = "pending"
+	TopUpStatusSuccess  = "success"
+	TopUpStatusFailed   = "failed"
+	TopUpStatusRefunded = "refunded"
 )
 
 // 辅助方法
@@ -286,10 +288,11 @@ func (r *Redemption) IsAvailable() bool {
 
 // IsSuccess 检查充值是否成功
 func (t *TopUp) IsSuccess() bool {
-	return t.Status == TopUpStatusSuccess
+	status := strings.ToLower(t.Status)
+	return status == TopUpStatusSuccess || status == "completed" || status == "1"
 }
 
 // IsRefunded 检查充值是否已退款
 func (t *TopUp) IsRefunded() bool {
-	return t.Status == TopUpStatusRefunded
+	return strings.ToLower(t.Status) == TopUpStatusRefunded
 }
