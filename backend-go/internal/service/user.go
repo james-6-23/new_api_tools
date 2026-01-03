@@ -64,10 +64,11 @@ type UserQuery struct {
 
 // UserListResult 用户列表结果
 type UserListResult struct {
-	Total    int64        `json:"total"`
-	Page     int          `json:"page"`
-	PageSize int          `json:"page_size"`
-	Records  []UserRecord `json:"records"`
+	Total      int64        `json:"total"`
+	Page       int          `json:"page"`
+	PageSize   int          `json:"page_size"`
+	TotalPages int          `json:"total_pages"`
+	Items      []UserRecord `json:"items"`
 }
 
 // GetUsers 获取用户列表
@@ -184,11 +185,15 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
 	}
 
+	// 计算总页数
+	totalPages := int((total + int64(query.PageSize) - 1) / int64(query.PageSize))
+
 	return &UserListResult{
-		Total:    total,
-		Page:     query.Page,
-		PageSize: query.PageSize,
-		Records:  records,
+		Total:      total,
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		TotalPages: totalPages,
+		Items:      records,
 	}, nil
 }
 
@@ -388,4 +393,109 @@ func (s *UserService) GetInvitedUsers(inviterID int, page, pageSize int) (*UserL
 		InviterID: inviterID,
 	}
 	return s.GetUsers(query)
+}
+
+// BatchDeleteUsersByActivity 按活跃度级别批量删除用户
+func (s *UserService) BatchDeleteUsersByActivity(activityLevel string, dryRun bool) (map[string]interface{}, error) {
+	db := database.GetMainDB()
+
+	// 活跃度阈值（秒）
+	const inactiveThreshold = 30 * 24 * 3600 // 30 天
+
+	now := time.Now().Unix()
+	inactiveCutoff := now - inactiveThreshold
+
+	var findSQL string
+	var params []interface{}
+
+	if activityLevel == "very_inactive" {
+		// 超过 30 天没有请求的用户
+		findSQL = `
+			SELECT u.id, u.username
+			FROM users u
+			LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
+			WHERE u.deleted_at IS NULL
+			GROUP BY u.id, u.username
+			HAVING MAX(l.created_at) < ?
+		`
+		params = []interface{}{inactiveCutoff}
+	} else if activityLevel == "never" {
+		// 从未请求的用户
+		findSQL = `
+			SELECT u.id, u.username
+			FROM users u
+			LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
+			WHERE u.deleted_at IS NULL
+			GROUP BY u.id, u.username
+			HAVING MAX(l.created_at) IS NULL
+		`
+		params = []interface{}{}
+	} else {
+		return nil, fmt.Errorf("不支持的活跃度级别: %s", activityLevel)
+	}
+
+	var results []struct {
+		ID       int    `gorm:"column:id"`
+		Username string `gorm:"column:username"`
+	}
+
+	if err := db.Raw(findSQL, params...).Scan(&results).Error; err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]int, len(results))
+	usernames := make([]string, 0, min(len(results), 20))
+	for i, r := range results {
+		userIDs[i] = r.ID
+		if i < 20 {
+			usernames = append(usernames, r.Username)
+		}
+	}
+
+	if dryRun {
+		return map[string]interface{}{
+			"success": true,
+			"dry_run": true,
+			"count":   len(userIDs),
+			"users":   usernames,
+			"message": fmt.Sprintf("预览：将删除 %d 个用户", len(userIDs)),
+		}, nil
+	}
+
+	if len(userIDs) == 0 {
+		return map[string]interface{}{
+			"success": true,
+			"count":   0,
+			"message": "没有需要删除的用户",
+		}, nil
+	}
+
+	// 执行批量删除
+	now2 := time.Now()
+	result := db.Model(&models.User{}).
+		Where("id IN ?", userIDs).
+		Update("deleted_at", now2)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// 同时删除这些用户的所有令牌
+	db.Model(&models.Token{}).
+		Where("user_id IN ?", userIDs).
+		Update("deleted_at", now2)
+
+	return map[string]interface{}{
+		"success": true,
+		"count":   result.RowsAffected,
+		"message": fmt.Sprintf("已删除 %d 个不活跃用户", result.RowsAffected),
+	}, nil
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

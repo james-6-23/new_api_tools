@@ -273,24 +273,31 @@ func DeleteUserHandler(c *gin.Context) {
 	Success(c, gin.H{"message": "删除成功"})
 }
 
-// BatchDeleteUsersHandler 批量删除用户
+// BatchDeleteUsersHandler 批量删除用户（按活跃度级别）
 func BatchDeleteUsersHandler(c *gin.Context) {
 	var req struct {
-		IDs []int `json:"ids"`
+		ActivityLevel string `json:"activity_level"` // very_inactive 或 never
+		DryRun        bool   `json:"dry_run"`        // 预演模式
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Error(c, 400, "参数错误")
 		return
 	}
 
-	count, err := userService.BatchDeleteUsers(req.IDs)
+	// 验证活跃度级别
+	if req.ActivityLevel != "very_inactive" && req.ActivityLevel != "never" {
+		Error(c, 400, "只能批量删除 very_inactive 或 never 级别的用户")
+		return
+	}
+
+	result, err := userService.BatchDeleteUsersByActivity(req.ActivityLevel, req.DryRun)
 	if err != nil {
 		logger.Error("批量删除用户失败", zap.Error(err))
 		Error(c, 500, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"deleted": count})
+	Success(c, result)
 }
 
 // DisableTokenHandler 禁用令牌
@@ -350,7 +357,7 @@ func GetLeaderboardsHandler(c *gin.Context) {
 
 // GetUserRiskAnalysisHandler 获取用户风险分析
 func GetUserRiskAnalysisHandler(c *gin.Context) {
-	userID, err := strconv.Atoi(c.Param("id"))
+	userID, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil {
 		Error(c, 400, "无效的用户 ID")
 		return
@@ -371,6 +378,14 @@ func GetBanRecordsHandler(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
+	// 防止除零 panic
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
 	data, total, err := riskService.GetBanRecords(page, pageSize)
 	if err != nil {
 		logger.Error("获取封禁记录失败", zap.Error(err))
@@ -378,10 +393,15 @@ func GetBanRecordsHandler(c *gin.Context) {
 		return
 	}
 
+	// 计算总页数
+	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
+
 	Success(c, gin.H{
-		"records": data,
-		"total":   total,
-		"page":    page,
+		"items":       data,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": totalPages,
 	})
 }
 

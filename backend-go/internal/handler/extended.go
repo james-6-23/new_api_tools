@@ -79,13 +79,25 @@ func GetSuspiciousUsersHandler(c *gin.Context) {
 
 // AssessUserRiskHandler 评估用户风险
 func AssessUserRiskHandler(c *gin.Context) {
-	userID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
+	var req struct {
+		UserID int    `json:"user_id"`
+		Window string `json:"window"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+
+	if req.UserID <= 0 {
 		Error(c, 400, "无效的用户 ID")
 		return
 	}
 
-	data, err := aiBanService.AssessUserRisk(userID)
+	if req.Window == "" {
+		req.Window = "1h"
+	}
+
+	data, err := aiBanService.AssessUserRisk(req.UserID)
 	if err != nil {
 		logger.Error("评估用户风险失败", zap.Error(err))
 		Error(c, 500, err.Error())
@@ -158,7 +170,11 @@ func RemoveFromWhitelistHandler(c *gin.Context) {
 
 // SearchWhitelistHandler 搜索白名单
 func SearchWhitelistHandler(c *gin.Context) {
-	keyword := c.Query("keyword")
+	// 支持 q 和 keyword 两种参数名，优先使用 q（与前端一致）
+	keyword := c.Query("q")
+	if keyword == "" {
+		keyword = c.Query("keyword")
+	}
 	data, err := aiBanService.SearchWhitelist(keyword)
 	if err != nil {
 		Error(c, 500, "搜索失败")
