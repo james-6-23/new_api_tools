@@ -16,7 +16,7 @@ import (
 
 // Response 统一响应结构
 type Response struct {
-	Code    int         `json:"code"`
+	Success bool        `json:"success"`
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
 }
@@ -24,15 +24,15 @@ type Response struct {
 // Success 成功响应
 func Success(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, Response{
-		Code: 0,
-		Data: data,
+		Success: true,
+		Data:    data,
 	})
 }
 
 // Error 错误响应
 func Error(c *gin.Context, code int, message string) {
 	c.JSON(http.StatusOK, Response{
-		Code:    code,
+		Success: false,
 		Message: message,
 	})
 }
@@ -40,7 +40,7 @@ func Error(c *gin.Context, code int, message string) {
 // ErrorWithStatus 带 HTTP 状态码的错误响应
 func ErrorWithStatus(c *gin.Context, httpStatus int, code int, message string) {
 	c.JSON(httpStatus, Response{
-		Code:    code,
+		Success: false,
 		Message: message,
 	})
 }
