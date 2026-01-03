@@ -121,6 +121,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 	// 健康检查（无需认证）
 	router.GET("/health", handler.HealthCheck)
 	router.GET("/api/health", handler.HealthCheck)
+	router.GET("/api/health/db", handler.DatabaseHealthCheck)
 
 	// API 路由组
 	api := router.Group("/api")

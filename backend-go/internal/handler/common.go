@@ -67,6 +67,32 @@ func HealthCheck(c *gin.Context) {
 	})
 }
 
+// DatabaseHealthCheck 数据库健康检查
+func DatabaseHealthCheck(c *gin.Context) {
+	cfg := config.Get()
+
+	if err := database.HealthCheck(); err != nil {
+		logger.Error("数据库健康检查失败", zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"status":  "disconnected",
+			"error": gin.H{
+				"code":    "DATABASE_ERROR",
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"status":   "connected",
+		"engine":   cfg.Database.Engine,
+		"host":     cfg.Database.Host,
+		"database": cfg.Database.Name,
+	})
+}
+
 // LoginRequest 登录请求
 type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
