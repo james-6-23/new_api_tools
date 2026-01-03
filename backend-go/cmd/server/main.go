@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ketches/new-api-tools/frontend"
 	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/config"
 	"github.com/ketches/new-api-tools/internal/database"
@@ -20,6 +21,13 @@ import (
 	"github.com/ketches/new-api-tools/pkg/geoip"
 	"github.com/ketches/new-api-tools/pkg/jwt"
 	"go.uber.org/zap"
+)
+
+// 版本信息（构建时注入）
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
 )
 
 func main() {
@@ -37,7 +45,11 @@ func main() {
 	}
 	defer logger.Sync()
 
-	logger.Info("NewAPI Tools (Golang) 启动中...")
+	logger.Info("NewAPI Tools (Golang) 启动中...",
+		zap.String("version", Version),
+		zap.String("build_time", BuildTime),
+		zap.String("git_commit", GitCommit),
+	)
 
 	// 3. 初始化数据库
 	if err := database.Init(cfg); err != nil {
@@ -319,6 +331,9 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			modelStatusEmbed.GET("/config/selected", handler.GetEmbedSelectedModelsHandler)
 		}
 	}
+
+	// 前端静态文件服务（放在最后，作为 fallback）
+	frontend.ServeFrontend(router)
 
 	return router
 }
