@@ -68,7 +68,6 @@ func HealthCheck(c *gin.Context) {
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -88,23 +87,17 @@ func Login(c *gin.Context) {
 
 	cfg := config.Get()
 
-	// 验证用户名（固定为 admin）
-	if req.Username != "admin" {
-		Error(c, 401, "用户名或密码错误")
-		return
-	}
-
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(cfg.Auth.AdminPassword), []byte(req.Password)); err != nil {
 		// 如果配置的是明文密码，直接比较
 		if req.Password != cfg.Auth.AdminPassword {
-			Error(c, 401, "用户名或密码错误")
+			Error(c, 401, "密码错误")
 			return
 		}
 	}
 
 	// 生成 JWT Token
-	token, err := jwt.GenerateToken(req.Username, 100, cfg.Auth.JWTExpireHours)
+	token, err := jwt.GenerateToken("admin", 100, cfg.Auth.JWTExpireHours)
 	if err != nil {
 		logger.Error("生成 Token 失败", zap.Error(err))
 		Error(c, 500, "生成令牌失败")
@@ -112,7 +105,6 @@ func Login(c *gin.Context) {
 	}
 
 	logger.Info("管理员登录成功",
-		zap.String("username", req.Username),
 		zap.String("ip", c.ClientIP()),
 	)
 
