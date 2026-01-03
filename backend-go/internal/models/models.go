@@ -127,15 +127,15 @@ func (Redemption) TableName() string {
 // TopUp NewAPI 充值记录表
 // 注意：数据库中 create_time/complete_time 是 Unix 时间戳，status 是字符串类型
 type TopUp struct {
-	ID           int    `gorm:"column:id;primaryKey" json:"id"`
-	UserID       int    `gorm:"column:user_id" json:"user_id"`
-	Amount       int64  `gorm:"column:amount" json:"amount"`
+	ID           int     `gorm:"column:id;primaryKey" json:"id"`
+	UserID       int     `gorm:"column:user_id" json:"user_id"`
+	Amount       int64   `gorm:"column:amount" json:"amount"`
 	Money        float64 `gorm:"column:money" json:"money"`
-	Method       string `gorm:"column:payment_method" json:"payment_method"`
-	TradeNo      string `gorm:"column:trade_no" json:"trade_no"`
-	Status       string `gorm:"column:status" json:"status"`
-	CreateTime   int64  `gorm:"column:create_time" json:"create_time"`
-	CompleteTime int64  `gorm:"column:complete_time" json:"complete_time"`
+	Method       string  `gorm:"column:payment_method" json:"payment_method"`
+	TradeNo      string  `gorm:"column:trade_no" json:"trade_no"`
+	Status       string  `gorm:"column:status" json:"status"`
+	CreateTime   int64   `gorm:"column:create_time" json:"create_time"`
+	CompleteTime int64   `gorm:"column:complete_time" json:"complete_time"`
 }
 
 func (TopUp) TableName() string {

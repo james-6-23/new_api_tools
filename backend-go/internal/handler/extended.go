@@ -2,7 +2,6 @@ package handler
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ketches/new-api-tools/internal/logger"
@@ -522,78 +521,25 @@ func RefreshSystemScaleHandler(c *gin.Context) {
 }
 
 // GetWarmupStatusHandler 获取预热状态
+// 直接使用 tasks.WarmupStatus 中维护的状态，避免重复计算
 func GetWarmupStatusHandler(c *gin.Context) {
-	// 从 tasks 包获取预热状态
+	// 从 tasks 包获取预热状态（已包含完整的 8 阶段信息）
 	warmupStatus := tasks.GetWarmupStatus()
 
-	// 计算总体进度 (0-100)
-	// 3 个阶段: dashboard(8项), ip_distribution(4项), leaderboard(3项) = 15 项
-	totalItems := 15
-	var completedItems int
-	var currentPhaseProgress int
-
-	switch warmupStatus.Phase {
-	case "dashboard":
-		completedItems = 0
-		currentPhaseProgress = warmupStatus.Progress
-	case "ip_distribution":
-		completedItems = 8 // dashboard 完成
-		currentPhaseProgress = warmupStatus.Progress
-	case "leaderboard":
-		completedItems = 12 // dashboard + ip_distribution 完成
-		currentPhaseProgress = warmupStatus.Progress
-	case "completed":
-		completedItems = totalItems
-		currentPhaseProgress = 0
-	}
-
-	overallProgress := (completedItems + currentPhaseProgress) * 100 / totalItems
-	if warmupStatus.Completed {
-		overallProgress = 100
-	}
-
-	// 确定状态字符串 (前端期望: pending/initializing/ready)
-	var status string
-	if warmupStatus.Completed {
-		status = "ready"
-	} else if warmupStatus.StartTime.IsZero() {
-		status = "pending"
-	} else {
-		status = "initializing"
-	}
-
-	// 构建步骤列表 (前端期望的格式)
-	steps := []gin.H{
-		{"name": "恢复缓存", "status": getStepStatus(warmupStatus, "dashboard", 0)},
-		{"name": "检查缓存有效性", "status": getStepStatus(warmupStatus, "dashboard", 1)},
-		{"name": "预热排行榜数据", "status": getStepStatus(warmupStatus, "leaderboard", -1)},
-		{"name": "预热 Dashboard", "status": getStepStatus(warmupStatus, "dashboard", -1)},
-		{"name": "预热用户活跃度", "status": getStepStatus(warmupStatus, "ip_distribution", 0)},
-		{"name": "预热 IP 监控", "status": getStepStatus(warmupStatus, "ip_distribution", -1)},
-		{"name": "预热 IP 分布", "status": getStepStatus(warmupStatus, "ip_distribution", -1)},
-		{"name": "预热模型状态", "status": getStepStatus(warmupStatus, "completed", -1)},
-	}
-
-	// 构建消息
-	var message string
-	switch warmupStatus.Phase {
-	case "dashboard":
-		message = "正在预热 Dashboard 数据..."
-	case "ip_distribution":
-		message = "正在预热 IP 分布数据..."
-	case "leaderboard":
-		message = "正在预热排行榜数据..."
-	case "completed":
-		message = "预热完成"
-	default:
-		message = "正在初始化..."
+	// 直接使用 WarmupStatus 中的 Steps 构建响应
+	steps := make([]gin.H, len(warmupStatus.Steps))
+	for i, step := range warmupStatus.Steps {
+		steps[i] = gin.H{
+			"name":   step.Name,
+			"status": step.Status,
+		}
 	}
 
 	// 返回前端期望的格式
 	data := gin.H{
-		"status":       status,
-		"progress":     overallProgress,
-		"message":      message,
+		"status":       warmupStatus.Status,
+		"progress":     warmupStatus.Progress,
+		"message":      warmupStatus.Message,
 		"steps":        steps,
 		"started_at":   nil,
 		"completed_at": nil,
@@ -602,41 +548,11 @@ func GetWarmupStatusHandler(c *gin.Context) {
 	if !warmupStatus.StartTime.IsZero() {
 		data["started_at"] = warmupStatus.StartTime.Unix()
 	}
-	if warmupStatus.Completed {
-		data["completed_at"] = warmupStatus.StartTime.Add(1 * time.Second).Unix()
+	if warmupStatus.CompletedAt != nil {
+		data["completed_at"] = warmupStatus.CompletedAt.Unix()
 	}
 
 	Success(c, data)
-}
-
-// getStepStatus 根据当前预热阶段返回步骤状态
-func getStepStatus(ws *tasks.WarmupStatus, targetPhase string, targetProgress int) string {
-	if ws.Completed {
-		return "done"
-	}
-
-	phaseOrder := map[string]int{
-		"":               0,
-		"dashboard":      1,
-		"ip_distribution": 2,
-		"leaderboard":    3,
-		"completed":      4,
-	}
-
-	currentOrder := phaseOrder[ws.Phase]
-	targetOrder := phaseOrder[targetPhase]
-
-	if currentOrder > targetOrder {
-		return "done"
-	}
-	if currentOrder < targetOrder {
-		return "pending"
-	}
-	// 同一阶段，检查进度
-	if targetProgress >= 0 && ws.Progress > targetProgress {
-		return "done"
-	}
-	return "pending"
 }
 
 // GetIndexesHandler 获取索引

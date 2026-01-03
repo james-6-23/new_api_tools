@@ -4,14 +4,17 @@ import (
 	"context"
 	"time"
 
+	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/database"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/models"
+	"github.com/ketches/new-api-tools/internal/service"
 	"go.uber.org/zap"
 )
 
 // IPRecordingEnforceTask 强制开启 IP 记录任务
 // 每 30 分钟检查并强制开启所有用户的 IP 记录功能
+// 防止用户自行关闭 IP 记录导致风控数据缺失
 func IPRecordingEnforceTask(ctx context.Context) error {
 	db := database.GetMainDB()
 
@@ -78,6 +81,9 @@ func IndexEnsureTask(ctx context.Context) error {
 		},
 	}
 
+	createdCount := 0
+	existingCount := 0
+
 	for _, idx := range indexes {
 		select {
 		case <-ctx.Done():
@@ -100,6 +106,7 @@ func IndexEnsureTask(ctx context.Context) error {
 		}
 
 		if exists {
+			existingCount++
 			logger.Debug("索引已存在", zap.String("index", idx.name))
 			continue
 		}
@@ -115,12 +122,19 @@ func IndexEnsureTask(ctx context.Context) error {
 			continue
 		}
 
+		createdCount++
 		logger.Info("索引创建完成",
 			zap.String("index", idx.name),
 			zap.Duration("elapsed", time.Since(start)))
 
 		// 每个索引创建后等待一下，避免数据库压力过大
 		time.Sleep(2 * time.Second)
+	}
+
+	if createdCount > 0 {
+		logger.Info("索引创建任务完成",
+			zap.Int("created", createdCount),
+			zap.Int("existing", existingCount))
 	}
 
 	return nil
@@ -144,15 +158,60 @@ func LogSyncTask(ctx context.Context) error {
 		return nil
 	}
 
-	// 处理新日志
-	processed, err := analyticsService.ProcessNewLogs(5000)
+	// 处理新日志（每次最多处理 5000 条）
+	totalProcessed := 0
+	for i := 0; i < 5; i++ {
+		processed, err := analyticsService.ProcessNewLogs(1000)
+		if err != nil {
+			return err
+		}
+		if processed == 0 {
+			break
+		}
+		totalProcessed += processed
+	}
+
+	if totalProcessed > 0 {
+		logger.Info("日志同步完成", zap.Int("processed", totalProcessed))
+	}
+
+	return nil
+}
+
+// CacheCleanupTask 过期缓存清理任务
+// 定时清理 SQLite 中过期的缓存数据
+func CacheCleanupTask(ctx context.Context) error {
+	cacheManager := cache.GetCacheManager()
+
+	cleaned, err := cacheManager.CleanupExpired()
 	if err != nil {
 		return err
 	}
 
-	if processed > 0 {
-		logger.Info("日志同步完成", zap.Int("processed", processed))
+	if cleaned > 0 {
+		logger.Info("过期缓存清理完成", zap.Int64("cleaned", cleaned))
 	}
+
+	return nil
+}
+
+// ModelStatusRefreshTask 模型状态刷新任务
+// 定时刷新模型列表和状态缓存
+func ModelStatusRefreshTask(ctx context.Context) error {
+	modelService := service.NewModelStatusService()
+
+	start := time.Now()
+
+	// 刷新可用模型列表
+	models, err := modelService.GetAvailableModels()
+	if err != nil {
+		logger.Warn("刷新模型列表失败", zap.Error(err))
+		return err
+	}
+
+	logger.Debug("模型状态刷新完成",
+		zap.Int("models", len(models)),
+		zap.Duration("elapsed", time.Since(start)))
 
 	return nil
 }
