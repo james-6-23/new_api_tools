@@ -200,7 +200,7 @@ func setDefaults() {
 	viper.SetDefault("auth.jwt_expire_hours", 24)
 
 	// GeoIP 默认值
-	viper.SetDefault("geoip.db_path", "/app/data/GeoLite2-Country.mmdb")
+	viper.SetDefault("geoip.db_path", "/app/data/geoip/GeoLite2-Country.mmdb")
 	viper.SetDefault("geoip.update_url", "https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb")
 	viper.SetDefault("geoip.update_period", 24*time.Hour)
 

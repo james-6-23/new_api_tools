@@ -37,7 +37,7 @@ services:
       - SERVER_MODE=${SERVER_MODE:-release}
 
       # GeoIP 配置
-      - GEOIP_DB_PATH=/app/data/GeoLite2-Country.mmdb
+      - GEOIP_DB_PATH=/app/data/geoip/GeoLite2-Country.mmdb
 
     volumes:
       - ./data:/app/data
