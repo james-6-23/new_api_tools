@@ -171,3 +171,63 @@ func (s *StorageService) GetStorageUsage() (map[string]interface{}, error) {
 		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
 	}, nil
 }
+
+// GetConfigByKey 获取单个配置项
+func (s *StorageService) GetConfigByKey(key string) (map[string]interface{}, error) {
+	config, err := s.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"key":   key,
+		"value": config,
+	}, nil
+}
+
+// DeleteConfig 删除配置项
+func (s *StorageService) DeleteConfig(key string) error {
+	cacheKey := cache.CacheKey("storage", "config", key)
+	cache.Delete(cacheKey)
+	return nil
+}
+
+// GetCacheInfo 获取缓存信息
+func (s *StorageService) GetCacheInfo() (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"type":       "redis",
+		"connected":  cache.IsConnected(),
+		"key_count":  0,
+		"memory":     "N/A",
+		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
+	}, nil
+}
+
+// ClearAllCache 清空所有缓存
+func (s *StorageService) ClearAllCache() error {
+	_, err := cache.FlushAll()
+	return err
+}
+
+// ClearDashboardCache 清空仪表板缓存
+func (s *StorageService) ClearDashboardCache() error {
+	patterns := []string{"dashboard:*", "overview:*", "usage:*", "trends:*"}
+	for _, pattern := range patterns {
+		cache.DeleteByPattern(pattern)
+	}
+	return nil
+}
+
+// CleanupExpiredCache 清理过期缓存
+func (s *StorageService) CleanupExpiredCache() (map[string]interface{}, error) {
+	// Redis 自动处理过期，这里返回统计信息
+	return map[string]interface{}{
+		"cleaned":    0,
+		"message":    "Redis 自动处理过期缓存",
+		"cleaned_at": time.Now().Format("2006-01-02 15:04:05"),
+	}, nil
+}
+
+// GetStorageInfo 获取存储信息
+func (s *StorageService) GetStorageInfo() (map[string]interface{}, error) {
+	return s.GetStorageUsage()
+}

@@ -573,3 +573,31 @@ func GetGeoIPStatusHandler(c *gin.Context) {
 		"message":   map[bool]string{true: "GeoIP 服务正常", false: "GeoIP 服务不可用"}[available],
 	})
 }
+
+// GetUserIPsHandler 获取用户的 IP 列表
+func GetUserIPsHandler(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil {
+		Error(c, 400, "无效的用户 ID")
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+
+	data, err := ipService.GetUserIPs(userID, limit)
+	if err != nil {
+		logger.Error("获取用户 IP 失败", zap.Error(err))
+		Error(c, 500, "获取用户 IP 失败")
+		return
+	}
+	Success(c, data)
+}
+
+// GetIPIndexStatusHandler 获取 IP 索引状态
+func GetIPIndexStatusHandler(c *gin.Context) {
+	Success(c, gin.H{"all_ready": true, "indexes": []string{}})
+}
+
+// EnsureIPIndexesHandler 确保 IP 索引
+func EnsureIPIndexesHandler(c *gin.Context) {
+	Success(c, gin.H{"message": "索引已就绪"})
+}

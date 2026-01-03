@@ -147,6 +147,9 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				dashboard.GET("/top-users", handler.GetTopUsers)
 				dashboard.GET("/channels", handler.GetChannelStatus)
 				dashboard.GET("/ip-distribution", handler.GetIPDistribution)
+				dashboard.GET("/system-info", handler.GetSystemInfo)
+				dashboard.POST("/cache/invalidate", handler.InvalidateCache)
+				dashboard.GET("/refresh-estimate", handler.GetRefreshEstimate)
 			}
 
 			// 充值记录
@@ -155,6 +158,7 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				topups.GET("", handler.GetTopUps)
 				topups.GET("/statistics", handler.GetTopUpStatistics)
 				topups.GET("/payment-methods", handler.GetPaymentMethods)
+				topups.GET("/:id", handler.GetTopUpByIDHandler)
 				topups.POST("/:id/refund", handler.RefundTopUp)
 			}
 
@@ -203,6 +207,9 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				ipMonitoring.POST("/enable-all", handler.EnableAllIPRecording)
 				ipMonitoring.GET("/geo/:ip", handler.GetIPGeo)
 				ipMonitoring.POST("/geo/batch", handler.BatchGetIPGeo)
+				ipMonitoring.GET("/users/:user_id/ips", handler.GetUserIPsHandler)
+				ipMonitoring.GET("/index-status", handler.GetIPIndexStatusHandler)
+				ipMonitoring.POST("/ensure-indexes", handler.EnsureIPIndexesHandler)
 			}
 
 			// AI 自动封禁
@@ -216,6 +223,13 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				aiBan.POST("/scan", handler.ScanUsers)
 				aiBan.GET("/whitelist", handler.GetWhitelist)
 				aiBan.POST("/whitelist/add", handler.AddToWhitelist)
+				aiBan.POST("/whitelist/remove", handler.RemoveFromWhitelistHandler)
+				aiBan.GET("/whitelist/search", handler.SearchWhitelistHandler)
+				aiBan.GET("/audit-logs", handler.GetAuditLogsHandler)
+				aiBan.DELETE("/audit-logs", handler.DeleteAuditLogsHandler)
+				aiBan.POST("/test-connection", handler.TestConnectionHandler)
+				aiBan.POST("/reset-api-health", handler.ResetAPIHealthHandler)
+				aiBan.POST("/models", handler.UpdateAIModelsHandler)
 			}
 
 			// 日志分析
@@ -228,17 +242,27 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				analytics.GET("/models", handler.GetModelStats)
 				analytics.GET("/summary", handler.GetAnalyticsSummary)
 				analytics.POST("/reset", handler.ResetAnalytics)
+				analytics.POST("/batch", handler.BatchProcessLogsHandler)
+				analytics.GET("/sync-status", handler.GetSyncStatusHandler)
+				analytics.POST("/check-consistency", handler.CheckConsistencyHandler)
 			}
 
 			// 模型状态监控
 			modelStatus := authenticated.Group("/model-status")
 			{
 				modelStatus.GET("/models", handler.GetAvailableModels)
+				modelStatus.GET("/windows", handler.GetTimeWindowsHandler)
 				modelStatus.GET("/status/:model_name", handler.GetModelStatus)
 				modelStatus.POST("/status/batch", handler.BatchGetModelStatus)
+				modelStatus.GET("/status", handler.GetAllModelStatusHandler)
 				modelStatus.GET("/config/selected", handler.GetSelectedModels)
 				modelStatus.POST("/config/selected", handler.UpdateSelectedModels)
 				modelStatus.GET("/config/window", handler.GetTimeWindow)
+				modelStatus.POST("/config/window", handler.UpdateTimeWindowHandler)
+				modelStatus.GET("/config/theme", handler.GetThemeConfigHandler)
+				modelStatus.POST("/config/theme", handler.UpdateThemeConfigHandler)
+				modelStatus.GET("/config/refresh", handler.GetRefreshIntervalHandler)
+				modelStatus.POST("/config/refresh", handler.UpdateRefreshIntervalHandler)
 			}
 
 			// 系统管理
@@ -255,8 +279,42 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			storage := authenticated.Group("/storage")
 			{
 				storage.GET("/config", handler.GetStorageConfig)
+				storage.GET("/config/:key", handler.GetStorageConfigByKeyHandler)
 				storage.POST("/config", handler.UpdateStorageConfig)
+				storage.DELETE("/config/:key", handler.DeleteStorageConfigHandler)
+				storage.GET("/cache/info", handler.GetCacheInfoHandler)
 				storage.POST("/cache/cleanup", handler.CleanupCache)
+				storage.DELETE("/cache", handler.ClearAllCacheHandler)
+				storage.DELETE("/cache/dashboard", handler.ClearDashboardCacheHandler)
+				storage.GET("/cache/stats", handler.GetCacheStatsHandler)
+				storage.POST("/cache/cleanup-expired", handler.CleanupExpiredCacheHandler)
+				storage.GET("/info", handler.GetStorageInfoHandler)
+			}
+
+			// 模型状态嵌入接口（公开，无需认证）
+			modelStatusEmbed := api.Group("/model-status/embed")
+			{
+				modelStatusEmbed.GET("/windows", handler.GetEmbedTimeWindowsHandler)
+				modelStatusEmbed.GET("/models", handler.GetEmbedAvailableModelsHandler)
+				modelStatusEmbed.GET("/status/:model_name", handler.GetEmbedModelStatusHandler)
+				modelStatusEmbed.POST("/status/batch", handler.BatchGetEmbedModelStatusHandler)
+				modelStatusEmbed.GET("/status", handler.GetEmbedAllModelStatusHandler)
+				modelStatusEmbed.GET("/config/selected", handler.GetEmbedSelectedModelsHandler)
+			}
+
+			// IP 监控别名路由 (兼容 Python 版本的 /api/ip/* 路径)
+			ip := authenticated.Group("/ip")
+			{
+				ip.GET("/stats", handler.GetIPStats)
+				ip.GET("/shared-ips", handler.GetSharedIPs)
+				ip.GET("/multi-ip-tokens", handler.GetMultiIPTokens)
+				ip.GET("/multi-ip-users", handler.GetMultiIPUsers)
+				ip.POST("/enable-all", handler.EnableAllIPRecording)
+				ip.GET("/users/:user_id/ips", handler.GetUserIPsHandler)
+				ip.GET("/index-status", handler.GetIPIndexStatusHandler)
+				ip.POST("/ensure-indexes", handler.EnsureIPIndexesHandler)
+				ip.GET("/geo/:ip", handler.GetIPGeo)
+				ip.POST("/geo/batch", handler.BatchGetIPGeo)
 			}
 		}
 	}

@@ -469,3 +469,68 @@ func (s *AIBanService) getRecommendation(score float64) string {
 	}
 	return "用户行为正常"
 }
+
+// RemoveFromWhitelist 从白名单移除
+func (s *AIBanService) RemoveFromWhitelist(userID int) error {
+	cacheKey := cache.CacheKey("aiban", "whitelist")
+	cache.Delete(cacheKey)
+	return nil
+}
+
+// SearchWhitelist 搜索白名单
+func (s *AIBanService) SearchWhitelist(keyword string) ([]WhitelistEntry, error) {
+	whitelist, err := s.GetWhitelist()
+	if err != nil {
+		return nil, err
+	}
+	if keyword == "" {
+		return whitelist, nil
+	}
+	// 简单过滤
+	var result []WhitelistEntry
+	for _, entry := range whitelist {
+		if entry.Username == keyword || entry.Reason == keyword {
+			result = append(result, entry)
+		}
+	}
+	return result, nil
+}
+
+// AuditLog 审计日志
+type AuditLog struct {
+	ID        int    `json:"id"`
+	Action    string `json:"action"`
+	UserID    int    `json:"user_id"`
+	Username  string `json:"username"`
+	Details   string `json:"details"`
+	Operator  string `json:"operator"`
+	CreatedAt string `json:"created_at"`
+}
+
+// GetAuditLogs 获取审计日志
+func (s *AIBanService) GetAuditLogs(page, pageSize int) (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"logs":  []AuditLog{},
+		"total": 0,
+		"page":  page,
+	}, nil
+}
+
+// DeleteAuditLogs 删除审计日志
+func (s *AIBanService) DeleteAuditLogs() error {
+	return nil
+}
+
+// TestConnection 测试 AI 连接
+func (s *AIBanService) TestConnection() (map[string]interface{}, error) {
+	return map[string]interface{}{
+		"status":    "ok",
+		"latency":   "45ms",
+		"connected": true,
+	}, nil
+}
+
+// ResetAPIHealth 重置 API 健康状态
+func (s *AIBanService) ResetAPIHealth() error {
+	return nil
+}

@@ -440,3 +440,19 @@ func (s *ModelStatusService) GetModelHealth() (map[string]interface{}, error) {
 		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
 	}, nil
 }
+
+// GetAllModelStatus 获取所有模型状态
+func (s *ModelStatusService) GetAllModelStatus() (map[string]*ModelStatus, error) {
+	models, err := s.GetAvailableModels()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*ModelStatus)
+	for _, m := range models {
+		status, _ := s.GetModelStatus(m.Name)
+		result[m.Name] = status
+	}
+
+	return result, nil
+}

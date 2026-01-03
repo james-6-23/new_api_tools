@@ -303,3 +303,68 @@ func (s *TopUpService) RefundTopUp(topUpID int) error {
 
 	return tx.Commit().Error
 }
+
+// TopUpDetail 充值详情
+type TopUpDetail struct {
+	ID            int     `json:"id"`
+	UserID        int     `json:"user_id"`
+	Username      string  `json:"username"`
+	Amount        int64   `json:"amount"`
+	Money         float64 `json:"money"`
+	TradeNo       string  `json:"trade_no"`
+	PaymentMethod string  `json:"payment_method"`
+	Status        int     `json:"status"`
+	StatusText    string  `json:"status_text"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+}
+
+// GetTopUpByID 获取单个充值记录
+func (s *TopUpService) GetTopUpByID(id int) (*TopUpDetail, error) {
+	db := database.GetMainDB()
+
+	var result struct {
+		ID            int
+		UserID        int
+		Username      string
+		Amount        int64
+		Money         float64
+		TradeNo       string
+		PaymentMethod string
+		Status        int
+		CreatedAt     time.Time
+		UpdatedAt     time.Time
+	}
+
+	err := db.Table("top_ups").
+		Select("top_ups.*, users.username").
+		Joins("LEFT JOIN users ON top_ups.user_id = users.id").
+		Where("top_ups.id = ?", id).
+		First(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("充值记录不存在")
+	}
+
+	statusText := map[int]string{
+		1: "待支付",
+		2: "支付中",
+		3: "成功",
+		4: "已退款",
+		5: "失败",
+	}
+
+	return &TopUpDetail{
+		ID:            result.ID,
+		UserID:        result.UserID,
+		Username:      result.Username,
+		Amount:        result.Amount,
+		Money:         result.Money,
+		TradeNo:       result.TradeNo,
+		PaymentMethod: result.PaymentMethod,
+		Status:        result.Status,
+		StatusText:    statusText[result.Status],
+		CreatedAt:     result.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt:     result.UpdatedAt.Format("2006-01-02 15:04:05"),
+	}, nil
+}

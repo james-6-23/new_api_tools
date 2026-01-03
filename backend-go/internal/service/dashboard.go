@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/ketches/new-api-tools/internal/cache"
@@ -562,4 +563,52 @@ func (s *DashboardService) fetchChannelStatus() ([]ChannelStatus, error) {
 	}
 
 	return data, nil
+}
+
+// SystemInfo 系统信息
+type SystemInfo struct {
+	Version      string `json:"version"`
+	GoVersion    string `json:"go_version"`
+	StartTime    string `json:"start_time"`
+	Uptime       string `json:"uptime"`
+	NumCPU       int    `json:"num_cpu"`
+	NumGoroutine int    `json:"num_goroutine"`
+	MemAlloc     string `json:"mem_alloc"`
+	MemSys       string `json:"mem_sys"`
+}
+
+// 服务启动时间
+var serviceStartTime = time.Now()
+
+// GetSystemInfo 获取系统信息
+func (s *DashboardService) GetSystemInfo() (*SystemInfo, error) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	uptime := time.Since(serviceStartTime)
+
+	return &SystemInfo{
+		Version:      "1.0.0-go",
+		GoVersion:    runtime.Version(),
+		StartTime:    serviceStartTime.Format("2006-01-02 15:04:05"),
+		Uptime:       uptime.Round(time.Second).String(),
+		NumCPU:       runtime.NumCPU(),
+		NumGoroutine: runtime.NumGoroutine(),
+		MemAlloc:     formatBytes(m.Alloc),
+		MemSys:       formatBytes(m.Sys),
+	}, nil
+}
+
+// formatBytes 格式化字节数
+func formatBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

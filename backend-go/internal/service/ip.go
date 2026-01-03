@@ -541,3 +541,51 @@ func (s *IPService) GetSuspiciousIPs(limit int) ([]map[string]interface{}, error
 
 	return suspicious, nil
 }
+
+// UserIPInfo 用户 IP 信息
+type UserIPInfo struct {
+	IP         string                 `json:"ip"`
+	Requests   int64                  `json:"requests"`
+	LastActive string                 `json:"last_active"`
+	GeoInfo    map[string]interface{} `json:"geo_info"`
+}
+
+// GetUserIPs 获取用户的 IP 列表
+func (s *IPService) GetUserIPs(userID int, limit int) ([]UserIPInfo, error) {
+	db := database.GetMainDB()
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var results []struct {
+		IP       string
+		Requests int64
+		LastAt   int64
+	}
+
+	db.Model(&models.Log{}).
+		Select("ip, COUNT(*) as requests, MAX(created_at) as last_at").
+		Where("user_id = ?", userID).
+		Group("ip").
+		Order("requests DESC").
+		Limit(limit).
+		Scan(&results)
+
+	ips := make([]UserIPInfo, len(results))
+	for i, r := range results {
+		geo := geoip.Lookup(r.IP)
+		ips[i] = UserIPInfo{
+			IP:         r.IP,
+			Requests:   r.Requests,
+			LastActive: time.Unix(r.LastAt, 0).Format("2006-01-02 15:04:05"),
+			GeoInfo: map[string]interface{}{
+				"country":      geo.Country,
+				"country_code": geo.CountryCode,
+				"continent":    geo.Continent,
+			},
+		}
+	}
+
+	return ips, nil
+}

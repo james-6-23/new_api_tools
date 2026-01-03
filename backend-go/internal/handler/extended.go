@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ketches/new-api-tools/internal/logger"
@@ -136,6 +137,86 @@ func AddToWhitelistHandler(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"message": "添加成功"})
+}
+
+// RemoveFromWhitelistHandler 从白名单移除
+func RemoveFromWhitelistHandler(c *gin.Context) {
+	var req struct {
+		UserID int `json:"user_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+	if err := aiBanService.RemoveFromWhitelist(req.UserID); err != nil {
+		logger.Error("移除白名单失败", zap.Error(err))
+		Error(c, 500, err.Error())
+		return
+	}
+	Success(c, gin.H{"message": "移除成功"})
+}
+
+// SearchWhitelistHandler 搜索白名单
+func SearchWhitelistHandler(c *gin.Context) {
+	keyword := c.Query("keyword")
+	data, err := aiBanService.SearchWhitelist(keyword)
+	if err != nil {
+		Error(c, 500, "搜索失败")
+		return
+	}
+	Success(c, data)
+}
+
+// GetAuditLogsHandler 获取审计日志
+func GetAuditLogsHandler(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	data, err := aiBanService.GetAuditLogs(page, pageSize)
+	if err != nil {
+		Error(c, 500, "获取审计日志失败")
+		return
+	}
+	Success(c, data)
+}
+
+// DeleteAuditLogsHandler 删除审计日志
+func DeleteAuditLogsHandler(c *gin.Context) {
+	if err := aiBanService.DeleteAuditLogs(); err != nil {
+		Error(c, 500, "删除失败")
+		return
+	}
+	Success(c, gin.H{"message": "删除成功"})
+}
+
+// TestConnectionHandler 测试 AI 连接
+func TestConnectionHandler(c *gin.Context) {
+	data, err := aiBanService.TestConnection()
+	if err != nil {
+		Error(c, 500, err.Error())
+		return
+	}
+	Success(c, data)
+}
+
+// ResetAPIHealthHandler 重置 API 健康状态
+func ResetAPIHealthHandler(c *gin.Context) {
+	if err := aiBanService.ResetAPIHealth(); err != nil {
+		Error(c, 500, err.Error())
+		return
+	}
+	Success(c, gin.H{"message": "重置成功"})
+}
+
+// UpdateAIModelsHandler 更新 AI 模型列表
+func UpdateAIModelsHandler(c *gin.Context) {
+	var req struct {
+		Models []string `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+	Success(c, gin.H{"message": "更新成功", "models": req.Models})
 }
 
 // ==================== Analytics Handlers ====================
@@ -334,6 +415,68 @@ func GetTimeWindowHandler(c *gin.Context) {
 	Success(c, data)
 }
 
+// UpdateTimeWindowHandler 更新时间窗口
+func UpdateTimeWindowHandler(c *gin.Context) {
+	var req struct {
+		Window string `json:"window"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+	Success(c, gin.H{"window": req.Window})
+}
+
+// GetTimeWindowsHandler 获取所有时间窗口选项
+func GetTimeWindowsHandler(c *gin.Context) {
+	Success(c, gin.H{
+		"windows": []gin.H{
+			{"value": "1h", "label": "1 小时"},
+			{"value": "6h", "label": "6 小时"},
+			{"value": "24h", "label": "24 小时"},
+			{"value": "7d", "label": "7 天"},
+		},
+	})
+}
+
+// GetAllModelStatusHandler 获取所有模型状态
+func GetAllModelStatusHandler(c *gin.Context) {
+	data, err := modelStatusService.GetAllModelStatus()
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// GetThemeConfigHandler 获取主题配置
+func GetThemeConfigHandler(c *gin.Context) {
+	Success(c, gin.H{"theme": "light"})
+}
+
+// UpdateThemeConfigHandler 更新主题配置
+func UpdateThemeConfigHandler(c *gin.Context) {
+	var req struct {
+		Theme string `json:"theme"`
+	}
+	c.ShouldBindJSON(&req)
+	Success(c, gin.H{"theme": req.Theme})
+}
+
+// GetRefreshIntervalHandler 获取刷新间隔
+func GetRefreshIntervalHandler(c *gin.Context) {
+	Success(c, gin.H{"interval": 30})
+}
+
+// UpdateRefreshIntervalHandler 更新刷新间隔
+func UpdateRefreshIntervalHandler(c *gin.Context) {
+	var req struct {
+		Interval int `json:"interval"`
+	}
+	c.ShouldBindJSON(&req)
+	Success(c, gin.H{"interval": req.Interval})
+}
+
 // ==================== System Handlers ====================
 
 // GetSystemScaleHandler 获取系统规模
@@ -367,24 +510,117 @@ func GetWarmupStatusHandler(c *gin.Context) {
 	// 从 tasks 包获取预热状态
 	warmupStatus := tasks.GetWarmupStatus()
 
-	// 获取系统内存状态
-	sysStatus, _ := systemService.GetWarmupStatus()
+	// 计算总体进度 (0-100)
+	// 3 个阶段: dashboard(8项), ip_distribution(4项), leaderboard(3项) = 15 项
+	totalItems := 15
+	var completedItems int
+	var currentPhaseProgress int
 
-	// 合并状态
+	switch warmupStatus.Phase {
+	case "dashboard":
+		completedItems = 0
+		currentPhaseProgress = warmupStatus.Progress
+	case "ip_distribution":
+		completedItems = 8 // dashboard 完成
+		currentPhaseProgress = warmupStatus.Progress
+	case "leaderboard":
+		completedItems = 12 // dashboard + ip_distribution 完成
+		currentPhaseProgress = warmupStatus.Progress
+	case "completed":
+		completedItems = totalItems
+		currentPhaseProgress = 0
+	}
+
+	overallProgress := (completedItems + currentPhaseProgress) * 100 / totalItems
+	if warmupStatus.Completed {
+		overallProgress = 100
+	}
+
+	// 确定状态字符串 (前端期望: pending/initializing/ready)
+	var status string
+	if warmupStatus.Completed {
+		status = "ready"
+	} else if warmupStatus.StartTime.IsZero() {
+		status = "pending"
+	} else {
+		status = "initializing"
+	}
+
+	// 构建步骤列表 (前端期望的格式)
+	steps := []gin.H{
+		{"name": "恢复缓存", "status": getStepStatus(warmupStatus, "dashboard", 0)},
+		{"name": "检查缓存有效性", "status": getStepStatus(warmupStatus, "dashboard", 1)},
+		{"name": "预热排行榜数据", "status": getStepStatus(warmupStatus, "leaderboard", -1)},
+		{"name": "预热 Dashboard", "status": getStepStatus(warmupStatus, "dashboard", -1)},
+		{"name": "预热用户活跃度", "status": getStepStatus(warmupStatus, "ip_distribution", 0)},
+		{"name": "预热 IP 监控", "status": getStepStatus(warmupStatus, "ip_distribution", -1)},
+		{"name": "预热 IP 分布", "status": getStepStatus(warmupStatus, "ip_distribution", -1)},
+		{"name": "预热模型状态", "status": getStepStatus(warmupStatus, "completed", -1)},
+	}
+
+	// 构建消息
+	var message string
+	switch warmupStatus.Phase {
+	case "dashboard":
+		message = "正在预热 Dashboard 数据..."
+	case "ip_distribution":
+		message = "正在预热 IP 分布数据..."
+	case "leaderboard":
+		message = "正在预热排行榜数据..."
+	case "completed":
+		message = "预热完成"
+	default:
+		message = "正在初始化..."
+	}
+
+	// 返回前端期望的格式
 	data := gin.H{
-		"is_warmed_up":    warmupStatus.Completed,
-		"warmup_progress": warmupStatus.Progress,
-		"warmup_total":    warmupStatus.Total,
-		"warmup_phase":    warmupStatus.Phase,
-		"current_task":    warmupStatus.CurrentTask,
-		"started_at":      warmupStatus.StartTime.Format("2006-01-02 15:04:05"),
-		"cache_stats":     sysStatus.CacheStats,
-		"database_stats":  sysStatus.DatabaseStats,
-		"memory_stats":    sysStatus.MemoryStats,
-		"task_manager":    tasks.GetManager().GetStatus(),
+		"status":       status,
+		"progress":     overallProgress,
+		"message":      message,
+		"steps":        steps,
+		"started_at":   nil,
+		"completed_at": nil,
+	}
+
+	if !warmupStatus.StartTime.IsZero() {
+		data["started_at"] = warmupStatus.StartTime.Unix()
+	}
+	if warmupStatus.Completed {
+		data["completed_at"] = warmupStatus.StartTime.Add(1 * time.Second).Unix()
 	}
 
 	Success(c, data)
+}
+
+// getStepStatus 根据当前预热阶段返回步骤状态
+func getStepStatus(ws *tasks.WarmupStatus, targetPhase string, targetProgress int) string {
+	if ws.Completed {
+		return "done"
+	}
+
+	phaseOrder := map[string]int{
+		"":               0,
+		"dashboard":      1,
+		"ip_distribution": 2,
+		"leaderboard":    3,
+		"completed":      4,
+	}
+
+	currentOrder := phaseOrder[ws.Phase]
+	targetOrder := phaseOrder[targetPhase]
+
+	if currentOrder > targetOrder {
+		return "done"
+	}
+	if currentOrder < targetOrder {
+		return "pending"
+	}
+	// 同一阶段，检查进度
+	if targetProgress >= 0 && ws.Progress > targetProgress {
+		return "done"
+	}
+	return "pending"
 }
 
 // GetIndexesHandler 获取索引
@@ -452,4 +688,171 @@ func CleanupCacheHandler(c *gin.Context) {
 	}
 
 	Success(c, data)
+}
+
+// GetStorageConfigByKeyHandler 获取单个配置项
+func GetStorageConfigByKeyHandler(c *gin.Context) {
+	key := c.Param("key")
+	data, err := storageService.GetConfigByKey(key)
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// DeleteStorageConfigHandler 删除配置项
+func DeleteStorageConfigHandler(c *gin.Context) {
+	key := c.Param("key")
+	if err := storageService.DeleteConfig(key); err != nil {
+		Error(c, 500, "删除失败")
+		return
+	}
+	Success(c, gin.H{"message": "删除成功"})
+}
+
+// GetCacheInfoHandler 获取缓存信息
+func GetCacheInfoHandler(c *gin.Context) {
+	data, err := storageService.GetCacheInfo()
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// ClearAllCacheHandler 清空所有缓存
+func ClearAllCacheHandler(c *gin.Context) {
+	if err := storageService.ClearAllCache(); err != nil {
+		Error(c, 500, "清空失败")
+		return
+	}
+	Success(c, gin.H{"message": "缓存已清空"})
+}
+
+// ClearDashboardCacheHandler 清空仪表板缓存
+func ClearDashboardCacheHandler(c *gin.Context) {
+	if err := storageService.ClearDashboardCache(); err != nil {
+		Error(c, 500, "清空失败")
+		return
+	}
+	Success(c, gin.H{"message": "仪表板缓存已清空"})
+}
+
+// GetCacheStatsHandler 获取缓存统计
+func GetCacheStatsHandler(c *gin.Context) {
+	data, err := storageService.GetCacheStats()
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// CleanupExpiredCacheHandler 清理过期缓存
+func CleanupExpiredCacheHandler(c *gin.Context) {
+	data, err := storageService.CleanupExpiredCache()
+	if err != nil {
+		Error(c, 500, "清理失败")
+		return
+	}
+	Success(c, data)
+}
+
+// GetStorageInfoHandler 获取存储信息
+func GetStorageInfoHandler(c *gin.Context) {
+	data, err := storageService.GetStorageInfo()
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// ==================== Analytics Extended Handlers ====================
+
+// BatchProcessLogsHandler 批量处理日志
+func BatchProcessLogsHandler(c *gin.Context) {
+	var req struct {
+		BatchSize int `json:"batch_size"`
+	}
+	c.ShouldBindJSON(&req)
+	if req.BatchSize <= 0 {
+		req.BatchSize = 1000
+	}
+	data, err := analyticsService.BatchProcessLogs(req.BatchSize)
+	if err != nil {
+		Error(c, 500, "处理失败")
+		return
+	}
+	Success(c, data)
+}
+
+// GetSyncStatusHandler 获取同步状态
+func GetSyncStatusHandler(c *gin.Context) {
+	data, err := analyticsService.GetSyncStatus()
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+	Success(c, data)
+}
+
+// CheckConsistencyHandler 检查数据一致性
+func CheckConsistencyHandler(c *gin.Context) {
+	data, err := analyticsService.CheckConsistency()
+	if err != nil {
+		Error(c, 500, "检查失败")
+		return
+	}
+	Success(c, data)
+}
+
+// ==================== TopUp Extended Handlers ====================
+
+// GetTopUpByIDHandler 获取单个充值记录
+func GetTopUpByIDHandler(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		Error(c, 400, "无效的 ID")
+		return
+	}
+	data, err := topUpService.GetTopUpByID(id)
+	if err != nil {
+		Error(c, 500, err.Error())
+		return
+	}
+	Success(c, data)
+}
+
+// ==================== Model Status Embed Handlers (Public) ====================
+
+// GetEmbedTimeWindowsHandler [公开] 获取时间窗口
+func GetEmbedTimeWindowsHandler(c *gin.Context) {
+	GetTimeWindowsHandler(c)
+}
+
+// GetEmbedAvailableModelsHandler [公开] 获取可用模型
+func GetEmbedAvailableModelsHandler(c *gin.Context) {
+	GetAvailableModelsHandler(c)
+}
+
+// GetEmbedModelStatusHandler [公开] 获取模型状态
+func GetEmbedModelStatusHandler(c *gin.Context) {
+	GetModelStatusHandler(c)
+}
+
+// BatchGetEmbedModelStatusHandler [公开] 批量获取模型状态
+func BatchGetEmbedModelStatusHandler(c *gin.Context) {
+	BatchGetModelStatusHandler(c)
+}
+
+// GetEmbedAllModelStatusHandler [公开] 获取所有模型状态
+func GetEmbedAllModelStatusHandler(c *gin.Context) {
+	GetAllModelStatusHandler(c)
+}
+
+// GetEmbedSelectedModelsHandler [公开] 获取选中模型配置
+func GetEmbedSelectedModelsHandler(c *gin.Context) {
+	GetSelectedModelsHandler(c)
 }

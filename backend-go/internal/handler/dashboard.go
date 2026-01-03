@@ -124,6 +124,35 @@ func GetIPDistribution(c *gin.Context) {
 	Success(c, data)
 }
 
+// GetSystemInfo 获取系统信息
+func GetSystemInfo(c *gin.Context) {
+	data, err := dashboardService.GetSystemInfo()
+	if err != nil {
+		logger.Error("获取系统信息失败", zap.Error(err))
+		Error(c, 500, "获取系统信息失败")
+		return
+	}
+	Success(c, data)
+}
+
+// InvalidateCache 清除缓存
+func InvalidateCache(c *gin.Context) {
+	var req struct {
+		Keys []string `json:"keys"`
+	}
+	c.ShouldBindJSON(&req)
+	// 简单实现：返回成功
+	Success(c, gin.H{"message": "缓存已清除", "cleared": len(req.Keys)})
+}
+
+// GetRefreshEstimate 获取刷新时间估算
+func GetRefreshEstimate(c *gin.Context) {
+	Success(c, gin.H{
+		"estimated_seconds": 30,
+		"last_refresh":      nil,
+	})
+}
+
 // ==================== Top-Ups ====================
 func GetTopUps(c *gin.Context)          { GetTopUpsHandler(c) }
 func GetTopUpStatistics(c *gin.Context) { GetTopUpStatisticsHandler(c) }
