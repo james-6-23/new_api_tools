@@ -60,10 +60,11 @@ type RedemptionQuery struct {
 
 // RedemptionListResult 兑换码列表结果
 type RedemptionListResult struct {
-	Total    int64              `json:"total"`
-	Page     int                `json:"page"`
-	PageSize int                `json:"page_size"`
-	Records  []RedemptionRecord `json:"records"`
+	Total      int64              `json:"total"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"page_size"`
+	TotalPages int                `json:"total_pages"`
+	Items      []RedemptionRecord `json:"items"`
 }
 
 // GenerateConfig 生成配置
@@ -147,11 +148,15 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 		}
 	}
 
+	// 计算总页数
+	totalPages := int((total + int64(query.PageSize) - 1) / int64(query.PageSize))
+
 	return &RedemptionListResult{
-		Total:    total,
-		Page:     query.Page,
-		PageSize: query.PageSize,
-		Records:  records,
+		Total:      total,
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		TotalPages: totalPages,
+		Items:      records,
 	}, nil
 }
 

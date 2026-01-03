@@ -58,10 +58,11 @@ type TopUpQuery struct {
 
 // TopUpListResult 充值列表结果
 type TopUpListResult struct {
-	Total    int64         `json:"total"`
-	Page     int           `json:"page"`
-	PageSize int           `json:"page_size"`
-	Records  []TopUpRecord `json:"records"`
+	Total      int64         `json:"total"`
+	Page       int           `json:"page"`
+	PageSize   int           `json:"page_size"`
+	TotalPages int           `json:"total_pages"`
+	Items      []TopUpRecord `json:"items"`
 }
 
 // GetTopUps 获取充值记录列表
@@ -140,11 +141,15 @@ func (s *TopUpService) GetTopUps(query *TopUpQuery) (*TopUpListResult, error) {
 		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
 	}
 
+	// 计算总页数
+	totalPages := int((total + int64(query.PageSize) - 1) / int64(query.PageSize))
+
 	return &TopUpListResult{
-		Total:    total,
-		Page:     query.Page,
-		PageSize: query.PageSize,
-		Records:  records,
+		Total:      total,
+		Page:       query.Page,
+		PageSize:   query.PageSize,
+		TotalPages: totalPages,
+		Items:      records,
 	}, nil
 }
 
