@@ -78,65 +78,87 @@ func GeoIPUpdateTask(ctx context.Context) error {
 	return downloadGeoIPDatabase(ctx, dbPath)
 }
 
+// GeoIP 免费下载源（无需 License Key）
+var geoIPDownloadURLs = []string{
+	"https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
+	"https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
+}
+
 // downloadGeoIPDatabase 下载 GeoIP 数据库
 func downloadGeoIPDatabase(ctx context.Context, dbPath string) error {
-	cfg := config.Get()
-
-	// 检查是否配置了 License Key
-	if cfg.GeoIP.LicenseKey == "" {
-		logger.Warn("未配置 GeoIP License Key，无法自动更新")
-		return nil
-	}
-
-	// 构建下载 URL
-	downloadURL := fmt.Sprintf(
-		"https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=%s&suffix=tar.gz",
-		cfg.GeoIP.LicenseKey,
-	)
-
-	// 创建临时文件
-	tmpFile, err := os.CreateTemp("", "geoip-*.tar.gz")
-	if err != nil {
-		return fmt.Errorf("创建临时文件失败: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// 下载文件
-	req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
-	if err != nil {
-		return fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("下载失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
-	}
-
-	// 写入临时文件
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		return fmt.Errorf("写入临时文件失败: %w", err)
-	}
-
 	// 确保目录存在
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 
-	// 解压并移动文件（简化处理，实际需要解压 tar.gz）
-	// 这里假设下载的是直接的 mmdb 文件
-	logger.Info("GeoIP 数据库下载完成，需要手动解压")
+	client := &http.Client{Timeout: 2 * time.Minute}
 
-	// 重新加载 GeoIP 数据库
-	if err := geoip.Init(); err != nil {
-		logger.Warn("重新加载 GeoIP 数据库失败", zap.Error(err))
+	// 尝试从多个源下载
+	for _, url := range geoIPDownloadURLs {
+		logger.Info("正在下载 GeoIP 数据库", zap.String("url", url[:50]+"..."))
+
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			logger.Warn("创建请求失败", zap.Error(err))
+			continue
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			logger.Warn("下载失败", zap.String("url", url[:50]+"..."), zap.Error(err))
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			logger.Warn("下载失败", zap.String("url", url[:50]+"..."), zap.Int("status", resp.StatusCode))
+			continue
+		}
+
+		// 写入临时文件
+		tmpPath := dbPath + ".tmp"
+		tmpFile, err := os.Create(tmpPath)
+		if err != nil {
+			resp.Body.Close()
+			logger.Warn("创建临时文件失败", zap.Error(err))
+			continue
+		}
+
+		written, err := io.Copy(tmpFile, resp.Body)
+		tmpFile.Close()
+		resp.Body.Close()
+
+		if err != nil {
+			os.Remove(tmpPath)
+			logger.Warn("写入文件失败", zap.Error(err))
+			continue
+		}
+
+		// 验证文件大小（至少 1MB）
+		if written < 1024*1024 {
+			os.Remove(tmpPath)
+			logger.Warn("文件太小，可能下载不完整", zap.Int64("size", written))
+			continue
+		}
+
+		// 替换旧文件
+		if err := os.Rename(tmpPath, dbPath); err != nil {
+			os.Remove(tmpPath)
+			logger.Warn("替换文件失败", zap.Error(err))
+			continue
+		}
+
+		logger.Info("GeoIP 数据库下载完成",
+			zap.String("path", dbPath),
+			zap.Float64("size_mb", float64(written)/1024/1024))
+
+		// 重新加载 GeoIP 数据库
+		if err := geoip.Init(); err != nil {
+			logger.Warn("重新加载 GeoIP 数据库失败", zap.Error(err))
+		}
+
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("所有下载源都失败")
 }
