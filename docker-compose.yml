@@ -1,27 +1,37 @@
-# NewAPI Middleware Tool - Docker Compose Configuration
+# NewAPI Tools - Docker Compose Configuration
 #
 # 使用方式:
-#   1. 通过 install.sh 一键安装 (推荐)
-#   2. 通过 deploy.sh 自动部署: ./deploy.sh
-#   3. 手动部署: 复制 .env.example 为 .env 并配置后运行 docker-compose up -d
+#   开发模式: make dev
+#   生产部署: docker compose up -d
 #
-# 更新方式:
-#   docker compose pull && docker compose down && docker compose up -d
+# 本地构建: docker compose build && docker compose up -d
 
 services:
+  # NewAPI Tools 主服务 (一体化架构: 后端 + 前端界面)
   newapi-tools:
     image: ghcr.io/james-6-23/new_api_tools:latest
+    # 本地构建使用以下配置（注释掉 image 行）:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   target: runtime
     container_name: newapi-tools
     ports:
-      - "${FRONTEND_PORT:-1145}:80"
+      # 统一端口：前端界面 + API
+      - '${PORT:-3000}:3000'
+    volumes:
+      # 数据目录持久化
+      - ./data:/app/data
+      # 可选：日志持久化
+      - ./logs:/app/logs
     environment:
       # 服务器配置
       - SERVER_MODE=${SERVER_MODE:-release}
-      - SERVER_PORT=8000
+      - SERVER_PORT=3000
       # 数据库配置 (SQL_DSN 优先)
       - SQL_DSN=${SQL_DSN}
       - DATABASE_ENGINE=${DB_ENGINE:-postgres}
-      - DATABASE_HOST=${DB_DNS:-postgres}
+      - DATABASE_HOST=${DB_HOST:-postgres}
       - DATABASE_PORT=${DB_PORT:-5432}
       - DATABASE_NAME=${DB_NAME:-new-api}
       - DATABASE_USER=${DB_USER:-postgres}
@@ -40,8 +50,25 @@ services:
       - AUTH_JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
       # GeoIP 配置
       - GEOIP_DB_PATH=/app/data/GeoLite2-Country.mmdb
-    volumes:
-      - ./data:/app/data
+      # 时区
+      - TZ=Asia/Shanghai
+    # 健康检查配置
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # 资源限制 (Go 应用内存占用更低)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    # 重启策略
     restart: unless-stopped
     depends_on:
       redis:
@@ -51,12 +78,6 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     networks:
       - default
       - newapi-network

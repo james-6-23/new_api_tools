@@ -1,88 +1,62 @@
-# NewAPI Middleware Tool - All-in-One Dockerfile
-# 前端 + Go 后端合并到单个镜像
+# --- 阶段 1: 准备 Bun 运行时 ---
+FROM oven/bun:alpine AS bun-runtime
 
-# Stage 1: 构建前端
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+# --- 阶段 2: 构建阶段 (Go + Bun) ---
+FROM golang:1.22-alpine AS builder
 
-# Stage 2: 构建 Go 后端
-FROM golang:1.21-alpine AS backend-builder
-WORKDIR /app
+# 声明 VERSION 构建参数（用于 CI 传入版本号，留空则从 VERSION 文件读取）
+ARG VERSION
 
-# 安装构建依赖
-RUN apk add --no-cache gcc musl-dev
+WORKDIR /src
 
-# 复制 go.mod 和 go.sum
-COPY backend-go/go.mod backend-go/go.sum ./
-RUN go mod download
+# 安装必要的构建工具和 bun 依赖（libstdc++ libgcc 是 bun:alpine 运行所需）
+RUN apk add --no-cache git make libstdc++ libgcc
 
-# 复制源代码并构建
-COPY backend-go/ ./
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
+# 从 bun-runtime 复制 bun 和 bunx 到 Go 镜像
+COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=bun-runtime /usr/local/bin/bunx /usr/local/bin/bunx
 
-# Stage 3: 最终镜像
-FROM alpine:3.19
+# 将 bun 添加到 PATH
+ENV PATH="/usr/local/bin:${PATH}"
+
+# 复制项目必要文件（.dockerignore 会排除不需要的文件）
+COPY Makefile VERSION ./
+COPY frontend/ ./frontend/
+COPY backend-go/ ./backend-go/
+
+# 使用 bun 安装前端依赖（比 npm 快 10-100 倍）
+RUN cd frontend && bun install
+
+# 安装 Go 后端依赖（go mod tidy 确保 go.sum 完整）
+RUN cd backend-go && go mod tidy && go mod download
+
+# 使用 Makefile 构建整个项目（前端 + 后端）
+# 如果 CI 传入了 VERSION 则使用，否则 Makefile 会从 VERSION 文件读取
+RUN if [ -n "${VERSION}" ]; then VERSION=${VERSION} make build; else make build; fi
+
+# --- 阶段 3: 运行时 ---
+FROM alpine:latest AS runtime
+
 WORKDIR /app
 
 # 安装运行时依赖
-RUN apk add --no-cache \
-    nginx \
-    supervisor \
-    curl \
-    ca-certificates \
-    tzdata
+RUN apk --no-cache add ca-certificates tzdata
 
-# 复制 Go 后端二进制
-COPY --from=backend-builder /app/server /app/server
+# 从构建阶段复制 Go 二进制文件（已内嵌前端资源）
+COPY --from=builder /src/dist/newapi-tools /app/newapi-tools
 
-# 创建数据目录
-RUN mkdir -p /app/data && chmod 755 /app/data
+# 创建配置目录和数据目录
+RUN mkdir -p /app/data /app/logs
 
-# 复制前端构建产物
-COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+# 设置时区（可选）
+ENV TZ=Asia/Shanghai
 
-# Nginx 配置
-RUN mkdir -p /etc/nginx/conf.d && rm -f /etc/nginx/http.d/default.conf
-COPY frontend/nginx.conf /etc/nginx/http.d/default.conf
+# 暴露端口
+EXPOSE 3000
 
-# 修改 Nginx 配置，代理到本地 Go 后端
-RUN sed -i 's|http://backend:8000|http://127.0.0.1:8000|g' /etc/nginx/http.d/default.conf
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Supervisor 配置
-RUN mkdir -p /etc/supervisor.d
-RUN echo '[supervisord]' > /etc/supervisord.conf && \
-    echo 'nodaemon=true' >> /etc/supervisord.conf && \
-    echo 'user=root' >> /etc/supervisord.conf && \
-    echo '' >> /etc/supervisord.conf && \
-    echo '[include]' >> /etc/supervisord.conf && \
-    echo 'files = /etc/supervisor.d/*.ini' >> /etc/supervisord.conf
-
-RUN echo '[program:nginx]' > /etc/supervisor.d/nginx.ini && \
-    echo 'command=/usr/sbin/nginx -g "daemon off;"' >> /etc/supervisor.d/nginx.ini && \
-    echo 'autostart=true' >> /etc/supervisor.d/nginx.ini && \
-    echo 'autorestart=true' >> /etc/supervisor.d/nginx.ini && \
-    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor.d/nginx.ini && \
-    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor.d/nginx.ini && \
-    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor.d/nginx.ini && \
-    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor.d/nginx.ini
-
-RUN echo '[program:backend]' > /etc/supervisor.d/backend.ini && \
-    echo 'command=/app/server' >> /etc/supervisor.d/backend.ini && \
-    echo 'directory=/app' >> /etc/supervisor.d/backend.ini && \
-    echo 'autostart=true' >> /etc/supervisor.d/backend.ini && \
-    echo 'autorestart=true' >> /etc/supervisor.d/backend.ini && \
-    echo 'stdout_logfile=/dev/stdout' >> /etc/supervisor.d/backend.ini && \
-    echo 'stdout_logfile_maxbytes=0' >> /etc/supervisor.d/backend.ini && \
-    echo 'stderr_logfile=/dev/stderr' >> /etc/supervisor.d/backend.ini && \
-    echo 'stderr_logfile_maxbytes=0' >> /etc/supervisor.d/backend.ini
-
-EXPOSE 80
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost/api/health || exit 1
-
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+# 启动命令
+CMD ["/app/newapi-tools"]
