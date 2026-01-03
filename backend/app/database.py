@@ -34,16 +34,55 @@ class DBConfig:
 
     @classmethod
     def from_env(cls) -> "DBConfig":
-        """Create DBConfig from environment variables."""
+        """Create DBConfig from environment variables.
+
+        Supports two formats (SQL_DSN takes priority):
+        1. SQL_DSN connection string (compatible with NewAPI):
+           - PostgreSQL: postgresql://user:pass@host:port/dbname
+           - MySQL: user:pass@tcp(host:port)/dbname
+        2. Separate environment variables: DB_ENGINE, DB_DNS, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+        """
+        from urllib.parse import urlparse, unquote
+
+        sql_dsn = os.getenv("SQL_DSN", "").strip()
+
+        if sql_dsn:
+            # Parse SQL_DSN connection string
+            if sql_dsn.startswith(("postgresql://", "postgres://")):
+                # PostgreSQL format: postgresql://user:pass@host:port/dbname
+                parsed = urlparse(sql_dsn)
+                return cls(
+                    engine=DatabaseEngine.POSTGRESQL,
+                    host=parsed.hostname or "localhost",
+                    port=parsed.port or 5432,
+                    user=unquote(parsed.username or "root"),
+                    password=unquote(parsed.password or ""),
+                    database=parsed.path.lstrip("/") or "newapi",
+                )
+            else:
+                # MySQL format: user:pass@tcp(host[:port])/dbname
+                import re
+                match = re.match(r"([^:]+):([^@]*)@tcp\(([^:)]+)(?::(\d+))?\)/(.+)", sql_dsn)
+                if match:
+                    return cls(
+                        engine=DatabaseEngine.MYSQL,
+                        host=match.group(3),
+                        port=int(match.group(4)) if match.group(4) else 3306,
+                        user=match.group(1),
+                        password=match.group(2),
+                        database=match.group(5),
+                    )
+
+        # Fallback to separate environment variables
         engine_str = os.getenv("DB_ENGINE", "mysql").lower()
-        
+
         if engine_str in ("postgresql", "postgres", "pgsql"):
             engine = DatabaseEngine.POSTGRESQL
             default_port = 5432
         else:
             engine = DatabaseEngine.MYSQL
             default_port = 3306
-        
+
         return cls(
             engine=engine,
             host=os.getenv("DB_DNS", "localhost"),
@@ -55,18 +94,23 @@ class DBConfig:
 
     def get_connection_url(self) -> str:
         """Generate SQLAlchemy connection URL."""
+        from urllib.parse import quote_plus
+
         # 处理 IPv6 地址格式 - 需要用方括号包裹
         host = self.host
         if ':' in host and not host.startswith('['):
             # IPv6 地址需要用方括号包裹
             host = f'[{host}]'
-        
+
+        # URL encode password to handle special characters
+        encoded_password = quote_plus(self.password) if self.password else ""
+
         if self.engine == DatabaseEngine.POSTGRESQL:
-            return f"postgresql+psycopg2://{self.user}:{self.password}@{host}:{self.port}/{self.database}"
+            return f"postgresql+psycopg2://{self.user}:{encoded_password}@{host}:{self.port}/{self.database}"
         else:
             # MySQL 连接参数
             # charset=utf8mb4 支持完整 Unicode
-            return f"mysql+pymysql://{self.user}:{self.password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
+            return f"mysql+pymysql://{self.user}:{encoded_password}@{host}:{self.port}/{self.database}?charset=utf8mb4"
 
 
 # Recommended indexes for performance optimization
@@ -210,8 +254,8 @@ class DatabaseManager:
         return create_engine(
             connection_url,
             poolclass=QueuePool,
-            pool_size=3,  # Reduced: keep minimal connections
-            max_overflow=5,  # Reduced: limit max connections to 8 total
+            pool_size=1,  # Minimal: single persistent connection
+            max_overflow=2,  # Allow up to 3 total connections under load
             pool_timeout=30,
             pool_recycle=1800,  # Recycle connections after 30 minutes
             pool_pre_ping=True,  # Verify connection before use

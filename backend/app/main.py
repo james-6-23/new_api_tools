@@ -1931,12 +1931,12 @@ async def background_geoip_update():
             logger.system("[GeoIP] 开始检查数据库更新...")
             result = await update_all_geoip_databases(force=False)
             
-            if result["city"]["success"] or result["asn"]["success"]:
+            if result["country"]["success"] or result["asn"]["success"]:
                 logger.system(
-                    f"[GeoIP] 更新完成 - City: {result['city']['message']}, ASN: {result['asn']['message']}"
+                    f"[GeoIP] 更新完成 - Country: {result['country']['message']}, ASN: {result['asn']['message']}"
                 )
             else:
-                logger.debug(f"[GeoIP] 无需更新 - {result['city']['message']}, {result['asn']['message']}")
+                logger.debug(f"[GeoIP] 无需更新 - {result['country']['message']}, {result['asn']['message']}")
 
         except asyncio.CancelledError:
             logger.system("[GeoIP] 后台更新任务已取消")

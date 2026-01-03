@@ -1,0 +1,72 @@
+# Git 相关
+.git
+.gitignore
+.github
+
+# Node 模块
+node_modules
+frontend/node_modules
+backend/node_modules
+
+# 构建产物（会在 Docker 中重新构建）
+frontend/dist
+backend/dist
+backend-go/dist
+backend-go/frontend/dist
+dist
+
+# 日志和缓存
+*.log
+logs
+.cache
+.vite
+frontend/node_modules/.vite
+
+# 开发工具
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# 环境配置
+.env
+.env.local
+.env.*.local
+backend/.env
+backend-go/.env
+
+# 配置文件（运行时生成）
+.config
+backend-go/.config
+
+# 测试和覆盖率
+coverage
+*.coverprofile
+coverage.out
+coverage.html
+
+# 临时文件
+tmp
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Aider 历史文件
+.aider*
+
+# Snow 配置
+.snow
+
+# Lock 文件保留
+!bun.lock
+!pnpm-lock.yaml
+!package-lock.json
+!go.sum
+
+# 文档和脚本（不需要在镜像中）
+docs
+*.md
+deploy.sh
+install.sh
+index.html
