@@ -25,7 +25,7 @@ help:
 
 dev:
 	@echo "$(GREEN)🚀 启动前后端开发模式...$(NC)"
-	@cd frontend && pnpm dev &
+	@cd frontend && bun run dev &
 	@cd backend-go && $(MAKE) dev
 
 run: embed-frontend
@@ -36,7 +36,7 @@ build: embed-frontend
 
 embed-frontend:
 	@echo "$(GREEN)📦 构建前端...$(NC)"
-	@cd frontend && pnpm run build
+	@cd frontend && bun run build
 	@echo "$(GREEN)📋 嵌入前端到 Go 后端...$(NC)"
 	@rm -rf backend-go/frontend/dist
 	@mkdir -p backend-go/frontend/dist
@@ -47,10 +47,10 @@ clean:
 	@rm -rf frontend/dist
 
 frontend-dev:
-	@cd frontend && pnpm dev
+	@cd frontend && bun run dev
 
 frontend-build:
-	@cd frontend && pnpm run build
+	@cd frontend && bun run build
 
 docker-build:
 	@echo "$(GREEN)🐳 构建 Docker 镜像...$(NC)"
