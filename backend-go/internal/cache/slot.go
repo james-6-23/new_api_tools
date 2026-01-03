@@ -20,18 +20,18 @@ type SlotConfig struct {
 // 时间槽配置：只对 3d、7d、14d 使用增量缓存
 var slotConfigs = map[string]SlotConfig{
 	"3d": {
-		SlotSize:  6 * 3600,     // 6 小时一个槽
-		SlotCount: 12,           // 12 个槽
+		SlotSize:  6 * 3600,      // 6 小时一个槽
+		SlotCount: 12,            // 12 个槽
 		TTL:       7 * 24 * 3600, // 槽缓存 7 天过期
 	},
 	"7d": {
-		SlotSize:  12 * 3600,     // 12 小时一个槽
-		SlotCount: 14,            // 14 个槽
+		SlotSize:  12 * 3600,      // 12 小时一个槽
+		SlotCount: 14,             // 14 个槽
 		TTL:       14 * 24 * 3600, // 槽缓存 14 天过期
 	},
 	"14d": {
-		SlotSize:  24 * 3600,     // 24 小时一个槽
-		SlotCount: 14,            // 14 个槽
+		SlotSize:  24 * 3600,      // 24 小时一个槽
+		SlotCount: 14,             // 14 个槽
 		TTL:       21 * 24 * 3600, // 槽缓存 21 天过期
 	},
 }

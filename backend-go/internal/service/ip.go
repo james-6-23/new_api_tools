@@ -116,15 +116,16 @@ func (s *IPService) fetchIPStats() (*IPStats, error) {
 		Distinct("ip").
 		Count(&data.TotalUniqueIPs)
 
-	// 今日唯一 IP 数
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	// 今日唯一 IP 数（Unix 时间戳）
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	db.Model(&models.Log{}).
-		Where("created_at >= ?", today).
+		Where("created_at >= ?", todayStart).
 		Distinct("ip").
 		Count(&data.TodayUniqueIPs)
 
 	// 最近一小时唯一 IP 数
-	hourAgo := time.Now().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+	hourAgo := now.Add(-1 * time.Hour).Unix()
 	db.Model(&models.Log{}).
 		Where("created_at >= ?", hourAgo).
 		Distinct("ip").
@@ -137,7 +138,7 @@ func (s *IPService) fetchIPStats() (*IPStats, error) {
 	}
 	db.Model(&models.Log{}).
 		Select("ip, COUNT(*) as count").
-		Where("created_at >= ?", today).
+		Where("created_at >= ?", todayStart).
 		Group("ip").
 		Order("count DESC").
 		Limit(100).
@@ -205,7 +206,7 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 		IP        string
 		UserCount int
 		TotalReqs int64
-		LastAt    time.Time
+		LastAt    int64
 	}
 
 	db.Model(&models.Log{}).
@@ -248,7 +249,7 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 			Users:      userList,
 			GeoInfo:    geoip.Lookup(r.IP),
 			TotalReqs:  r.TotalReqs,
-			LastActive: r.LastAt.Format("2006-01-02 15:04:05"),
+			LastActive: time.Unix(r.LastAt, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -338,7 +339,8 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 		limit = 50
 	}
 
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	// 查找今日使用多个 IP 的用户
 	var results []struct {
@@ -356,7 +358,7 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 			COUNT(*) as requests
 		`).
 		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.created_at >= ?", today).
+		Where("logs.created_at >= ?", todayStart).
 		Group("logs.user_id, users.username").
 		Having("ip_count >= ?", minIPs).
 		Order("ip_count DESC").
@@ -368,7 +370,7 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 		// 获取该用户使用的 IP 列表
 		var ips []string
 		db.Model(&models.Log{}).
-			Where("user_id = ? AND created_at >= ?", r.UserID, today).
+			Where("user_id = ? AND created_at >= ?", r.UserID, todayStart).
 			Distinct("ip").
 			Limit(30).
 			Pluck("ip", &ips)
@@ -454,7 +456,7 @@ func (s *IPService) GetIPAccessHistory(ip string, limit int) ([]map[string]inter
 		TokenName string
 		Model     string
 		Quota     int64
-		CreatedAt time.Time
+		CreatedAt int64
 	}
 
 	db.Table("logs").
@@ -463,7 +465,7 @@ func (s *IPService) GetIPAccessHistory(ip string, limit int) ([]map[string]inter
 			users.username,
 			logs.token_id,
 			tokens.name as token_name,
-			logs.model,
+			logs.model_name as model,
 			logs.quota,
 			logs.created_at
 		`).
@@ -483,7 +485,7 @@ func (s *IPService) GetIPAccessHistory(ip string, limit int) ([]map[string]inter
 			"token_name": r.TokenName,
 			"model":      r.Model,
 			"quota":      r.Quota,
-			"created_at": r.CreatedAt.Format("2006-01-02 15:04:05"),
+			"created_at": time.Unix(r.CreatedAt, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -498,7 +500,7 @@ func (s *IPService) GetSuspiciousIPs(limit int) ([]map[string]interface{}, error
 		limit = 50
 	}
 
-	hourAgo := time.Now().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+	hourAgo := time.Now().Add(-1 * time.Hour).Unix()
 
 	// 查找过去一小时内高频请求的 IP
 	var results []struct {

@@ -52,21 +52,22 @@ func (Token) TableName() string {
 }
 
 // Log NewAPI 日志表
+// 注意：logs 表的 created_at 字段在数据库中是 bigint (Unix 时间戳)
 type Log struct {
-	ID               int       `gorm:"column:id;primaryKey" json:"id"`
-	UserID           int       `gorm:"column:user_id" json:"user_id"`
-	CreatedAt        time.Time `gorm:"column:created_at" json:"created_at"`
-	Type             int       `gorm:"column:type" json:"type"`
-	Content          string    `gorm:"column:content" json:"content"`
-	Username         string    `gorm:"column:username" json:"username"`
-	TokenID          int       `gorm:"column:token_id" json:"token_id"`
-	TokenName        string    `gorm:"column:token_name" json:"token_name"`
-	ModelName        string    `gorm:"column:model_name" json:"model_name"`
-	Quota            int       `gorm:"column:quota" json:"quota"`
-	PromptTokens     int       `gorm:"column:prompt_tokens" json:"prompt_tokens"`
-	CompletionTokens int       `gorm:"column:completion_tokens" json:"completion_tokens"`
-	IP               string    `gorm:"column:ip" json:"ip"`
-	ChannelID        int       `gorm:"column:channel_id" json:"channel_id"`
+	ID               int    `gorm:"column:id;primaryKey" json:"id"`
+	UserID           int    `gorm:"column:user_id" json:"user_id"`
+	CreatedAt        int64  `gorm:"column:created_at" json:"created_at"`
+	Type             int    `gorm:"column:type" json:"type"`
+	Content          string `gorm:"column:content" json:"content"`
+	Username         string `gorm:"column:username" json:"username"`
+	TokenID          int    `gorm:"column:token_id" json:"token_id"`
+	TokenName        string `gorm:"column:token_name" json:"token_name"`
+	ModelName        string `gorm:"column:model_name" json:"model_name"`
+	Quota            int    `gorm:"column:quota" json:"quota"`
+	PromptTokens     int    `gorm:"column:prompt_tokens" json:"prompt_tokens"`
+	CompletionTokens int    `gorm:"column:completion_tokens" json:"completion_tokens"`
+	IP               string `gorm:"column:ip" json:"ip"`
+	ChannelID        int    `gorm:"column:channel_id" json:"channel_id"`
 }
 
 func (Log) TableName() string {

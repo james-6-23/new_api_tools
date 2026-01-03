@@ -140,8 +140,8 @@ func (s *SystemService) collectMetrics() *ScaleMetrics {
 	metrics := &ScaleMetrics{}
 
 	now := time.Now()
-	start24h := now.Add(-24 * time.Hour).Format("2006-01-02 15:04:05")
-	start1h := now.Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+	start24h := now.Add(-24 * time.Hour).Unix()
+	start1h := now.Add(-1 * time.Hour).Unix()
 
 	// 总用户数
 	db.Model(&models.User{}).Where("deleted_at IS NULL").Count(&metrics.TotalUsers)
@@ -301,8 +301,9 @@ func (s *SystemService) fetchSystemScale() (*SystemScale, error) {
 
 	// 日志统计
 	db.Model(&models.Log{}).Count(&scale.TotalLogs)
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
-	db.Model(&models.Log{}).Where("created_at >= ?", today).Count(&scale.TodayLogs)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	db.Model(&models.Log{}).Where("created_at >= ?", todayStart).Count(&scale.TodayLogs)
 
 	// 充值和兑换码统计
 	db.Model(&models.TopUp{}).Count(&scale.TotalTopUps)

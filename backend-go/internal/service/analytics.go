@@ -163,7 +163,7 @@ func (s *AnalyticsService) fetchUserRequestRanking(period string, limit int) ([]
 		UserID       int
 		Username     string
 		RequestCount int64
-		LastRequest  time.Time
+		LastRequest  int64
 	}
 
 	db.Table("logs").
@@ -190,7 +190,7 @@ func (s *AnalyticsService) fetchUserRequestRanking(period string, limit int) ([]
 			SuccessCount: r.RequestCount, // 假设全部成功
 			FailCount:    0,
 			SuccessRate:  100.0,
-			LastRequest:  r.LastRequest.Format("2006-01-02 15:04:05"),
+			LastRequest:  time.Unix(r.LastRequest, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -297,7 +297,7 @@ func (s *AnalyticsService) fetchModelStats(period string, limit int) ([]ModelSta
 		TotalQuota   int64
 		AvgQuota     float64
 		UserCount    int64
-		LastUsed     time.Time
+		LastUsed     int64
 	}
 
 	db.Table("logs").
@@ -324,7 +324,7 @@ func (s *AnalyticsService) fetchModelStats(period string, limit int) ([]ModelSta
 			AvgQuota:     r.AvgQuota,
 			SuccessRate:  100.0, // 假设全部成功
 			UserCount:    r.UserCount,
-			LastUsed:     r.LastUsed.Format("2006-01-02 15:04:05"),
+			LastUsed:     time.Unix(r.LastUsed, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -390,14 +390,21 @@ func (s *AnalyticsService) fetchSummary(period string) (*AnalyticsSummary, error
 	}
 
 	// 高峰时段
+	// 注意：created_at 是 bigint (Unix 时间戳)
 	var peakResult struct {
 		Hour     int
 		Requests int64
 	}
+	var hourFormat string
+	if database.GetMainDB().Dialector.Name() == "postgres" {
+		hourFormat = "EXTRACT(HOUR FROM TO_TIMESTAMP(created_at))"
+	} else {
+		hourFormat = "HOUR(FROM_UNIXTIME(created_at))"
+	}
 	db.Table("logs").
-		Select("HOUR(created_at) as hour, COUNT(*) as requests").
+		Select(hourFormat+" as hour, COUNT(*) as requests").
 		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
-		Group("HOUR(created_at)").
+		Group(hourFormat).
 		Order("requests DESC").
 		Limit(1).
 		Scan(&peakResult)
@@ -435,21 +442,21 @@ func (s *AnalyticsService) Reset() error {
 	return nil
 }
 
-// getStartTime 根据周期获取开始时间
-func (s *AnalyticsService) getStartTime(period string) string {
+// getStartTime 根据周期获取开始时间（Unix 时间戳）
+func (s *AnalyticsService) getStartTime(period string) int64 {
 	now := time.Now()
 	switch period {
 	case "hour":
-		return now.Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+		return now.Add(-1 * time.Hour).Unix()
 	case "today":
-		return now.Format("2006-01-02") + " 00:00:00"
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	case "week":
-		return now.AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		return now.AddDate(0, 0, -7).Unix()
 	case "month":
-		return now.AddDate(0, -1, 0).Format("2006-01-02 15:04:05")
+		return now.AddDate(0, -1, 0).Unix()
 	case "year":
-		return now.AddDate(-1, 0, 0).Format("2006-01-02 15:04:05")
+		return now.AddDate(-1, 0, 0).Unix()
 	default:
-		return now.Format("2006-01-02") + " 00:00:00"
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	}
 }

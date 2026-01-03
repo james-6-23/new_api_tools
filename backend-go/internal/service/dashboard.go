@@ -74,8 +74,8 @@ func (s *DashboardService) fetchOverviewData() (*OverviewData, error) {
 	db.Model(&models.Channel{}).Where("deleted_at IS NULL AND status = ?", models.ChannelStatusEnabled).Count(&data.ActiveChannels)
 
 	// 今日请求数和额度消耗
-	today := time.Now().Format("2006-01-02")
-	todayStart := today + " 00:00:00"
+	// 注意：数据库中 created_at 是 bigint (Unix 时间戳)
+	todayStart := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location()).Unix()
 
 	db.Model(&models.Log{}).
 		Where("created_at >= ? AND type = ?", todayStart, models.LogTypeConsume).
@@ -137,17 +137,18 @@ func (s *DashboardService) fetchUsageData(period string) (*UsageData, error) {
 	db := database.GetMainDB()
 	data := &UsageData{Period: period}
 
-	// 计算时间范围
-	var startTime string
+	// 计算时间范围（Unix 时间戳）
+	now := time.Now()
+	var startTime int64
 	switch period {
 	case "today":
-		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	case "week":
-		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		startTime = now.AddDate(0, 0, -7).Unix()
 	case "month":
-		startTime = time.Now().AddDate(0, -1, 0).Format("2006-01-02 15:04:05")
+		startTime = now.AddDate(0, -1, 0).Unix()
 	default:
-		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	}
 
 	// 总请求数
@@ -210,8 +211,9 @@ func (s *DashboardService) GetModelUsage(limit int) ([]ModelUsage, error) {
 func (s *DashboardService) fetchModelUsage(limit int) ([]ModelUsage, error) {
 	db := database.GetMainDB()
 
-	// 获取今日数据
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	// 获取今日数据（Unix 时间戳）
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	var results []struct {
 		ModelName string
@@ -221,7 +223,7 @@ func (s *DashboardService) fetchModelUsage(limit int) ([]ModelUsage, error) {
 
 	err := db.Model(&models.Log{}).
 		Select("model_name, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota").
-		Where("created_at >= ? AND type = ? AND model_name != ''", today, models.LogTypeConsume).
+		Where("created_at >= ? AND type = ? AND model_name != ''", todayStart, models.LogTypeConsume).
 		Group("model_name").
 		Order("requests DESC").
 		Limit(limit).
@@ -282,7 +284,7 @@ func (s *DashboardService) GetDailyTrends(days int) ([]TrendData, error) {
 func (s *DashboardService) fetchDailyTrends(days int) ([]TrendData, error) {
 	db := database.GetMainDB()
 
-	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	startTime := time.Now().AddDate(0, 0, -days).Unix()
 
 	var results []struct {
 		Date     string
@@ -292,14 +294,18 @@ func (s *DashboardService) fetchDailyTrends(days int) ([]TrendData, error) {
 	}
 
 	// 根据数据库类型使用不同的日期格式化函数
-	dateFormat := "DATE(created_at)"
+	// 注意：created_at 是 bigint (Unix 时间戳)
+	var dateFormat string
 	if database.GetMainDB().Dialector.Name() == "postgres" {
-		dateFormat = "DATE(created_at)"
+		dateFormat = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+	} else {
+		// MySQL
+		dateFormat = "DATE(FROM_UNIXTIME(created_at))"
 	}
 
 	err := db.Model(&models.Log{}).
 		Select(fmt.Sprintf("%s as date, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota, COUNT(DISTINCT user_id) as users", dateFormat)).
-		Where("created_at >= ? AND type = ?", startDate, models.LogTypeConsume).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
 		Group("date").
 		Order("date ASC").
 		Scan(&results).Error
@@ -352,8 +358,9 @@ func (s *DashboardService) GetTopUsers(limit int, orderBy string) ([]TopUser, er
 func (s *DashboardService) fetchTopUsers(limit int, orderBy string) ([]TopUser, error) {
 	db := database.GetMainDB()
 
-	// 获取今日数据
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	// 获取今日数据（Unix 时间戳）
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	orderClause := "requests DESC"
 	if orderBy == "quota" {
@@ -365,13 +372,13 @@ func (s *DashboardService) fetchTopUsers(limit int, orderBy string) ([]TopUser, 
 		Username    string
 		Requests    int64
 		Quota       int64
-		LastRequest time.Time
+		LastRequest int64
 	}
 
 	err := db.Table("logs").
 		Select("logs.user_id, users.username, COUNT(*) as requests, COALESCE(SUM(logs.quota), 0) as quota, MAX(logs.created_at) as last_request").
 		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.created_at >= ? AND logs.type = ?", today, models.LogTypeConsume).
+		Where("logs.created_at >= ? AND logs.type = ?", todayStart, models.LogTypeConsume).
 		Group("logs.user_id, users.username").
 		Order(orderClause).
 		Limit(limit).
@@ -389,7 +396,7 @@ func (s *DashboardService) fetchTopUsers(limit int, orderBy string) ([]TopUser, 
 			Username:    r.Username,
 			Requests:    r.Requests,
 			Quota:       r.Quota,
-			LastRequest: r.LastRequest.Format("2006-01-02 15:04:05"),
+			LastRequest: time.Unix(r.LastRequest, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -448,15 +455,17 @@ func (s *DashboardService) fetchHourlyTrends(hours int) ([]HourlyTrendData, erro
 		hourTimestamps[hours-1-i] = currentHour.Add(-time.Duration(i) * time.Hour).Unix()
 	}
 
-	startTime := time.Unix(hourTimestamps[0], 0).Format("2006-01-02 15:04:05")
+	startTime := hourTimestamps[0]
 
 	// 根据数据库类型使用不同的小时格式化
+	// 注意：created_at 是 bigint (Unix 时间戳)
 	var hourFormat string
 	if database.GetMainDB().Dialector.Name() == "postgres" {
-		hourFormat = "EXTRACT(EPOCH FROM DATE_TRUNC('hour', created_at))::bigint"
+		// 将 Unix 时间戳向下取整到小时
+		hourFormat = "(created_at / 3600) * 3600"
 	} else {
 		// MySQL
-		hourFormat = "UNIX_TIMESTAMP(DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00'))"
+		hourFormat = "UNIX_TIMESTAMP(DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:00:00'))"
 	}
 
 	var results []struct {
@@ -530,7 +539,8 @@ func (s *DashboardService) fetchChannelStatus() ([]ChannelStatus, error) {
 	db := database.GetMainDB()
 
 	var channels []models.Channel
-	err := db.Where("deleted_at IS NULL").Order("id ASC").Find(&channels).Error
+	// 注意：channels 表可能没有 deleted_at 字段，直接查询所有渠道
+	err := db.Order("id ASC").Find(&channels).Error
 	if err != nil {
 		return nil, err
 	}

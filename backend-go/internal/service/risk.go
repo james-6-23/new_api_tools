@@ -97,19 +97,20 @@ func (s *RiskService) fetchLeaderboards(period string, limit int) (*LeaderboardD
 	db := database.GetMainDB()
 	data := &LeaderboardData{Period: period}
 
-	// 计算时间范围
-	var startTime string
+	// 计算时间范围（Unix 时间戳）
+	now := time.Now()
+	var startTime int64
 	switch period {
 	case "hour":
-		startTime = time.Now().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+		startTime = now.Add(-1 * time.Hour).Unix()
 	case "today":
-		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	case "week":
-		startTime = time.Now().AddDate(0, 0, -7).Format("2006-01-02 15:04:05")
+		startTime = now.AddDate(0, 0, -7).Unix()
 	case "month":
-		startTime = time.Now().AddDate(0, -1, 0).Format("2006-01-02 15:04:05")
+		startTime = now.AddDate(0, -1, 0).Unix()
 	default:
-		startTime = time.Now().Format("2006-01-02") + " 00:00:00"
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	}
 
 	// 按请求数排行
@@ -125,7 +126,7 @@ func (s *RiskService) fetchLeaderboards(period string, limit int) (*LeaderboardD
 }
 
 // getLeaderboardByMetric 按指标获取排行榜
-func (s *RiskService) getLeaderboardByMetric(db interface{}, startTime string, metric string, limit int) []LeaderboardUser {
+func (s *RiskService) getLeaderboardByMetric(db interface{}, startTime int64, metric string, limit int) []LeaderboardUser {
 	gormDB := database.GetMainDB()
 
 	orderClause := "requests DESC"
@@ -142,7 +143,7 @@ func (s *RiskService) getLeaderboardByMetric(db interface{}, startTime string, m
 		Requests int64
 		Quota    int64
 		AvgQuota float64
-		LastAt   time.Time
+		LastAt   int64
 	}
 
 	gormDB.Table("logs").
@@ -170,7 +171,7 @@ func (s *RiskService) getLeaderboardByMetric(db interface{}, startTime string, m
 			Requests:     r.Requests,
 			Quota:        r.Quota,
 			AvgQuota:     r.AvgQuota,
-			LastActivity: r.LastAt.Format("2006-01-02 15:04:05"),
+			LastActivity: time.Unix(r.LastAt, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -199,11 +200,12 @@ func (s *RiskService) GetUserRiskAnalysis(userID int) (*UserRiskAnalysis, error)
 	// 计算风险分数
 	riskScore := 0.0
 
-	// 1. 请求频率分析
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	// 1. 请求频率分析（Unix 时间戳）
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 	var todayRequests int64
 	db.Model(&models.Log{}).
-		Where("user_id = ? AND created_at >= ? AND type = ?", userID, today, models.LogTypeConsume).
+		Where("user_id = ? AND created_at >= ? AND type = ?", userID, todayStart, models.LogTypeConsume).
 		Count(&todayRequests)
 
 	analysis.RequestPattern["today_requests"] = todayRequests
@@ -232,7 +234,7 @@ func (s *RiskService) GetUserRiskAnalysis(userID int) (*UserRiskAnalysis, error)
 	// 3. IP 行为分析
 	var uniqueIPs int64
 	db.Model(&models.Log{}).
-		Where("user_id = ? AND created_at >= ?", userID, today).
+		Where("user_id = ? AND created_at >= ?", userID, todayStart).
 		Distinct("ip").
 		Count(&uniqueIPs)
 
@@ -311,8 +313,8 @@ func (s *RiskService) GetBanRecords(page, pageSize int) ([]BanRecord, int64, err
 func (s *RiskService) GetTokenRotation(limit int) ([]TokenRotation, error) {
 	db := database.GetMainDB()
 
-	// 获取24小时内令牌变动较大的用户
-	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02 15:04:05")
+	// 获取24小时内令牌变动较大的用户（Unix 时间戳）
+	yesterday := time.Now().Add(-24 * time.Hour).Unix()
 
 	var results []struct {
 		UserID     int

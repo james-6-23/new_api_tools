@@ -146,7 +146,8 @@ func (s *AIBanService) TestModel() (map[string]interface{}, error) {
 // GetSuspiciousUsers 获取可疑用户列表
 func (s *AIBanService) GetSuspiciousUsers(limit int) ([]SuspiciousUser, error) {
 	db := database.GetMainDB()
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	// 查询今日活跃用户的风险指标
 	var results []struct {
@@ -156,7 +157,7 @@ func (s *AIBanService) GetSuspiciousUsers(limit int) ([]SuspiciousUser, error) {
 		UniqueIPs    int64
 		Quota        int64
 		UsedQuota    int64
-		LastActivity time.Time
+		LastActivity int64
 	}
 
 	db.Table("logs").
@@ -170,7 +171,7 @@ func (s *AIBanService) GetSuspiciousUsers(limit int) ([]SuspiciousUser, error) {
 			MAX(logs.created_at) as last_activity
 		`).
 		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.created_at >= ? AND logs.type = ?", today, models.LogTypeConsume).
+		Where("logs.created_at >= ? AND logs.type = ?", todayStart, models.LogTypeConsume).
 		Group("logs.user_id, users.username, users.quota, users.used_quota").
 		Having("requests > 1000 OR unique_ips > 20").
 		Order("requests DESC").
@@ -223,7 +224,7 @@ func (s *AIBanService) GetSuspiciousUsers(limit int) ([]SuspiciousUser, error) {
 			UniqueIPs:    int(r.UniqueIPs),
 			TokenCount:   tokenCounts[r.UserID],
 			QuotaUsage:   quotaUsage,
-			LastActivity: r.LastActivity.Format("2006-01-02 15:04:05"),
+			LastActivity: time.Unix(r.LastActivity, 0).Format("2006-01-02 15:04:05"),
 		}
 		user.Recommendation = s.getRecommendation(riskScore)
 		users = append(users, user)
@@ -242,18 +243,19 @@ func (s *AIBanService) AssessUserRisk(userID int) (*RiskAssessment, error) {
 		return nil, fmt.Errorf("用户不存在")
 	}
 
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	// 获取今日请求数
 	var todayRequests int64
 	db.Model(&models.Log{}).
-		Where("user_id = ? AND created_at >= ? AND type = ?", userID, today, models.LogTypeConsume).
+		Where("user_id = ? AND created_at >= ? AND type = ?", userID, todayStart, models.LogTypeConsume).
 		Count(&todayRequests)
 
 	// 获取唯一 IP 数
 	var uniqueIPs int64
 	db.Model(&models.Log{}).
-		Where("user_id = ? AND created_at >= ?", userID, today).
+		Where("user_id = ? AND created_at >= ?", userID, todayStart).
 		Distinct("ip").
 		Count(&uniqueIPs)
 

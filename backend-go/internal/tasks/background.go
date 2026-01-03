@@ -178,9 +178,9 @@ func (s *AnalyticsService) GetState() (*AnalyticsState, error) {
 	db := database.GetLocalDB()
 
 	var state struct {
-		LastProcessedID  int64
-		LastProcessedAt  *time.Time
-		TotalProcessed   int64
+		LastProcessedID int64
+		LastProcessedAt *time.Time
+		TotalProcessed  int64
 	}
 
 	err := db.Raw(`
@@ -194,8 +194,13 @@ func (s *AnalyticsService) GetState() (*AnalyticsState, error) {
 	}
 
 	return &AnalyticsState{
-		LastProcessedID:  state.LastProcessedID,
-		LastProcessedAt:  func() time.Time { if state.LastProcessedAt != nil { return *state.LastProcessedAt }; return time.Time{} }(),
+		LastProcessedID: state.LastProcessedID,
+		LastProcessedAt: func() time.Time {
+			if state.LastProcessedAt != nil {
+				return *state.LastProcessedAt
+			}
+			return time.Time{}
+		}(),
 		TotalProcessed:   state.TotalProcessed,
 		NeedsInitialSync: state.LastProcessedID == 0,
 	}, nil

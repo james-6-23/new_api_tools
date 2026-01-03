@@ -31,10 +31,10 @@ type Task struct {
 
 // TaskStatus 任务状态
 type TaskStatus struct {
-	Name     string    `json:"name"`
-	Running  bool      `json:"running"`
-	LastRun  time.Time `json:"last_run"`
-	LastErr  string    `json:"last_error,omitempty"`
+	Name    string    `json:"name"`
+	Running bool      `json:"running"`
+	LastRun time.Time `json:"last_run"`
+	LastErr string    `json:"last_error,omitempty"`
 }
 
 var (

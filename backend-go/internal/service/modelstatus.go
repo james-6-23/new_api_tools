@@ -104,7 +104,7 @@ func (s *ModelStatusService) fetchAvailableModels() ([]AvailableModel, error) {
 	var results []struct {
 		ModelName    string
 		RequestCount int64
-		LastUsed     time.Time
+		LastUsed     int64
 	}
 
 	db.Table("logs").
@@ -123,7 +123,7 @@ func (s *ModelStatusService) fetchAvailableModels() ([]AvailableModel, error) {
 			Type:         s.guessModelType(r.ModelName),
 			IsEnabled:    true,
 			RequestCount: r.RequestCount,
-			LastUsed:     r.LastUsed.Format("2006-01-02 15:04:05"),
+			LastUsed:     time.Unix(r.LastUsed, 0).Format("2006-01-02 15:04:05"),
 		}
 	}
 
@@ -151,13 +151,14 @@ func (s *ModelStatusService) GetModelStatus(modelName string) (*ModelStatus, err
 func (s *ModelStatusService) fetchModelStatus(modelName string) (*ModelStatus, error) {
 	db := database.GetMainDB()
 
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
 	status := &ModelStatus{
 		ModelName:   modelName,
 		IsAvailable: true,
 		Status:      "healthy",
-		CheckedAt:   time.Now().Format("2006-01-02 15:04:05"),
+		CheckedAt:   now.Format("2006-01-02 15:04:05"),
 	}
 
 	// 获取今日请求统计
@@ -168,7 +169,7 @@ func (s *ModelStatusService) fetchModelStatus(modelName string) (*ModelStatus, e
 
 	db.Table("logs").
 		Select("COUNT(*) as request_count, SUM(CASE WHEN quota = 0 THEN 1 ELSE 0 END) as error_count").
-		Where("model_name = ? AND created_at >= ? AND type = ?", modelName, today, models.LogTypeConsume).
+		Where("model_name = ? AND created_at >= ? AND type = ?", modelName, todayStart, models.LogTypeConsume).
 		Scan(&stats)
 
 	status.RequestCount = stats.RequestCount
@@ -181,10 +182,10 @@ func (s *ModelStatusService) fetchModelStatus(modelName string) (*ModelStatus, e
 	}
 
 	// 获取渠道统计
-	status.ChannelStats = s.getChannelStats(modelName, today)
+	status.ChannelStats = s.getChannelStats(modelName, todayStart)
 
 	// 获取每小时统计
-	status.HourlyStats = s.getHourlyStats(modelName, today)
+	status.HourlyStats = s.getHourlyStats(modelName, todayStart)
 
 	// 判断状态
 	if status.SuccessRate < 50 {
@@ -198,7 +199,7 @@ func (s *ModelStatusService) fetchModelStatus(modelName string) (*ModelStatus, e
 }
 
 // getChannelStats 获取渠道统计
-func (s *ModelStatusService) getChannelStats(modelName string, startTime string) []ChannelModelStat {
+func (s *ModelStatusService) getChannelStats(modelName string, startTime int64) []ChannelModelStat {
 	db := database.GetMainDB()
 
 	var results []struct {
@@ -231,7 +232,7 @@ func (s *ModelStatusService) getChannelStats(modelName string, startTime string)
 }
 
 // getHourlyStats 获取每小时统计
-func (s *ModelStatusService) getHourlyStats(modelName string, startTime string) []HourlyModelStat {
+func (s *ModelStatusService) getHourlyStats(modelName string, startTime int64) []HourlyModelStat {
 	db := database.GetMainDB()
 
 	var results []struct {
@@ -239,10 +240,18 @@ func (s *ModelStatusService) getHourlyStats(modelName string, startTime string) 
 		RequestCount int64
 	}
 
+	// 根据数据库类型使用不同的小时格式化
+	var hourFormat string
+	if database.GetMainDB().Dialector.Name() == "postgres" {
+		hourFormat = "EXTRACT(HOUR FROM TO_TIMESTAMP(created_at))"
+	} else {
+		hourFormat = "HOUR(FROM_UNIXTIME(created_at))"
+	}
+
 	db.Table("logs").
-		Select("HOUR(created_at) as hour, COUNT(*) as request_count").
+		Select(hourFormat+" as hour, COUNT(*) as request_count").
 		Where("model_name = ? AND created_at >= ? AND type = ?", modelName, startTime, models.LogTypeConsume).
-		Group("HOUR(created_at)").
+		Group(hourFormat).
 		Order("hour").
 		Scan(&results)
 

@@ -372,16 +372,16 @@ func GetWarmupStatusHandler(c *gin.Context) {
 
 	// 合并状态
 	data := gin.H{
-		"is_warmed_up":     warmupStatus.Completed,
-		"warmup_progress":  warmupStatus.Progress,
-		"warmup_total":     warmupStatus.Total,
-		"warmup_phase":     warmupStatus.Phase,
-		"current_task":     warmupStatus.CurrentTask,
-		"started_at":       warmupStatus.StartTime.Format("2006-01-02 15:04:05"),
-		"cache_stats":      sysStatus.CacheStats,
-		"database_stats":   sysStatus.DatabaseStats,
-		"memory_stats":     sysStatus.MemoryStats,
-		"task_manager":     tasks.GetManager().GetStatus(),
+		"is_warmed_up":    warmupStatus.Completed,
+		"warmup_progress": warmupStatus.Progress,
+		"warmup_total":    warmupStatus.Total,
+		"warmup_phase":    warmupStatus.Phase,
+		"current_task":    warmupStatus.CurrentTask,
+		"started_at":      warmupStatus.StartTime.Format("2006-01-02 15:04:05"),
+		"cache_stats":     sysStatus.CacheStats,
+		"database_stats":  sysStatus.DatabaseStats,
+		"memory_stats":    sysStatus.MemoryStats,
+		"task_manager":    tasks.GetManager().GetStatus(),
 	}
 
 	Success(c, data)

@@ -47,14 +47,14 @@ var domesticCountryCodes = map[string]bool{
 
 // IPDistributionResult IP 分布统计结果
 type IPDistributionResult struct {
-	TotalIPs            int                   `json:"total_ips"`
-	TotalRequests       int64                 `json:"total_requests"`
-	DomesticPercentage  float64               `json:"domestic_percentage"`
-	OverseasPercentage  float64               `json:"overseas_percentage"`
-	ByCountry           []CountryDistribution `json:"by_country"`
-	ByProvince          []ProvinceDistribution `json:"by_province"`
-	TopCities           []CityDistribution    `json:"top_cities"`
-	SnapshotTime        int64                 `json:"snapshot_time"`
+	TotalIPs           int                    `json:"total_ips"`
+	TotalRequests      int64                  `json:"total_requests"`
+	DomesticPercentage float64                `json:"domestic_percentage"`
+	OverseasPercentage float64                `json:"overseas_percentage"`
+	ByCountry          []CountryDistribution  `json:"by_country"`
+	ByProvince         []ProvinceDistribution `json:"by_province"`
+	TopCities          []CityDistribution     `json:"top_cities"`
+	SnapshotTime       int64                  `json:"snapshot_time"`
 }
 
 // CountryDistribution 国家分布
@@ -161,9 +161,6 @@ func (s *IPDistributionService) fetchDistribution(window string) (*IPDistributio
 func (s *IPDistributionService) queryIPStats(startTime int64) (map[string]*ipStats, error) {
 	db := database.GetMainDB()
 
-	// 将时间戳转换为时间字符串
-	startTimeStr := time.Unix(startTime, 0).Format("2006-01-02 15:04:05")
-
 	var results []struct {
 		IP           string
 		RequestCount int64
@@ -171,9 +168,10 @@ func (s *IPDistributionService) queryIPStats(startTime int64) (map[string]*ipSta
 	}
 
 	// 查询 IP 统计，限制最多 3000 个 IP
+	// 注意：数据库中 created_at 是 bigint (Unix 时间戳)
 	err := db.Model(&models.Log{}).
 		Select("ip, COUNT(*) as request_count, COUNT(DISTINCT user_id) as user_count").
-		Where("created_at >= ? AND ip != '' AND ip IS NOT NULL AND type = ?", startTimeStr, models.LogTypeConsume).
+		Where("created_at >= ? AND ip != '' AND ip IS NOT NULL AND type = ?", startTime, models.LogTypeConsume).
 		Group("ip").
 		Order("request_count DESC").
 		Limit(3000).
