@@ -31,6 +31,7 @@ type UserRecord struct {
 	TokenCount   int    `json:"token_count"`
 	InviterID    int    `json:"inviter_id"`
 	InviterName  string `json:"inviter_name"`
+	LinuxDoID    string `json:"linux_do_id"`
 	CreatedAt    string `json:"created_at"`
 	LastLoginAt  string `json:"last_login_at"`
 }
@@ -54,6 +55,7 @@ type UserQuery struct {
 	PageSize  int    `form:"page_size"`
 	Username  string `form:"username"`
 	Email     string `form:"email"`
+	Search    string `form:"search"` // 通用搜索：支持用户名、邮箱、linux_do_id、aff_code
 	Role      int    `form:"role"`
 	Status    int    `form:"status"`
 	InviterID int    `form:"inviter_id"`
@@ -95,6 +97,12 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 	}
 	if query.Email != "" {
 		tx = tx.Where("u.email LIKE ?", "%"+query.Email+"%")
+	}
+	// 通用搜索：支持用户名、显示名、邮箱、linux_do_id、aff_code
+	if query.Search != "" {
+		searchPattern := "%" + query.Search + "%"
+		tx = tx.Where("(u.username LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.email, '') LIKE ? OR COALESCE(u.linux_do_id, '') LIKE ? OR COALESCE(u.aff_code, '') LIKE ?)",
+			searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 	if query.Role > 0 {
 		tx = tx.Where("u.role = ?", query.Role)
@@ -181,6 +189,7 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 			TokenCount:   tokenCounts[r.ID],
 			InviterID:    r.InviterID,
 			InviterName:  r.InviterName,
+			LinuxDoID:    r.LinuxDoID,
 		}
 		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
 	}
@@ -385,14 +394,104 @@ func (s *UserService) DisableUserToken(tokenID int) error {
 	return nil
 }
 
-// GetInvitedUsers 获取被邀请用户列表
-func (s *UserService) GetInvitedUsers(inviterID int, page, pageSize int) (*UserListResult, error) {
-	query := &UserQuery{
-		Page:      page,
-		PageSize:  pageSize,
-		InviterID: inviterID,
+// GetInvitedUsers 获取被邀请用户列表（增强版，与 Python 版本一致）
+func (s *UserService) GetInvitedUsers(inviterID int, page, pageSize int) (map[string]interface{}, error) {
+	db := database.GetMainDB()
+
+	// 默认分页
+	if page <= 0 {
+		page = 1
 	}
-	return s.GetUsers(query)
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	// 1. 获取邀请人信息
+	var inviter models.User
+	if err := db.Where("id = ? AND deleted_at IS NULL", inviterID).First(&inviter).Error; err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": "用户不存在",
+			"inviter": nil,
+			"items":   []interface{}{},
+			"total":   0,
+		}, nil
+	}
+
+	inviterInfo := map[string]interface{}{
+		"user_id":      inviter.ID,
+		"username":     inviter.Username,
+		"display_name": inviter.DisplayName,
+		"aff_code":     inviter.AffCode,
+		"aff_count":    inviter.AffCount,
+		"aff_quota":    inviter.AffQuota,
+		"aff_history":  inviter.AffHistory,
+	}
+
+	// 2. 查询被邀请用户总数
+	var total int64
+	db.Model(&models.User{}).
+		Where("inviter_id = ? AND deleted_at IS NULL", inviterID).
+		Count(&total)
+
+	// 3. 查询被邀请用户列表
+	offset := (page - 1) * pageSize
+	var invitedUsers []models.User
+	db.Where("inviter_id = ? AND deleted_at IS NULL", inviterID).
+		Order("id DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&invitedUsers)
+
+	// 4. 转换为返回格式
+	items := make([]map[string]interface{}, len(invitedUsers))
+	var activeCount, bannedCount int
+	var totalUsedQuota int64
+	var totalRequests int
+
+	for i, u := range invitedUsers {
+		items[i] = map[string]interface{}{
+			"user_id":       u.ID,
+			"username":      u.Username,
+			"display_name":  u.DisplayName,
+			"email":         u.Email,
+			"status":        u.Status,
+			"quota":         u.Quota,
+			"used_quota":    u.UsedQuota,
+			"request_count": u.RequestCount,
+			"group":         u.Group,
+			"role":          u.Role,
+		}
+
+		// 统计
+		if u.RequestCount > 0 {
+			activeCount++
+		}
+		if u.Status == models.UserStatusBanned {
+			bannedCount++
+		}
+		totalUsedQuota += u.UsedQuota
+		totalRequests += u.RequestCount
+	}
+
+	// 5. 构建统计信息
+	stats := map[string]interface{}{
+		"total_invited":    total,
+		"active_count":     activeCount,
+		"banned_count":     bannedCount,
+		"total_used_quota": totalUsedQuota,
+		"total_requests":   totalRequests,
+	}
+
+	return map[string]interface{}{
+		"success":   true,
+		"inviter":   inviterInfo,
+		"items":     items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"stats":     stats,
+	}, nil
 }
 
 // BatchDeleteUsersByActivity 按活跃度级别批量删除用户

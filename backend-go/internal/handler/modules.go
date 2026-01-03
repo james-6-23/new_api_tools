@@ -319,7 +319,7 @@ func DisableTokenHandler(c *gin.Context) {
 
 // GetInvitedUsersHandler 获取被邀请用户列表
 func GetInvitedUsersHandler(c *gin.Context) {
-	inviterID, err := strconv.Atoi(c.Param("id"))
+	inviterID, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil {
 		Error(c, 400, "无效的用户 ID")
 		return
@@ -335,7 +335,8 @@ func GetInvitedUsersHandler(c *gin.Context) {
 		return
 	}
 
-	Success(c, data)
+	// 直接返回 data，因为它已经包含了 success 字段
+	c.JSON(200, data)
 }
 
 // ==================== Risk Monitoring Handlers ====================

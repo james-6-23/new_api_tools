@@ -16,6 +16,7 @@ type User struct {
 	Email            string     `gorm:"column:email" json:"email"`
 	GitHubID         string     `gorm:"column:github_id" json:"github_id"`
 	WeChatID         string     `gorm:"column:wechat_id" json:"wechat_id"`
+	LinuxDoID        string     `gorm:"column:linux_do_id" json:"linux_do_id"`
 	VerificationCode string     `gorm:"column:verification_code" json:"-"`
 	AccessToken      string     `gorm:"column:access_token" json:"-"`
 	Quota            int64      `gorm:"column:quota" json:"quota"`
@@ -23,6 +24,9 @@ type User struct {
 	RequestCount     int        `gorm:"column:request_count" json:"request_count"`
 	Group            string     `gorm:"column:group" json:"group"`
 	AffCode          string     `gorm:"column:aff_code" json:"aff_code"`
+	AffCount         int        `gorm:"column:aff_count" json:"aff_count"`
+	AffQuota         int64      `gorm:"column:aff_quota" json:"aff_quota"`
+	AffHistory       int64      `gorm:"column:aff_history" json:"aff_history"`
 	InviterID        int        `gorm:"column:inviter_id" json:"inviter_id"`
 	CreatedAt        time.Time  `gorm:"column:created_at" json:"created_at"`
 	DeletedAt        *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
