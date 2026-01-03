@@ -83,6 +83,7 @@ def _get_operator_label(req: Request) -> str:
 
 @router.get("/stats", response_model=ActivityStatsResponse)
 async def get_activity_stats(
+    quick: bool = Query(default=False, description="快速模式，只返回总用户数和从未请求数"),
     _: str = Depends(verify_auth),
 ):
     """
@@ -93,9 +94,13 @@ async def get_activity_stats(
     - inactive: 7-30 天内有请求
     - very_inactive: 超过 30 天没有请求
     - never_requested: 从未请求
+    
+    参数:
+    - quick: 快速模式，只返回总用户数和从未请求数（毫秒级响应）
+             适用于大型系统首次加载时快速显示基础数据
     """
     service = get_user_management_service()
-    stats = service.get_activity_stats()
+    stats = service.get_activity_stats(quick=quick)
 
     return ActivityStatsResponse(
         success=True,
@@ -176,6 +181,7 @@ async def get_users(
             "group": user.group,
             "last_request_time": user.last_request_time,
             "activity_level": user.activity_level.value,
+            "linux_do_id": user.linux_do_id,
         })
 
     return UserListResponse(

@@ -133,6 +133,7 @@ interface UserInfo {
   group: string | null
   last_request_time: number | null
   activity_level: string
+  linux_do_id: string | null
 }
 
 export function UserManagement() {
@@ -195,12 +196,18 @@ export function UserManagement() {
     'Authorization': `Bearer ${token}`,
   }), [token])
 
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (quick = false) => {
     try {
-      const response = await fetch(`${apiUrl}/api/users/stats`, { headers: getAuthHeaders() })
+      const params = quick ? '?quick=true' : ''
+      const response = await fetch(`${apiUrl}/api/users/stats${params}`, { headers: getAuthHeaders() })
       const data = await response.json()
       if (data.success) {
         setStats(data.data)
+        // 如果是快速模式且活跃度数据为0，异步加载完整数据
+        if (quick && data.data.active_users === 0 && data.data.inactive_users === 0 && data.data.very_inactive_users === 0) {
+          // 延迟加载完整统计，不阻塞用户列表
+          setTimeout(() => fetchStats(false), 100)
+        }
       }
     } catch (error) {
       console.error('Failed to fetch stats:', error)
@@ -380,7 +387,7 @@ export function UserManagement() {
   }
 
   useEffect(() => {
-    fetchStats()
+    fetchStats(true)  // 首次加载使用快速模式
   }, [fetchStats])
 
   useEffect(() => {
@@ -536,7 +543,7 @@ export function UserManagement() {
         <StatCard
           title="活跃用户"
           value={stats?.active_users || 0}
-          subValue="7天内有请求"
+          subValue={stats?.active_users === 0 && stats?.inactive_users === 0 && stats?.very_inactive_users === 0 && (stats?.never_requested || 0) > 0 ? "计算中..." : "7天内有请求"}
           icon={UserCheck}
           color="green"
           onClick={() => { setActivityFilter('active'); setPage(1) }}
@@ -545,7 +552,7 @@ export function UserManagement() {
         <StatCard
           title="不活跃用户"
           value={stats?.inactive_users || 0}
-          subValue="7-30天内有请求"
+          subValue={stats?.active_users === 0 && stats?.inactive_users === 0 && stats?.very_inactive_users === 0 && (stats?.never_requested || 0) > 0 ? "计算中..." : "7-30天内有请求"}
           icon={Clock}
           color="yellow"
           onClick={() => { setActivityFilter('inactive'); setPage(1) }}
@@ -554,7 +561,7 @@ export function UserManagement() {
         <StatCard
           title="非常不活跃"
           value={stats?.very_inactive_users || 0}
-          subValue="超过30天无请求"
+          subValue={stats?.active_users === 0 && stats?.inactive_users === 0 && stats?.very_inactive_users === 0 && (stats?.never_requested || 0) > 0 ? "计算中..." : "超过30天无请求"}
           icon={UserX}
           color="red"
           onClick={() => { setActivityFilter('very_inactive'); setPage(1) }}
@@ -630,7 +637,7 @@ export function UserManagement() {
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="搜索用户名或邮箱..."
+                  placeholder="搜索用户名/邮箱/LinuxDoID/邀请码..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   onKeyPress={handleKeyPress}
@@ -664,6 +671,7 @@ export function UserManagement() {
                     <TableHead>用户</TableHead>
                     <TableHead className="hidden sm:table-cell">角色</TableHead>
                     <TableHead>状态</TableHead>
+                    <TableHead className="hidden lg:table-cell">Linux.do</TableHead>
                     <TableHead className="text-right">额度 (USD)</TableHead>
                     <TableHead className="text-right hidden sm:table-cell">已用</TableHead>
                     <TableHead className="text-right hidden md:table-cell">请求数</TableHead>
@@ -695,6 +703,21 @@ export function UserManagement() {
                         {getRoleBadge(user.role)}
                       </TableCell>
                       <TableCell>{getStatusBadge(user.status)}</TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        {user.linux_do_id ? (
+                          <a
+                            href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${user.linux_do_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
+                            title="查看 Linux.do 证书"
+                          >
+                            {user.linux_do_id}
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-sm font-bold text-primary tabular-nums tracking-tight">
                         {formatQuota(user.quota)}
                       </TableCell>

@@ -136,6 +136,11 @@ RECOMMENDED_INDEXES = [
     # Query: WHERE created_at >= x AND type = 2 GROUP BY model_name
     ("idx_logs_type_created_model", "logs", ["type", "created_at", "model_name"]),
 
+    # === 高优先级：用户活跃度查询（解决预热耗时 2000s+ 问题）===
+    # Query: EXISTS (SELECT 1 FROM logs WHERE user_id = x AND type = 2 AND created_at >= cutoff)
+    # 索引顺序：等值条件(user_id, type) 在前，范围条件(created_at) 在后
+    ("idx_logs_user_type_created", "logs", ["user_id", "type", "created_at"]),
+
     # === IP 监控索引 ===
     # IP 切换分析: WHERE user_id = x AND created_at >= y ORDER BY created_at
     ("idx_logs_user_created_ip", "logs", ["user_id", "created_at", "ip"]),
@@ -203,7 +208,7 @@ REDUNDANT_LOGS_INDEXES = {
     "idx_logs_type_time_model",   # 与 idx_logs_type_created_model 重复
     "idx_logs_created_user_type", # 列顺序不同的重复
     "idx_logs_created_user_ip",   # 与 idx_logs_user_created_ip 重复
-    "idx_logs_user_type_created", # 重复
+    # idx_logs_user_type_created 已移至 RECOMMENDED_INDEXES（用户活跃度查询优化）
     "idx_logs_ip_created",        # 被 idx_logs_created_ip_token 覆盖
     "idx_logs_token_created_ip",  # 被 idx_logs_created_token_ip 覆盖
     "idx_logs_id_type",           # 几乎无用
