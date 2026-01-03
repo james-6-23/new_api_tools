@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ketches/new-api-tools/internal/cache"
@@ -73,15 +74,17 @@ type LoginRequest struct {
 
 // LoginResponse 登录响应
 type LoginResponse struct {
-	Token     string `json:"token"`
-	ExpiresIn int    `json:"expires_in"`
+	Success   bool   `json:"success"`
+	Message   string `json:"message,omitempty"`
+	Token     string `json:"token,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // Login 管理员登录
 func Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Error(c, 400, "请求参数错误")
+		c.JSON(http.StatusOK, LoginResponse{Success: false, Message: "请求参数错误"})
 		return
 	}
 
@@ -91,7 +94,7 @@ func Login(c *gin.Context) {
 	if err := bcrypt.CompareHashAndPassword([]byte(cfg.Auth.AdminPassword), []byte(req.Password)); err != nil {
 		// 如果配置的是明文密码，直接比较
 		if req.Password != cfg.Auth.AdminPassword {
-			Error(c, 401, "密码错误")
+			c.JSON(http.StatusOK, LoginResponse{Success: false, Message: "密码错误"})
 			return
 		}
 	}
@@ -100,7 +103,7 @@ func Login(c *gin.Context) {
 	token, err := jwt.GenerateToken("admin", 100, cfg.Auth.JWTExpireHours)
 	if err != nil {
 		logger.Error("生成 Token 失败", zap.Error(err))
-		Error(c, 500, "生成令牌失败")
+		c.JSON(http.StatusOK, LoginResponse{Success: false, Message: "生成令牌失败"})
 		return
 	}
 
@@ -108,9 +111,12 @@ func Login(c *gin.Context) {
 		zap.String("ip", c.ClientIP()),
 	)
 
-	Success(c, LoginResponse{
+	expiresAt := time.Now().Add(time.Duration(cfg.Auth.JWTExpireHours) * time.Hour).UTC().Format(time.RFC3339)
+	c.JSON(http.StatusOK, LoginResponse{
+		Success:   true,
+		Message:   "Login successful",
 		Token:     token,
-		ExpiresIn: cfg.Auth.JWTExpireHours * 3600,
+		ExpiresAt: expiresAt,
 	})
 }
 
