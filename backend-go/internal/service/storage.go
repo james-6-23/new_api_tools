@@ -192,6 +192,7 @@ func (s *StorageService) DeleteConfig(key string) error {
 }
 
 // GetCacheInfo 获取缓存信息
+// TODO: 实现实际的缓存键数量统计
 func (s *StorageService) GetCacheInfo() (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"type":       "redis",

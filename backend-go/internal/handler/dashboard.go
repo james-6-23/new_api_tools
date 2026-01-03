@@ -136,12 +136,12 @@ func GetSystemInfo(c *gin.Context) {
 }
 
 // InvalidateCache 清除缓存
+// TODO: 实现实际的缓存清除逻辑
 func InvalidateCache(c *gin.Context) {
 	var req struct {
 		Keys []string `json:"keys"`
 	}
 	c.ShouldBindJSON(&req)
-	// 简单实现：返回成功
 	Success(c, gin.H{"message": "缓存已清除", "cleared": len(req.Keys)})
 }
 

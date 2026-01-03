@@ -471,6 +471,7 @@ func (s *AIBanService) getRecommendation(score float64) string {
 }
 
 // RemoveFromWhitelist 从白名单移除
+// TODO: 实现实际的数据库删除逻辑
 func (s *AIBanService) RemoveFromWhitelist(userID int) error {
 	cacheKey := cache.CacheKey("aiban", "whitelist")
 	cache.Delete(cacheKey)
@@ -508,6 +509,7 @@ type AuditLog struct {
 }
 
 // GetAuditLogs 获取审计日志
+// TODO: 实现实际的审计日志查询逻辑
 func (s *AIBanService) GetAuditLogs(page, pageSize int) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"logs":  []AuditLog{},
@@ -517,6 +519,7 @@ func (s *AIBanService) GetAuditLogs(page, pageSize int) (map[string]interface{},
 }
 
 // DeleteAuditLogs 删除审计日志
+// TODO: 实现实际的审计日志删除逻辑
 func (s *AIBanService) DeleteAuditLogs() error {
 	return nil
 }

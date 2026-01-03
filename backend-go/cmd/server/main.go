@@ -291,17 +291,6 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				storage.GET("/info", handler.GetStorageInfoHandler)
 			}
 
-			// 模型状态嵌入接口（公开，无需认证）
-			modelStatusEmbed := api.Group("/model-status/embed")
-			{
-				modelStatusEmbed.GET("/windows", handler.GetEmbedTimeWindowsHandler)
-				modelStatusEmbed.GET("/models", handler.GetEmbedAvailableModelsHandler)
-				modelStatusEmbed.GET("/status/:model_name", handler.GetEmbedModelStatusHandler)
-				modelStatusEmbed.POST("/status/batch", handler.BatchGetEmbedModelStatusHandler)
-				modelStatusEmbed.GET("/status", handler.GetEmbedAllModelStatusHandler)
-				modelStatusEmbed.GET("/config/selected", handler.GetEmbedSelectedModelsHandler)
-			}
-
 			// IP 监控别名路由 (兼容 Python 版本的 /api/ip/* 路径)
 			ip := authenticated.Group("/ip")
 			{
@@ -316,6 +305,17 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				ip.GET("/geo/:ip", handler.GetIPGeo)
 				ip.POST("/geo/batch", handler.BatchGetIPGeo)
 			}
+		}
+
+		// 模型状态嵌入接口（公开，无需认证）
+		modelStatusEmbed := api.Group("/model-status/embed")
+		{
+			modelStatusEmbed.GET("/windows", handler.GetEmbedTimeWindowsHandler)
+			modelStatusEmbed.GET("/models", handler.GetEmbedAvailableModelsHandler)
+			modelStatusEmbed.GET("/status/:model_name", handler.GetEmbedModelStatusHandler)
+			modelStatusEmbed.POST("/status/batch", handler.BatchGetEmbedModelStatusHandler)
+			modelStatusEmbed.GET("/status", handler.GetEmbedAllModelStatusHandler)
+			modelStatusEmbed.GET("/config/selected", handler.GetEmbedSelectedModelsHandler)
 		}
 	}
 
