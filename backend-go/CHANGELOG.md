@@ -47,6 +47,10 @@ All notable changes to this project will be documented in this file.
   - 涉及文件：`internal/tasks/aiban.go`
 
 ### Fixed
+- **Dashboard 渠道/模型统计修复**：修复 `/api/dashboard/overview` 接口渠道总数和模型数量返回全零问题
+  - 原因：NewAPI 的 `channels` 表没有 `deleted_at` 字段，但 Go 查询错误地添加了 `deleted_at IS NULL` 条件
+  - 修复：移除渠道统计和模型统计查询中的 `deleted_at` 条件
+  - 涉及文件：`internal/service/dashboard.go`
 - **Dashboard 模型统计修复**：修复 `/api/dashboard/models` 接口返回全零问题
 - **Dashboard Overview 统计修复**：修复 `/api/dashboard/overview` 接口缺失字段
   - 新增 `total_models`：从 abilities 表统计启用渠道的唯一模型数

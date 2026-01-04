@@ -72,10 +72,11 @@ func (s *DashboardService) fetchOverviewData() (*OverviewData, error) {
 	db.Model(&models.Token{}).Where("deleted_at IS NULL AND status = ?", models.TokenStatusEnabled).Count(&data.ActiveTokens)
 
 	// 总渠道数
-	db.Model(&models.Channel{}).Where("deleted_at IS NULL").Count(&data.TotalChannels)
+	// 注意：NewAPI 的 channels 表没有 deleted_at 字段
+	db.Model(&models.Channel{}).Count(&data.TotalChannels)
 
 	// 活跃渠道数
-	db.Model(&models.Channel{}).Where("deleted_at IS NULL AND status = ?", models.ChannelStatusEnabled).Count(&data.ActiveChannels)
+	db.Model(&models.Channel{}).Where("status = ?", models.ChannelStatusEnabled).Count(&data.ActiveChannels)
 
 	// 今日请求数和额度消耗
 	// 注意：数据库中 created_at 是 bigint (Unix 时间戳)
@@ -107,9 +108,10 @@ func (s *DashboardService) fetchOverviewData() (*OverviewData, error) {
 	}
 
 	// 可用模型数量（从 abilities 表统计启用渠道的唯一模型数）
+	// 注意：NewAPI 的 channels 表没有 deleted_at 字段
 	db.Model(&models.Ability{}).
 		Joins("INNER JOIN channels c ON c.id = abilities.channel_id").
-		Where("c.status = ? AND c.deleted_at IS NULL AND abilities.enabled = ?", models.ChannelStatusEnabled, true).
+		Where("c.status = ? AND abilities.enabled = ?", models.ChannelStatusEnabled, true).
 		Distinct("abilities.model").
 		Count(&data.TotalModels)
 
