@@ -20,17 +20,20 @@ func NewDashboardService() *DashboardService {
 
 // OverviewData 概览数据
 type OverviewData struct {
-	TotalUsers     int64   `json:"total_users"`
-	ActiveUsers    int64   `json:"active_users"`
-	TotalTokens    int64   `json:"total_tokens"`
-	ActiveTokens   int64   `json:"active_tokens"`
-	TotalChannels  int64   `json:"total_channels"`
-	ActiveChannels int64   `json:"active_channels"`
-	TodayRequests  int64   `json:"today_requests"`
-	TodayQuota     int64   `json:"today_quota"`
-	TotalQuota     int64   `json:"total_quota"`
-	TotalUsedQuota int64   `json:"total_used_quota"`
-	QuotaUsageRate float64 `json:"quota_usage_rate"`
+	TotalUsers        int64   `json:"total_users"`
+	ActiveUsers       int64   `json:"active_users"`
+	TotalTokens       int64   `json:"total_tokens"`
+	ActiveTokens      int64   `json:"active_tokens"`
+	TotalChannels     int64   `json:"total_channels"`
+	ActiveChannels    int64   `json:"active_channels"`
+	TodayRequests     int64   `json:"today_requests"`
+	TodayQuota        int64   `json:"today_quota"`
+	TotalQuota        int64   `json:"total_quota"`
+	TotalUsedQuota    int64   `json:"total_used_quota"`
+	QuotaUsageRate    float64 `json:"quota_usage_rate"`
+	TotalModels       int64   `json:"total_models"`       // 可用模型数
+	TotalRedemptions  int64   `json:"total_redemptions"`  // 兑换码总数
+	UnusedRedemptions int64   `json:"unused_redemptions"` // 未使用兑换码
 }
 
 // GetOverview 获取系统概览
@@ -103,17 +106,36 @@ func (s *DashboardService) fetchOverviewData() (*OverviewData, error) {
 		data.QuotaUsageRate = float64(data.TotalUsedQuota) / float64(data.TotalQuota) * 100
 	}
 
+	// 可用模型数量（从 abilities 表统计启用渠道的唯一模型数）
+	db.Model(&models.Ability{}).
+		Joins("INNER JOIN channels c ON c.id = abilities.channel_id").
+		Where("c.status = ? AND c.deleted_at IS NULL AND abilities.enabled = ?", models.ChannelStatusEnabled, true).
+		Distinct("abilities.model").
+		Count(&data.TotalModels)
+
+	// 兑换码总数
+	db.Model(&models.Redemption{}).Where("deleted_at IS NULL").Count(&data.TotalRedemptions)
+
+	// 未使用的兑换码（status = 1 表示启用/未使用）
+	db.Model(&models.Redemption{}).
+		Where("deleted_at IS NULL AND status = ?", models.RedemptionStatusEnabled).
+		Count(&data.UnusedRedemptions)
+
 	return data, nil
 }
 
 // UsageData 使用统计数据
 type UsageData struct {
-	Period        string  `json:"period"`
-	TotalRequests int64   `json:"total_requests"`
-	TotalQuota    int64   `json:"total_quota"`
-	AvgQuota      float64 `json:"avg_quota"`
-	UniqueUsers   int64   `json:"unique_users"`
-	UniqueTokens  int64   `json:"unique_tokens"`
+	Period                string  `json:"period"`
+	TotalRequests         int64   `json:"total_requests"`
+	TotalQuota            int64   `json:"total_quota"`
+	AvgQuota              float64 `json:"avg_quota"`
+	UniqueUsers           int64   `json:"unique_users"`
+	UniqueTokens          int64   `json:"unique_tokens"`
+	TotalPromptTokens     int64   `json:"total_prompt_tokens"`     // 输入 token 总数
+	TotalCompletionTokens int64   `json:"total_completion_tokens"` // 输出 token 总数
+	AverageResponseTime   float64 `json:"average_response_time"`   // 平均响应时间(毫秒)
+	TotalQuotaUsed        int64   `json:"total_quota_used"`        // 前端使用这个字段名
 }
 
 // GetUsage 获取使用统计
@@ -190,6 +212,22 @@ func (s *DashboardService) fetchUsageData(period string) (*UsageData, error) {
 		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
 		Distinct("token_id").
 		Count(&data.UniqueTokens)
+
+	// Token 统计和响应时间
+	var tokenStats struct {
+		PromptTokens     int64
+		CompletionTokens int64
+		AvgTime          float64
+	}
+	db.Model(&models.Log{}).
+		Where("created_at >= ? AND type = ?", startTime, models.LogTypeConsume).
+		Select("COALESCE(SUM(prompt_tokens), 0) as prompt_tokens, COALESCE(SUM(completion_tokens), 0) as completion_tokens, COALESCE(AVG(use_time), 0) as avg_time").
+		Scan(&tokenStats)
+
+	data.TotalPromptTokens = tokenStats.PromptTokens
+	data.TotalCompletionTokens = tokenStats.CompletionTokens
+	data.AverageResponseTime = tokenStats.AvgTime
+	data.TotalQuotaUsed = data.TotalQuota // 前端使用 total_quota_used
 
 	return data, nil
 }

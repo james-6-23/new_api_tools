@@ -71,6 +71,7 @@ type Log struct {
 	Quota            int    `gorm:"column:quota" json:"quota"`
 	PromptTokens     int    `gorm:"column:prompt_tokens" json:"prompt_tokens"`
 	CompletionTokens int    `gorm:"column:completion_tokens" json:"completion_tokens"`
+	UseTime          int    `gorm:"column:use_time" json:"use_time"` // 响应时间(毫秒)
 	IP               string `gorm:"column:ip" json:"ip"`
 	ChannelID        int    `gorm:"column:channel_id" json:"channel_id"`
 }

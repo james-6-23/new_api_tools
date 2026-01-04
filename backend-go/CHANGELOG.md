@@ -48,6 +48,19 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Dashboard 模型统计修复**：修复 `/api/dashboard/models` 接口返回全零问题
+- **Dashboard Overview 统计修复**：修复 `/api/dashboard/overview` 接口缺失字段
+  - 新增 `total_models`：从 abilities 表统计启用渠道的唯一模型数
+  - 新增 `total_redemptions`/`unused_redemptions`：兑换码统计
+  - 涉及文件：`internal/service/dashboard.go`
+- **Dashboard Usage 统计修复**：修复 `/api/dashboard/usage` 接口缺失字段
+  - 新增 `total_prompt_tokens`/`total_completion_tokens`：Token 统计
+  - 新增 `average_response_time`：平均响应时间
+  - 新增 `total_quota_used`：已使用额度（前端字段兼容）
+  - 为 Log 模型添加 `UseTime` 字段
+  - 涉及文件：`internal/service/dashboard.go`、`internal/models/models.go`
+- **Dashboard 单元测试**：新增完整的 Dashboard 服务测试
+  - 添加 `SetTestDB`/`ClearTestDB` 测试辅助函数
+  - 涉及文件：`internal/service/dashboard_test.go`、`internal/database/database.go`
   - 添加 `period` 参数支持，支持 `24h/3d/7d/14d/today/week/month` 时间范围
   - 修正返回字段名以匹配前端期望：`requests` → `request_count`，`quota` → `quota_used`
   - 新增 `prompt_tokens`、`completion_tokens` 字段

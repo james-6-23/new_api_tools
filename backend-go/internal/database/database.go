@@ -365,3 +365,13 @@ func IsConnected() bool {
 
 	return sqlDB.Ping() == nil
 }
+
+// SetTestDB 设置测试数据库（仅用于单元测试）
+func SetTestDB(db *gorm.DB) {
+	mainDB = db
+}
+
+// ClearTestDB 清除测试数据库（仅用于单元测试）
+func ClearTestDB() {
+	mainDB = nil
+}
