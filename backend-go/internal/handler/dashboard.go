@@ -40,9 +40,10 @@ func GetDashboardUsage(c *gin.Context) {
 
 // GetDashboardModels 获取模型使用统计
 func GetDashboardModels(c *gin.Context) {
+	period := c.DefaultQuery("period", "24h")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 
-	data, err := dashboardService.GetModelUsage(limit)
+	data, err := dashboardService.GetModelUsage(period, limit)
 	if err != nil {
 		logger.Error("获取模型统计失败", zap.Error(err))
 		Error(c, 500, "获取模型统计失败")

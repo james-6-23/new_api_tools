@@ -47,6 +47,11 @@ All notable changes to this project will be documented in this file.
   - 涉及文件：`internal/tasks/aiban.go`
 
 ### Fixed
+- **Dashboard 模型统计修复**：修复 `/api/dashboard/models` 接口返回全零问题
+  - 添加 `period` 参数支持，支持 `24h/3d/7d/14d/today/week/month` 时间范围
+  - 修正返回字段名以匹配前端期望：`requests` → `request_count`，`quota` → `quota_used`
+  - 新增 `prompt_tokens`、`completion_tokens` 字段
+  - 涉及文件：`internal/service/dashboard.go`、`internal/handler/dashboard.go`
 - **GeoIP 目录配置修复**：修复 `geoip.db_path` 默认值错误包含文件名导致目录创建失败
   - 将默认值从 `/app/data/geoip/GeoLite2-Country.mmdb` 改为 `/app/data/geoip`
   - 涉及文件：`internal/config/config.go`

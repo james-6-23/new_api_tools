@@ -196,15 +196,16 @@ func (s *DashboardService) fetchUsageData(period string) (*UsageData, error) {
 
 // ModelUsage 模型使用统计
 type ModelUsage struct {
-	ModelName  string  `json:"model_name"`
-	Requests   int64   `json:"requests"`
-	Quota      int64   `json:"quota"`
-	Percentage float64 `json:"percentage"`
+	ModelName        string `json:"model_name"`
+	RequestCount     int64  `json:"request_count"`
+	QuotaUsed        int64  `json:"quota_used"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
 }
 
 // GetModelUsage 获取模型使用统计
-func (s *DashboardService) GetModelUsage(limit int) ([]ModelUsage, error) {
-	cacheKey := cache.CacheKey("dashboard", "models", fmt.Sprintf("%d", limit))
+func (s *DashboardService) GetModelUsage(period string, limit int) ([]ModelUsage, error) {
+	cacheKey := cache.CacheKey("dashboard", "models", period, fmt.Sprintf("%d", limit))
 
 	var data []ModelUsage
 	wrapper := &cache.CacheWrapper{
@@ -213,31 +214,54 @@ func (s *DashboardService) GetModelUsage(limit int) ([]ModelUsage, error) {
 	}
 
 	err := wrapper.GetOrSet(&data, func() (interface{}, error) {
-		return s.fetchModelUsage(limit)
+		return s.fetchModelUsage(period, limit)
 	})
 
 	return data, err
 }
 
 // fetchModelUsage 获取模型使用数据
-func (s *DashboardService) fetchModelUsage(limit int) ([]ModelUsage, error) {
+func (s *DashboardService) fetchModelUsage(period string, limit int) ([]ModelUsage, error) {
 	db := database.GetMainDB()
 
-	// 获取今日数据（Unix 时间戳）
+	// 根据 period 计算时间范围（与 fetchUsageData 保持一致）
 	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	var startTime int64
+	switch period {
+	case "today":
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	case "1h":
+		startTime = now.Add(-1 * time.Hour).Unix()
+	case "6h":
+		startTime = now.Add(-6 * time.Hour).Unix()
+	case "24h":
+		startTime = now.Add(-24 * time.Hour).Unix()
+	case "3d":
+		startTime = now.Add(-3 * 24 * time.Hour).Unix()
+	case "7d", "week":
+		startTime = now.Add(-7 * 24 * time.Hour).Unix()
+	case "14d":
+		startTime = now.Add(-14 * 24 * time.Hour).Unix()
+	case "month":
+		startTime = now.AddDate(0, -1, 0).Unix()
+	default:
+		// 默认 24 小时
+		startTime = now.Add(-24 * time.Hour).Unix()
+	}
 
 	var results []struct {
-		ModelName string
-		Requests  int64
-		Quota     int64
+		ModelName        string
+		RequestCount     int64
+		QuotaUsed        int64
+		PromptTokens     int64
+		CompletionTokens int64
 	}
 
 	err := db.Model(&models.Log{}).
-		Select("model_name, COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota").
-		Where("created_at >= ? AND type = ? AND model_name != ''", todayStart, models.LogTypeConsume).
+		Select("model_name, COUNT(*) as request_count, COALESCE(SUM(quota), 0) as quota_used, COALESCE(SUM(prompt_tokens), 0) as prompt_tokens, COALESCE(SUM(completion_tokens), 0) as completion_tokens").
+		Where("created_at >= ? AND type = ? AND model_name != ''", startTime, models.LogTypeConsume).
 		Group("model_name").
-		Order("requests DESC").
+		Order("request_count DESC").
 		Limit(limit).
 		Scan(&results).Error
 
@@ -245,22 +269,15 @@ func (s *DashboardService) fetchModelUsage(limit int) ([]ModelUsage, error) {
 		return nil, err
 	}
 
-	// 计算总请求数
-	var totalRequests int64
-	for _, r := range results {
-		totalRequests += r.Requests
-	}
-
 	// 转换为返回格式
 	data := make([]ModelUsage, len(results))
 	for i, r := range results {
 		data[i] = ModelUsage{
-			ModelName: r.ModelName,
-			Requests:  r.Requests,
-			Quota:     r.Quota,
-		}
-		if totalRequests > 0 {
-			data[i].Percentage = float64(r.Requests) / float64(totalRequests) * 100
+			ModelName:        r.ModelName,
+			RequestCount:     r.RequestCount,
+			QuotaUsed:        r.QuotaUsed,
+			PromptTokens:     r.PromptTokens,
+			CompletionTokens: r.CompletionTokens,
 		}
 	}
 

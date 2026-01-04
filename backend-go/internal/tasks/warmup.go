@@ -205,7 +205,7 @@ func warmupDashboard(ctx context.Context) error {
 		// 核心 Dashboard API
 		{"overview_7d", func() error { _, err := dashboardService.GetOverview(); return err }},
 		{"usage_7d", func() error { _, err := dashboardService.GetUsage("7d"); return err }},
-		{"models_7d", func() error { _, err := dashboardService.GetModelUsage(8); return err }},
+		{"models_7d", func() error { _, err := dashboardService.GetModelUsage("7d", 8); return err }},
 		{"daily_trends_7d", func() error { _, err := dashboardService.GetDailyTrends(7); return err }},
 		{"top_users_7d", func() error { _, err := dashboardService.GetTopUsers(10, "requests"); return err }},
 		// 其他时间周期
