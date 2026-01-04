@@ -92,6 +92,12 @@ async def save_config(
         if interval != 0 and (interval < 15 or interval > 1440):
             raise HTTPException(status_code=400, detail="扫描间隔必须为0（关闭）或15-1440分钟")
         config["scan_interval_minutes"] = interval
+    if request.custom_prompt is not None:
+        config["custom_prompt"] = request.custom_prompt
+    if request.whitelist_ips is not None:
+        config["whitelist_ips"] = request.whitelist_ips
+    if request.blacklist_ips is not None:
+        config["blacklist_ips"] = request.blacklist_ips
 
     if not config:
         raise HTTPException(status_code=400, detail="没有要保存的配置")

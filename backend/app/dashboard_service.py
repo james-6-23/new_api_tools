@@ -313,49 +313,51 @@ class DashboardService:
         Returns:
             List of DailyTrend for each day.
         """
-        # 使用滚动时间窗口，与 get_usage_statistics 保持一致
-        end_time = int(time.time())
-        start_time = end_time - (days * 24 * 3600)
-        
-        # 生成日期列表（从 start_time 所在日期到今天）
+        # 使用本地时间计算每天的时间戳范围，避免时区转换问题
         now = datetime.now()
-        start_dt = datetime.fromtimestamp(start_time)
-        date_list = []
-        current_dt = start_dt
-        while current_dt.date() <= now.date():
-            date_list.append(current_dt.strftime("%Y-%m-%d"))
-            current_dt += timedelta(days=1)
-
+        today_start = datetime(now.year, now.month, now.day)
+        
+        # 生成日期列表和对应的时间戳范围
+        date_ranges = []
+        for i in range(days, -1, -1):  # 从 days 天前到今天
+            day_start = today_start - timedelta(days=i)
+            day_end = day_start + timedelta(days=1)
+            date_ranges.append({
+                "date": day_start.strftime("%Y-%m-%d"),
+                "start_ts": int(day_start.timestamp()),
+                "end_ts": int(day_end.timestamp()),
+            })
+        
+        # 查询整个时间范围的数据
+        start_time = date_ranges[0]["start_ts"]
+        end_time = date_ranges[-1]["end_ts"]
+        
         # 根据数据库类型选择正确的日期函数
+        # 关键：使用本地时间戳边界，让数据库直接按时间戳分组
         from .database import DatabaseEngine
         is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
         
-        if is_pg:
-            sql = """
-                SELECT
-                    TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD') as date,
-                    COUNT(*) as request_count,
-                    COALESCE(SUM(quota), 0) as quota_used,
-                    COUNT(DISTINCT user_id) as unique_users
-                FROM logs
-                WHERE created_at >= :start_time AND created_at <= :end_time
-                    AND type = 2
-                GROUP BY TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')
-                ORDER BY date ASC
-            """
-        else:
-            sql = """
-                SELECT
-                    DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d') as date,
-                    COUNT(*) as request_count,
-                    COALESCE(SUM(quota), 0) as quota_used,
-                    COUNT(DISTINCT user_id) as unique_users
-                FROM logs
-                WHERE created_at >= :start_time AND created_at <= :end_time
-                    AND type = 2
-                GROUP BY DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d')
-                ORDER BY date ASC
-            """
+        # 构建 CASE WHEN 语句，按本地日期边界分组
+        case_parts = []
+        for dr in date_ranges:
+            case_parts.append(
+                f"WHEN created_at >= {dr['start_ts']} AND created_at < {dr['end_ts']} THEN '{dr['date']}'"
+            )
+        case_sql = "CASE " + " ".join(case_parts) + " END"
+        
+        sql = f"""
+            SELECT
+                {case_sql} as date,
+                COUNT(*) as request_count,
+                COALESCE(SUM(quota), 0) as quota_used,
+                COUNT(DISTINCT user_id) as unique_users
+            FROM logs
+            WHERE created_at >= :start_time AND created_at < :end_time
+                AND type = 2
+            GROUP BY {case_sql}
+            HAVING {case_sql} IS NOT NULL
+            ORDER BY date ASC
+        """
 
         result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})
 
@@ -372,12 +374,17 @@ class DashboardService:
 
         # Fill in all dates in the range
         trends = []
-        for date_str in date_list:
+        for dr in date_ranges:
+            date_str = dr["date"]
             if date_str in data_by_date:
                 trends.append(data_by_date[date_str])
             else:
                 trends.append(DailyTrend(
                     date=date_str,
+                    request_count=0,
+                    quota_used=0,
+                    unique_users=0,
+                ))
                     request_count=0,
                     quota_used=0,
                     unique_users=0,

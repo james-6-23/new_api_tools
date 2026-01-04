@@ -1200,7 +1200,7 @@ export function RealtimeRanking() {
         setAiConfig(res.data)
         setPromptDialogOpen(false)
       } else {
-        showToast('error', res.message || '保存失败')
+        showToast('error', res.detail || res.message || '保存失败')
       }
     } catch (e) {
       console.error('Failed to save prompt:', e)
