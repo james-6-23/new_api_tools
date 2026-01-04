@@ -208,7 +208,7 @@ export function TopUps() {
           onClick={() => setStatusFilter('success')}
         />
         <StatCard
-          title="待处理"
+          title="待支付"
           value={statsLoading ? '-' : `${statistics?.pending_count || 0} 笔`}
           subValue={statsLoading ? '-' : `${formatMoney(statistics?.pending_money || 0)}`}
           icon={Clock}
@@ -269,7 +269,7 @@ export function TopUps() {
               <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
                 <option value="">全部状态</option>
                 <option value="success">成功</option>
-                <option value="pending">待处理</option>
+                <option value="pending">待支付</option>
                 <option value="failed">失败</option>
                 <option value="refunded">已退款</option>
               </Select>
@@ -402,7 +402,7 @@ export function TopUps() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={record.status === 'success' ? 'success' : record.status === 'pending' ? 'warning' : record.status === 'refunded' ? 'secondary' : 'destructive'}>
-                          {record.status === 'success' ? '成功' : record.status === 'pending' ? '待处理' : record.status === 'refunded' ? '已退款' : '失败'}
+                          {record.status === 'success' ? '成功' : record.status === 'pending' ? '待支付' : record.status === 'refunded' ? '已退款' : '失败'}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
