@@ -47,6 +47,9 @@ All notable changes to this project will be documented in this file.
   - 涉及文件：`internal/tasks/aiban.go`
 
 ### Fixed
+- **GeoIP 目录配置修复**：修复 `geoip.db_path` 默认值错误包含文件名导致目录创建失败
+  - 将默认值从 `/app/data/geoip/GeoLite2-Country.mmdb` 改为 `/app/data/geoip`
+  - 涉及文件：`internal/config/config.go`
 - **IP 监控详情查询一致性**：修复时间窗口过滤未应用于子查询的问题
   - `GetSharedIPs` 的用户列表查询现正确应用 `windowSeconds` 过滤
   - `GetMultiIPTokens` 的 IP 列表查询现正确应用 `windowSeconds` 过滤
