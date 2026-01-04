@@ -42,6 +42,19 @@ type TopUpStatistics struct {
 	AvgAmount        float64          `json:"avg_amount"`
 	SuccessRate      float64          `json:"success_rate"`
 	PaymentMethodMap map[string]int64 `json:"payment_methods"`
+	// 按状态分类统计
+	SuccessCount   int64   `json:"success_count"`
+	SuccessAmount  int64   `json:"success_amount"`
+	SuccessMoney   float64 `json:"success_money"`
+	PendingCount   int64   `json:"pending_count"`
+	PendingAmount  int64   `json:"pending_amount"`
+	PendingMoney   float64 `json:"pending_money"`
+	FailedCount    int64   `json:"failed_count"`
+	FailedAmount   int64   `json:"failed_amount"`
+	FailedMoney    float64 `json:"failed_money"`
+	RefundedCount  int64   `json:"refunded_count"`
+	RefundedAmount int64   `json:"refunded_amount"`
+	RefundedMoney  float64 `json:"refunded_money"`
 }
 
 // TopUpQuery 充值查询参数
@@ -187,26 +200,39 @@ func (s *TopUpService) fetchTopUpStatistics() (*TopUpStatistics, error) {
 		PaymentMethodMap: make(map[string]int64),
 	}
 
-	// 成功状态 (字符串类型，与 Python 版本一致)
-	// 注意：需要用括号包裹，避免 AND/OR 优先级问题
+	// 状态条件定义
 	successCondition := "(LOWER(status) IN ('success', 'completed') OR status = '1')"
+	pendingCondition := "(LOWER(status) IN ('pending', 'processing') OR status = '0')"
+	failedCondition := "(LOWER(status) IN ('failed', 'error', 'cancelled') OR status = '2')"
+	refundedCondition := "(LOWER(status) = 'refunded' OR status = '3')"
 
-	// 总统计
-	db.Model(&models.TopUp{}).
-		Where(successCondition).
-		Count(&data.TotalCount)
+	// === 总统计（所有记录） ===
+	db.Model(&models.TopUp{}).Count(&data.TotalCount)
+	db.Model(&models.TopUp{}).Select("COALESCE(SUM(amount), 0)").Scan(&data.TotalAmount)
+	db.Model(&models.TopUp{}).Select("COALESCE(SUM(money), 0)").Scan(&data.TotalMoney)
 
-	db.Model(&models.TopUp{}).
-		Where(successCondition).
-		Select("COALESCE(SUM(amount), 0)").
-		Scan(&data.TotalAmount)
+	// === 按状态分类统计 ===
+	// 成功
+	db.Model(&models.TopUp{}).Where(successCondition).Count(&data.SuccessCount)
+	db.Model(&models.TopUp{}).Where(successCondition).Select("COALESCE(SUM(amount), 0)").Scan(&data.SuccessAmount)
+	db.Model(&models.TopUp{}).Where(successCondition).Select("COALESCE(SUM(money), 0)").Scan(&data.SuccessMoney)
 
-	db.Model(&models.TopUp{}).
-		Where(successCondition).
-		Select("COALESCE(SUM(money), 0)").
-		Scan(&data.TotalMoney)
+	// 待处理
+	db.Model(&models.TopUp{}).Where(pendingCondition).Count(&data.PendingCount)
+	db.Model(&models.TopUp{}).Where(pendingCondition).Select("COALESCE(SUM(amount), 0)").Scan(&data.PendingAmount)
+	db.Model(&models.TopUp{}).Where(pendingCondition).Select("COALESCE(SUM(money), 0)").Scan(&data.PendingMoney)
 
-	// 今日统计 (使用本地时区午夜的 Unix 时间戳)
+	// 失败
+	db.Model(&models.TopUp{}).Where(failedCondition).Count(&data.FailedCount)
+	db.Model(&models.TopUp{}).Where(failedCondition).Select("COALESCE(SUM(amount), 0)").Scan(&data.FailedAmount)
+	db.Model(&models.TopUp{}).Where(failedCondition).Select("COALESCE(SUM(money), 0)").Scan(&data.FailedMoney)
+
+	// 已退款
+	db.Model(&models.TopUp{}).Where(refundedCondition).Count(&data.RefundedCount)
+	db.Model(&models.TopUp{}).Where(refundedCondition).Select("COALESCE(SUM(amount), 0)").Scan(&data.RefundedAmount)
+	db.Model(&models.TopUp{}).Where(refundedCondition).Select("COALESCE(SUM(money), 0)").Scan(&data.RefundedMoney)
+
+	// === 今日统计（仅成功） ===
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
@@ -224,16 +250,14 @@ func (s *TopUpService) fetchTopUpStatistics() (*TopUpStatistics, error) {
 		Select("COALESCE(SUM(money), 0)").
 		Scan(&data.TodayMoney)
 
-	// 平均额度
-	if data.TotalCount > 0 {
-		data.AvgAmount = float64(data.TotalAmount) / float64(data.TotalCount)
+	// 平均额度（基于成功记录）
+	if data.SuccessCount > 0 {
+		data.AvgAmount = float64(data.SuccessAmount) / float64(data.SuccessCount)
 	}
 
 	// 成功率
-	var allCount int64
-	db.Model(&models.TopUp{}).Count(&allCount)
-	if allCount > 0 {
-		data.SuccessRate = float64(data.TotalCount) / float64(allCount) * 100
+	if data.TotalCount > 0 {
+		data.SuccessRate = float64(data.SuccessCount) / float64(data.TotalCount) * 100
 	}
 
 	return data, nil
