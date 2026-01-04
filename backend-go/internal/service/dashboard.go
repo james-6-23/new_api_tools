@@ -139,13 +139,24 @@ func (s *DashboardService) fetchUsageData(period string) (*UsageData, error) {
 	data := &UsageData{Period: period}
 
 	// 计算时间范围（Unix 时间戳）
+	// 支持前端期望的格式：24h/3d/7d/14d 以及传统格式：today/week/month
 	now := time.Now()
 	var startTime int64
 	switch period {
 	case "today":
 		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
-	case "week":
-		startTime = now.AddDate(0, 0, -7).Unix()
+	case "1h":
+		startTime = now.Add(-1 * time.Hour).Unix()
+	case "6h":
+		startTime = now.Add(-6 * time.Hour).Unix()
+	case "24h":
+		startTime = now.Add(-24 * time.Hour).Unix()
+	case "3d":
+		startTime = now.Add(-3 * 24 * time.Hour).Unix()
+	case "7d", "week":
+		startTime = now.Add(-7 * 24 * time.Hour).Unix()
+	case "14d":
+		startTime = now.Add(-14 * 24 * time.Hour).Unix()
 	case "month":
 		startTime = now.AddDate(0, -1, 0).Unix()
 	default:

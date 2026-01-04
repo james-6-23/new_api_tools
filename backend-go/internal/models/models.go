@@ -115,6 +115,7 @@ type Redemption struct {
 	Name       string     `gorm:"column:name" json:"name"`
 	Quota      int64      `gorm:"column:quota" json:"quota"`
 	CreatedAt  time.Time  `gorm:"column:created_at" json:"created_at"`
+	ExpiredAt  *time.Time `gorm:"column:expired_at" json:"expired_at,omitempty"`
 	RedeemedAt *time.Time `gorm:"column:redeemed_at" json:"redeemed_at,omitempty"`
 	RedeemedBy int        `gorm:"column:redeemed_by" json:"redeemed_by"`
 	DeletedAt  *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
@@ -300,3 +301,65 @@ func (t *TopUp) IsSuccess() bool {
 func (t *TopUp) IsRefunded() bool {
 	return strings.ToLower(t.Status) == TopUpStatusRefunded
 }
+
+// ==================== AI Ban 相关模型 ====================
+
+// AIBanWhitelist AI 封禁白名单表
+type AIBanWhitelist struct {
+	ID        int        `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	UserID    int        `gorm:"column:user_id;uniqueIndex" json:"user_id"`
+	Reason    string     `gorm:"column:reason" json:"reason"`
+	AddedBy   string     `gorm:"column:added_by" json:"added_by"`
+	ExpiresAt *time.Time `gorm:"column:expires_at" json:"expires_at,omitempty"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (AIBanWhitelist) TableName() string {
+	return "aiban_whitelist"
+}
+
+// IsExpired 检查白名单条目是否过期
+func (w *AIBanWhitelist) IsExpired() bool {
+	if w.ExpiresAt == nil {
+		return false
+	}
+	return w.ExpiresAt.Before(time.Now())
+}
+
+// AIAuditLog AI 封禁审计日志表
+type AIAuditLog struct {
+	ID        int       `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	ScanID    string    `gorm:"column:scan_id;index" json:"scan_id"`
+	Action    string    `gorm:"column:action" json:"action"`
+	UserID    int       `gorm:"column:user_id;index" json:"user_id"`
+	Username  string    `gorm:"column:username" json:"username"`
+	Details   string    `gorm:"column:details;type:text" json:"details"`
+	Operator  string    `gorm:"column:operator" json:"operator"`
+	RiskScore float64   `gorm:"column:risk_score" json:"risk_score"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;index" json:"created_at"`
+}
+
+func (AIAuditLog) TableName() string {
+	return "aiban_audit_logs"
+}
+
+// AIBanConfig AI 封禁配置表
+type AIBanConfigModel struct {
+	Key       string    `gorm:"column:key;primaryKey" json:"key"`
+	Value     string    `gorm:"column:value;type:text" json:"value"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+func (AIBanConfigModel) TableName() string {
+	return "aiban_config"
+}
+
+// AI 审计动作常量
+const (
+	AIAuditActionScan     = "scan"
+	AIAuditActionBan      = "ban"
+	AIAuditActionUnban    = "unban"
+	AIAuditActionWhiteAdd = "whitelist_add"
+	AIAuditActionWhiteDel = "whitelist_del"
+	AIAuditActionConfig   = "config_update"
+)

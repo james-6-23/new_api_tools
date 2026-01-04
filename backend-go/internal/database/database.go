@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/ketches/new-api-tools/internal/config"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
@@ -214,11 +214,57 @@ func migrateLocalTables(db *gorm.DB) error {
 		return err
 	}
 
+	// AI Ban 白名单表
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS aiban_whitelist (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL UNIQUE,
+			reason TEXT,
+			added_by TEXT,
+			expires_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+
+	// AI Ban 审计日志表
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS aiban_audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			scan_id TEXT,
+			action TEXT NOT NULL,
+			user_id INTEGER,
+			username TEXT,
+			details TEXT,
+			operator TEXT,
+			risk_score REAL DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+
+	// AI Ban 配置表
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS aiban_config (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+
 	// 创建索引
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_cache_expire ON cache(expire_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_stats_type ON stats_snapshots(snapshot_type)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_user ON security_audit(user_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_ai_audit_user ON ai_audit_logs(user_id)")
+	// AI Ban 相关索引
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_scan ON aiban_audit_logs(scan_id)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_user ON aiban_audit_logs(user_id)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_created ON aiban_audit_logs(created_at)")
 
 	return nil
 }

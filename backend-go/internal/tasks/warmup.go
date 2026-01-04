@@ -327,6 +327,26 @@ func warmupLeaderboard(ctx context.Context) error {
 	return nil
 }
 
+// parseWindowToSeconds 将窗口字符串解析为秒数
+func parseWindowToSeconds(window string) int64 {
+	switch window {
+	case "1h":
+		return 3600
+	case "6h":
+		return 6 * 3600
+	case "24h":
+		return 24 * 3600
+	case "3d":
+		return 3 * 24 * 3600
+	case "7d":
+		return 7 * 24 * 3600
+	case "14d":
+		return 14 * 24 * 3600
+	default:
+		return 24 * 3600 // 默认 24 小时
+	}
+}
+
 // warmupIPMonitoring 预热 IP 监控数据
 func warmupIPMonitoring(ctx context.Context) error {
 	ipService := service.NewIPService()
@@ -339,6 +359,8 @@ func warmupIPMonitoring(ctx context.Context) error {
 	totalCount := len(windows) * len(types)
 
 	for _, window := range windows {
+		windowSeconds := parseWindowToSeconds(window)
+
 		for _, monitorType := range types {
 			select {
 			case <-ctx.Done():
@@ -351,11 +373,11 @@ func warmupIPMonitoring(ctx context.Context) error {
 
 			switch monitorType {
 			case "shared_ips":
-				_, err = ipService.GetSharedIPs(2, 200)
+				_, err = ipService.GetSharedIPs(2, 200, windowSeconds)
 			case "multi_ip_tokens":
-				_, err = ipService.GetMultiIPTokens(2, 200)
+				_, err = ipService.GetMultiIPTokens(2, 200, windowSeconds)
 			case "multi_ip_users":
-				_, err = ipService.GetMultiIPUsers(3, 200)
+				_, err = ipService.GetMultiIPUsers(3, 200, windowSeconds)
 			}
 
 			if err != nil {

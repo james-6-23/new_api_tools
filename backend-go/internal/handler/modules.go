@@ -19,6 +19,26 @@ var (
 	ipService         = service.NewIPService()
 )
 
+// parseWindowToSeconds 将窗口字符串解析为秒数
+func parseWindowToSeconds(window string) int64 {
+	switch window {
+	case "1h":
+		return 3600
+	case "6h":
+		return 6 * 3600
+	case "24h":
+		return 24 * 3600
+	case "3d":
+		return 3 * 24 * 3600
+	case "7d":
+		return 7 * 24 * 3600
+	case "14d":
+		return 14 * 24 * 3600
+	default:
+		return 24 * 3600 // 默认 24 小时
+	}
+}
+
 // ==================== Top-Up Handlers ====================
 
 // GetTopUpsHandler 获取充值记录列表
@@ -470,8 +490,10 @@ func GetIPStatsHandler(c *gin.Context) {
 func GetSharedIPsHandler(c *gin.Context) {
 	minUsers, _ := strconv.Atoi(c.DefaultQuery("min_users", "2"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	window := c.DefaultQuery("window", "24h")
+	windowSeconds := parseWindowToSeconds(window)
 
-	data, err := ipService.GetSharedIPs(minUsers, limit)
+	data, err := ipService.GetSharedIPs(minUsers, limit, windowSeconds)
 	if err != nil {
 		logger.Error("获取共享 IP 失败", zap.Error(err))
 		Error(c, 500, "获取共享 IP 失败")
@@ -485,8 +507,10 @@ func GetSharedIPsHandler(c *gin.Context) {
 func GetMultiIPTokensHandler(c *gin.Context) {
 	minIPs, _ := strconv.Atoi(c.DefaultQuery("min_ips", "5"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	window := c.DefaultQuery("window", "24h")
+	windowSeconds := parseWindowToSeconds(window)
 
-	data, err := ipService.GetMultiIPTokens(minIPs, limit)
+	data, err := ipService.GetMultiIPTokens(minIPs, limit, windowSeconds)
 	if err != nil {
 		logger.Error("获取多 IP 令牌失败", zap.Error(err))
 		Error(c, 500, "获取多 IP 令牌失败")
@@ -500,8 +524,10 @@ func GetMultiIPTokensHandler(c *gin.Context) {
 func GetMultiIPUsersHandler(c *gin.Context) {
 	minIPs, _ := strconv.Atoi(c.DefaultQuery("min_ips", "10"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	window := c.DefaultQuery("window", "24h")
+	windowSeconds := parseWindowToSeconds(window)
 
-	data, err := ipService.GetMultiIPUsers(minIPs, limit)
+	data, err := ipService.GetMultiIPUsers(minIPs, limit, windowSeconds)
 	if err != nil {
 		logger.Error("获取多 IP 用户失败", zap.Error(err))
 		Error(c, 500, "获取多 IP 用户失败")

@@ -1,17 +1,29 @@
 package service
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/database"
+	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/models"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // AnalyticsService 日志分析服务
 type AnalyticsService struct {
-	mu sync.RWMutex
+	mu           sync.RWMutex
+	isProcessing bool
+}
+
+// AnalyticsStateDB 分析状态（对应数据库 analytics_state 表）
+type AnalyticsStateDB struct {
+	LastProcessedID int64     `json:"last_processed_id"`
+	LastProcessedAt time.Time `json:"last_processed_at"`
+	TotalProcessed  int64     `json:"total_processed"`
 }
 
 // NewAnalyticsService 创建日志分析服务
@@ -94,42 +106,155 @@ type AnalyticsSummary struct {
 
 // GetState 获取分析状态
 func (s *AnalyticsService) GetState() (*AnalyticsState, error) {
-	db := database.GetMainDB()
+	mainDB := database.GetMainDB()
+	localDB := database.GetLocalDB()
+
+	s.mu.RLock()
+	isProcessing := s.isProcessing
+	s.mu.RUnlock()
 
 	state := &AnalyticsState{
-		IsProcessing: false,
+		IsProcessing: isProcessing,
 	}
 
 	// 获取总日志数
-	db.Model(&models.Log{}).Count(&state.TotalLogsCount)
+	mainDB.Model(&models.Log{}).Count(&state.TotalLogsCount)
 
-	// 已处理数（这里假设所有日志都已处理）
-	state.ProcessedCount = state.TotalLogsCount
-	state.PendingCount = 0
-	state.LastProcessedAt = time.Now().Format("2006-01-02 15:04:05")
+	// 获取已处理状态
+	dbState := s.getStateFromDB(localDB)
+	state.ProcessedCount = dbState.TotalProcessed
+	state.PendingCount = state.TotalLogsCount - state.ProcessedCount
+
+	if state.PendingCount < 0 {
+		state.PendingCount = 0
+	}
+
+	if !dbState.LastProcessedAt.IsZero() {
+		state.LastProcessedAt = dbState.LastProcessedAt.Format("2006-01-02 15:04:05")
+	}
+
+	// 估算剩余时间（假设每秒处理 5000 条）
+	if state.IsProcessing && state.PendingCount > 0 {
+		seconds := state.PendingCount / 5000
+		if seconds < 60 {
+			state.EstimatedTimeLeft = "不到 1 分钟"
+		} else if seconds < 3600 {
+			minutes := seconds / 60
+			state.EstimatedTimeLeft = fmt.Sprintf("约 %d 分钟", minutes)
+		} else {
+			state.EstimatedTimeLeft = "超过 1 小时"
+		}
+		state.ProcessingSpeed = 5000
+	}
 
 	return state, nil
 }
 
-// ProcessLogs 处理日志
+// getStateFromDB 从数据库获取分析状态
+func (s *AnalyticsService) getStateFromDB(db *gorm.DB) *AnalyticsStateDB {
+	state := &AnalyticsStateDB{}
+
+	var row struct {
+		LastProcessedID int64
+		LastProcessedAt *time.Time
+		TotalProcessed  int64
+	}
+
+	err := db.Table("analytics_state").
+		Select("last_processed_id, last_processed_at, total_processed").
+		Order("id DESC").
+		Limit(1).
+		Scan(&row).Error
+
+	if err == nil && row.LastProcessedAt != nil {
+		state.LastProcessedID = row.LastProcessedID
+		state.LastProcessedAt = *row.LastProcessedAt
+		state.TotalProcessed = row.TotalProcessed
+	}
+
+	return state
+}
+
+// updateStateInDB 更新数据库中的分析状态
+func (s *AnalyticsService) updateStateInDB(db *gorm.DB, lastID int64, processed int64) error {
+	now := time.Now()
+
+	// 使用 upsert 模式
+	return db.Exec(`
+		INSERT INTO analytics_state (id, last_processed_id, last_processed_at, total_processed, updated_at)
+		VALUES (1, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			last_processed_id = excluded.last_processed_id,
+			last_processed_at = excluded.last_processed_at,
+			total_processed = excluded.total_processed,
+			updated_at = excluded.updated_at
+	`, lastID, now, processed, now).Error
+}
+
+// ProcessLogs 处理日志（增量处理）
 func (s *AnalyticsService) ProcessLogs(batchSize int) (*ProcessResult, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.isProcessing {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("已有处理任务正在执行")
+	}
+	s.isProcessing = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.isProcessing = false
+		s.mu.Unlock()
+	}()
 
 	startTime := time.Now()
+	mainDB := database.GetMainDB()
+	localDB := database.GetLocalDB()
 
-	// 模拟日志处理
 	if batchSize <= 0 {
 		batchSize = 1000
 	}
 
-	// 实际处理逻辑可以在这里实现
-	// 例如：聚合统计、生成报表等
+	// 获取当前处理状态
+	dbState := s.getStateFromDB(localDB)
+	lastProcessedID := dbState.LastProcessedID
+	totalProcessed := dbState.TotalProcessed
+
+	// 查询新日志
+	var logs []models.Log
+	err := mainDB.Where("id > ?", lastProcessedID).
+		Order("id ASC").
+		Limit(batchSize).
+		Find(&logs).Error
+
+	if err != nil {
+		logger.Error("查询日志失败", zap.Error(err))
+		return nil, fmt.Errorf("查询日志失败: %w", err)
+	}
+
+	processedCount := int64(len(logs))
+
+	if processedCount > 0 {
+		// 更新最后处理的 ID
+		newLastID := int64(logs[len(logs)-1].ID)
+		totalProcessed += processedCount
+
+		// 更新状态到数据库
+		if err := s.updateStateInDB(localDB, newLastID, totalProcessed); err != nil {
+			logger.Error("更新处理状态失败", zap.Error(err))
+			return nil, fmt.Errorf("更新处理状态失败: %w", err)
+		}
+
+		logger.Info("日志处理完成",
+			zap.Int64("processed_count", processedCount),
+			zap.Int64("last_id", newLastID),
+			zap.Int64("total_processed", totalProcessed))
+	}
 
 	endTime := time.Now()
 
 	return &ProcessResult{
-		ProcessedCount: int64(batchSize),
+		ProcessedCount: processedCount,
 		Duration:       endTime.Sub(startTime).String(),
 		StartTime:      startTime.Format("2006-01-02 15:04:05"),
 		EndTime:        endTime.Format("2006-01-02 15:04:05"),
@@ -503,16 +628,83 @@ func (s *AnalyticsService) GetSyncStatus() (*SyncStatus, error) {
 
 // ConsistencyResult 一致性检查结果
 type ConsistencyResult struct {
-	IsConsistent bool   `json:"is_consistent"`
-	Message      string `json:"message"`
-	CheckedAt    string `json:"checked_at"`
+	IsConsistent    bool   `json:"is_consistent"`
+	Message         string `json:"message"`
+	CheckedAt       string `json:"checked_at"`
+	MainDBLogCount  int64  `json:"main_db_log_count"`
+	ProcessedCount  int64  `json:"processed_count"`
+	LastProcessedID int64  `json:"last_processed_id"`
+	MaxLogID        int64  `json:"max_log_id"`
+	NeedsReset      bool   `json:"needs_reset"`
 }
 
 // CheckConsistency 检查数据一致性
 func (s *AnalyticsService) CheckConsistency() (*ConsistencyResult, error) {
-	return &ConsistencyResult{
-		IsConsistent: true,
-		Message:      "数据一致性检查通过",
-		CheckedAt:    time.Now().Format("2006-01-02 15:04:05"),
-	}, nil
+	mainDB := database.GetMainDB()
+	localDB := database.GetLocalDB()
+
+	result := &ConsistencyResult{
+		CheckedAt: time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	// 获取主数据库日志总数
+	mainDB.Model(&models.Log{}).Count(&result.MainDBLogCount)
+
+	// 获取主数据库最大日志 ID
+	var maxLog models.Log
+	mainDB.Order("id DESC").Limit(1).Find(&maxLog)
+	result.MaxLogID = int64(maxLog.ID)
+
+	// 获取本地处理状态
+	dbState := s.getStateFromDB(localDB)
+	result.ProcessedCount = dbState.TotalProcessed
+	result.LastProcessedID = dbState.LastProcessedID
+
+	// 一致性检查逻辑
+	// 1. 如果 last_processed_id > max_log_id，说明日志被删除，需要重置
+	if result.LastProcessedID > result.MaxLogID && result.MaxLogID > 0 {
+		result.IsConsistent = false
+		result.NeedsReset = true
+		result.Message = "检测到日志删除：已处理 ID 大于当前最大日志 ID，建议重置分析状态"
+		return result, nil
+	}
+
+	// 2. 如果 processed_count > main_db_log_count，说明有日志被删除
+	if result.ProcessedCount > result.MainDBLogCount {
+		result.IsConsistent = false
+		result.NeedsReset = true
+		result.Message = "检测到日志删除：已处理数量大于当前日志总数，建议重置分析状态"
+		return result, nil
+	}
+
+	// 3. 检查是否有未处理的日志
+	pendingCount := result.MainDBLogCount - result.ProcessedCount
+	if pendingCount > 0 {
+		result.IsConsistent = true
+		result.Message = fmt.Sprintf("数据一致，有 %d 条待处理日志", pendingCount)
+	} else {
+		result.IsConsistent = true
+		result.Message = "数据一致，所有日志已处理完成"
+	}
+
+	return result, nil
+}
+
+// ResetState 重置分析状态
+func (s *AnalyticsService) ResetState() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	localDB := database.GetLocalDB()
+
+	// 删除分析状态记录
+	if err := localDB.Exec("DELETE FROM analytics_state").Error; err != nil {
+		return fmt.Errorf("重置分析状态失败: %w", err)
+	}
+
+	// 清除分析相关缓存
+	cache.DeleteByPattern("analytics:*")
+
+	logger.Info("分析状态已重置")
+	return nil
 }

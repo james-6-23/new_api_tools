@@ -191,7 +191,8 @@ func (s *IPService) fetchIPStats() (*IPStats, error) {
 }
 
 // GetSharedIPs 获取共享 IP（多用户使用同一 IP）
-func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error) {
+// windowSeconds: 时间窗口（秒），0 表示不限制时间
+func (s *IPService) GetSharedIPs(minUsers int, limit int, windowSeconds int64) ([]SharedIPInfo, error) {
 	db := database.GetMainDB()
 
 	if minUsers <= 0 {
@@ -199,6 +200,12 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 	}
 	if limit <= 0 {
 		limit = 50
+	}
+
+	// 计算时间窗口
+	var startTime int64
+	if windowSeconds > 0 {
+		startTime = time.Now().Add(-time.Duration(windowSeconds) * time.Second).Unix()
 	}
 
 	// 查找被多个用户使用的 IP
@@ -209,9 +216,14 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 		LastAt    int64
 	}
 
-	db.Model(&models.Log{}).
-		Select("ip, COUNT(DISTINCT user_id) as user_count, COUNT(*) as total_reqs, MAX(created_at) as last_at").
-		Group("ip").
+	query := db.Model(&models.Log{}).
+		Select("ip, COUNT(DISTINCT user_id) as user_count, COUNT(*) as total_reqs, MAX(created_at) as last_at")
+
+	if startTime > 0 {
+		query = query.Where("created_at >= ?", startTime)
+	}
+
+	query.Group("ip").
 		Having("user_count >= ?", minUsers).
 		Order("user_count DESC").
 		Limit(limit).
@@ -219,17 +231,23 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 
 	sharedIPs := make([]SharedIPInfo, len(results))
 	for i, r := range results {
-		// 获取该 IP 下的用户列表
+		// 获取该 IP 下的用户列表（应用相同的时间窗口过滤）
 		var users []struct {
 			UserID   int
 			Username string
 			Requests int64
 		}
-		db.Table("logs").
+		userQuery := db.Table("logs").
 			Select("logs.user_id, users.username, COUNT(*) as requests").
 			Joins("LEFT JOIN users ON logs.user_id = users.id").
-			Where("logs.ip = ?", r.IP).
-			Group("logs.user_id, users.username").
+			Where("logs.ip = ?", r.IP)
+
+		// 应用相同的时间窗口过滤
+		if startTime > 0 {
+			userQuery = userQuery.Where("logs.created_at >= ?", startTime)
+		}
+
+		userQuery.Group("logs.user_id, users.username").
 			Order("requests DESC").
 			Limit(10).
 			Scan(&users)
@@ -257,7 +275,8 @@ func (s *IPService) GetSharedIPs(minUsers int, limit int) ([]SharedIPInfo, error
 }
 
 // GetMultiIPTokens 获取多 IP 令牌（一个令牌被多个 IP 使用）
-func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo, error) {
+// windowSeconds: 时间窗口（秒），0 表示不限制时间
+func (s *IPService) GetMultiIPTokens(minIPs int, limit int, windowSeconds int64) ([]MultiIPTokenInfo, error) {
 	db := database.GetMainDB()
 
 	if minIPs <= 0 {
@@ -265,6 +284,12 @@ func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo,
 	}
 	if limit <= 0 {
 		limit = 50
+	}
+
+	// 计算时间窗口
+	var startTime int64
+	if windowSeconds > 0 {
+		startTime = time.Now().Add(-time.Duration(windowSeconds) * time.Second).Unix()
 	}
 
 	// 查找被多个 IP 使用的令牌
@@ -277,7 +302,7 @@ func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo,
 		Requests  int64
 	}
 
-	db.Table("logs").
+	query := db.Table("logs").
 		Select(`
 			logs.token_id,
 			tokens.name as token_name,
@@ -288,8 +313,13 @@ func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo,
 		`).
 		Joins("LEFT JOIN tokens ON logs.token_id = tokens.id").
 		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.token_id > 0").
-		Group("logs.token_id, tokens.name, logs.user_id, users.username").
+		Where("logs.token_id > 0")
+
+	if startTime > 0 {
+		query = query.Where("logs.created_at >= ?", startTime)
+	}
+
+	query.Group("logs.token_id, tokens.name, logs.user_id, users.username").
 		Having("ip_count >= ?", minIPs).
 		Order("ip_count DESC").
 		Limit(limit).
@@ -297,11 +327,17 @@ func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo,
 
 	tokens := make([]MultiIPTokenInfo, len(results))
 	for i, r := range results {
-		// 获取该令牌使用的 IP 列表
+		// 获取该令牌使用的 IP 列表（应用相同的时间窗口过滤）
 		var ips []string
-		db.Model(&models.Log{}).
-			Where("token_id = ?", r.TokenID).
-			Distinct("ip").
+		ipQuery := db.Model(&models.Log{}).
+			Where("token_id = ?", r.TokenID)
+
+		// 应用相同的时间窗口过滤
+		if startTime > 0 {
+			ipQuery = ipQuery.Where("created_at >= ?", startTime)
+		}
+
+		ipQuery.Distinct("ip").
 			Limit(20).
 			Pluck("ip", &ips)
 
@@ -329,7 +365,8 @@ func (s *IPService) GetMultiIPTokens(minIPs int, limit int) ([]MultiIPTokenInfo,
 }
 
 // GetMultiIPUsers 获取多 IP 用户
-func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, error) {
+// windowSeconds: 时间窗口（秒），0 表示使用今日
+func (s *IPService) GetMultiIPUsers(minIPs int, limit int, windowSeconds int64) ([]MultiIPUserInfo, error) {
 	db := database.GetMainDB()
 
 	if minIPs <= 0 {
@@ -339,10 +376,17 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 		limit = 50
 	}
 
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	// 计算时间窗口
+	var startTime int64
+	if windowSeconds > 0 {
+		startTime = time.Now().Add(-time.Duration(windowSeconds) * time.Second).Unix()
+	} else {
+		// 默认使用今日
+		now := time.Now()
+		startTime = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	}
 
-	// 查找今日使用多个 IP 的用户
+	// 查找指定时间窗口内使用多个 IP 的用户
 	var results []struct {
 		UserID   int
 		Username string
@@ -358,7 +402,7 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 			COUNT(*) as requests
 		`).
 		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.created_at >= ?", todayStart).
+		Where("logs.created_at >= ?", startTime).
 		Group("logs.user_id, users.username").
 		Having("ip_count >= ?", minIPs).
 		Order("ip_count DESC").
@@ -370,7 +414,7 @@ func (s *IPService) GetMultiIPUsers(minIPs int, limit int) ([]MultiIPUserInfo, e
 		// 获取该用户使用的 IP 列表
 		var ips []string
 		db.Model(&models.Log{}).
-			Where("user_id = ? AND created_at >= ?", r.UserID, todayStart).
+			Where("user_id = ? AND created_at >= ?", r.UserID, startTime).
 			Distinct("ip").
 			Limit(30).
 			Pluck("ip", &ips)

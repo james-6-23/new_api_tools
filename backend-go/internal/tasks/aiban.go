@@ -46,56 +46,143 @@ func AIBanScanTask(ctx context.Context) error {
 	return nil
 }
 
+// GeoIPDatabase GeoIP 数据库信息
+type GeoIPDatabase struct {
+	Name     string   // 数据库名称
+	Filename string   // 本地文件名
+	URLs     []string // 下载 URL 列表
+	MinSize  int64    // 最小文件大小（字节）
+	Required bool     // 是否必需
+}
+
+// GeoIP 数据库列表
+var geoIPDatabases = []GeoIPDatabase{
+	{
+		Name:     "Country",
+		Filename: "GeoLite2-Country.mmdb",
+		URLs: []string{
+			"https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
+			"https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
+		},
+		MinSize:  1024 * 1024, // 1MB
+		Required: true,
+	},
+	{
+		Name:     "ASN",
+		Filename: "GeoLite2-ASN.mmdb",
+		URLs: []string{
+			"https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb",
+			"https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb",
+		},
+		MinSize:  5 * 1024 * 1024, // 5MB
+		Required: false,
+	},
+	{
+		Name:     "City",
+		Filename: "GeoLite2-City.mmdb",
+		URLs: []string{
+			"https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
+			"https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
+		},
+		MinSize:  30 * 1024 * 1024, // 30MB
+		Required: false,
+	},
+}
+
 // GeoIPUpdateTask GeoIP 数据库更新任务
 // 每天检查并更新 GeoIP 数据库
 func GeoIPUpdateTask(ctx context.Context) error {
 	cfg := config.Get()
 	dbPath := cfg.GeoIP.DBPath
 	if dbPath == "" {
-		dbPath = "./data/GeoLite2-Country.mmdb"
+		dbPath = "./data"
 	}
 
-	// 检查数据库文件是否存在
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Info("GeoIP 数据库不存在，尝试下载")
-			return downloadGeoIPDatabase(ctx, dbPath)
-		}
-		return err
-	}
-
-	// 检查文件是否超过 7 天
-	if time.Since(info.ModTime()) < 7*24*time.Hour {
-		logger.Debug("GeoIP 数据库较新，无需更新",
-			zap.Time("modified", info.ModTime()))
-		return nil
-	}
-
-	logger.Info("GeoIP 数据库已过期，尝试更新",
-		zap.Time("modified", info.ModTime()))
-
-	return downloadGeoIPDatabase(ctx, dbPath)
-}
-
-// GeoIP 免费下载源（无需 License Key）
-var geoIPDownloadURLs = []string{
-	"https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
-	"https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
-}
-
-// downloadGeoIPDatabase 下载 GeoIP 数据库
-func downloadGeoIPDatabase(ctx context.Context, dbPath string) error {
 	// 确保目录存在
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(dbPath, 0755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 
-	client := &http.Client{Timeout: 2 * time.Minute}
+	updated := false
+	client := &http.Client{Timeout: 5 * time.Minute}
 
-	// 尝试从多个源下载
-	for _, url := range geoIPDownloadURLs {
-		logger.Info("正在下载 GeoIP 数据库", zap.String("url", url[:50]+"..."))
+	for _, db := range geoIPDatabases {
+		fullPath := filepath.Join(dbPath, db.Filename)
+
+		// 检查是否需要更新
+		needsUpdate := false
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				if db.Required {
+					logger.Info("GeoIP 数据库不存在，需要下载",
+						zap.String("db", db.Name))
+					needsUpdate = true
+				} else {
+					logger.Debug("GeoIP 可选数据库不存在，尝试下载",
+						zap.String("db", db.Name))
+					needsUpdate = true
+				}
+			} else {
+				logger.Warn("检查 GeoIP 数据库失败",
+					zap.String("db", db.Name),
+					zap.Error(err))
+				continue
+			}
+		} else if time.Since(info.ModTime()) >= 7*24*time.Hour {
+			logger.Info("GeoIP 数据库已过期，需要更新",
+				zap.String("db", db.Name),
+				zap.Time("modified", info.ModTime()))
+			needsUpdate = true
+		}
+
+		if !needsUpdate {
+			continue
+		}
+
+		// 下载数据库
+		if err := downloadGeoIPFile(ctx, client, db, fullPath); err != nil {
+			if db.Required {
+				logger.Error("下载必需的 GeoIP 数据库失败",
+					zap.String("db", db.Name),
+					zap.Error(err))
+			} else {
+				logger.Warn("下载可选的 GeoIP 数据库失败",
+					zap.String("db", db.Name),
+					zap.Error(err))
+			}
+			continue
+		}
+
+		updated = true
+		logger.Info("GeoIP 数据库更新完成",
+			zap.String("db", db.Name),
+			zap.String("path", fullPath))
+	}
+
+	// 如果有更新，热重载 GeoIP 数据库
+	if updated {
+		if err := geoip.Reload(); err != nil {
+			logger.Warn("重新加载 GeoIP 数据库失败", zap.Error(err))
+		} else {
+			logger.Info("GeoIP 数据库热重载完成")
+		}
+	}
+
+	return nil
+}
+
+// downloadGeoIPFile 下载单个 GeoIP 数据库文件
+func downloadGeoIPFile(ctx context.Context, client *http.Client, db GeoIPDatabase, destPath string) error {
+	for _, url := range db.URLs {
+		urlShort := url
+		if len(url) > 60 {
+			urlShort = url[:60] + "..."
+		}
+
+		logger.Info("正在下载 GeoIP 数据库",
+			zap.String("db", db.Name),
+			zap.String("url", urlShort))
 
 		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
@@ -105,18 +192,22 @@ func downloadGeoIPDatabase(ctx context.Context, dbPath string) error {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			logger.Warn("下载失败", zap.String("url", url[:50]+"..."), zap.Error(err))
+			logger.Warn("下载失败",
+				zap.String("db", db.Name),
+				zap.Error(err))
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			logger.Warn("下载失败", zap.String("url", url[:50]+"..."), zap.Int("status", resp.StatusCode))
+			logger.Warn("下载失败",
+				zap.String("db", db.Name),
+				zap.Int("status", resp.StatusCode))
 			continue
 		}
 
 		// 写入临时文件
-		tmpPath := dbPath + ".tmp"
+		tmpPath := destPath + ".tmp"
 		tmpFile, err := os.Create(tmpPath)
 		if err != nil {
 			resp.Body.Close()
@@ -134,31 +225,30 @@ func downloadGeoIPDatabase(ctx context.Context, dbPath string) error {
 			continue
 		}
 
-		// 验证文件大小（至少 1MB）
-		if written < 1024*1024 {
+		// 验证文件大小
+		if written < db.MinSize {
 			os.Remove(tmpPath)
-			logger.Warn("文件太小，可能下载不完整", zap.Int64("size", written))
+			logger.Warn("文件太小，可能下载不完整",
+				zap.String("db", db.Name),
+				zap.Int64("size", written),
+				zap.Int64("min_size", db.MinSize))
 			continue
 		}
 
 		// 替换旧文件
-		if err := os.Rename(tmpPath, dbPath); err != nil {
+		if err := os.Rename(tmpPath, destPath); err != nil {
 			os.Remove(tmpPath)
 			logger.Warn("替换文件失败", zap.Error(err))
 			continue
 		}
 
 		logger.Info("GeoIP 数据库下载完成",
-			zap.String("path", dbPath),
+			zap.String("db", db.Name),
+			zap.String("path", destPath),
 			zap.Float64("size_mb", float64(written)/1024/1024))
-
-		// 重新加载 GeoIP 数据库
-		if err := geoip.Init(); err != nil {
-			logger.Warn("重新加载 GeoIP 数据库失败", zap.Error(err))
-		}
 
 		return nil
 	}
 
-	return fmt.Errorf("所有下载源都失败")
+	return fmt.Errorf("所有下载源都失败: %s", db.Name)
 }

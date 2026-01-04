@@ -1,10 +1,15 @@
 package service
 
 import (
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ketches/new-api-tools/internal/cache"
+	"github.com/ketches/new-api-tools/internal/config"
+	"github.com/ketches/new-api-tools/internal/database"
+	"github.com/ketches/new-api-tools/internal/models"
 )
 
 // StorageService 存储管理服务
@@ -152,24 +157,149 @@ func (s *StorageService) CleanupOldLogs(retentionDays int) (int64, error) {
 
 // GetStorageUsage 获取存储使用情况
 func (s *StorageService) GetStorageUsage() (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"database": map[string]interface{}{
-			"size":        "N/A",
-			"table_count": 0,
-			"row_count":   0,
-		},
-		"cache": map[string]interface{}{
-			"size":      "N/A",
-			"key_count": 0,
-		},
-		"logs": map[string]interface{}{
-			"total_count":  0,
-			"today_count":  0,
-			"oldest_log":   "N/A",
-			"storage_size": "N/A",
-		},
+	result := map[string]interface{}{
 		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
-	}, nil
+	}
+
+	// 获取本地 SQLite 数据库信息
+	localDBInfo := s.getLocalDBInfo()
+	result["local_database"] = localDBInfo
+
+	// 获取主数据库日志统计
+	logsInfo := s.getLogsInfo()
+	result["logs"] = logsInfo
+
+	// 获取 Redis 缓存信息
+	cacheInfo := s.getCacheInfoInternal()
+	result["cache"] = cacheInfo
+
+	return result, nil
+}
+
+// getLocalDBInfo 获取本地 SQLite 数据库信息
+func (s *StorageService) getLocalDBInfo() map[string]interface{} {
+	info := map[string]interface{}{
+		"size":        "N/A",
+		"table_count": 0,
+		"tables":      []map[string]interface{}{},
+	}
+
+	cfg := config.Get()
+	if cfg == nil {
+		return info
+	}
+
+	// 获取数据库文件大小
+	dbPath := cfg.Database.LocalDBPath
+	if fileInfo, err := os.Stat(dbPath); err == nil {
+		info["size"] = formatBytes(uint64(fileInfo.Size()))
+		info["size_bytes"] = fileInfo.Size()
+	}
+
+	// 统计各表行数
+	localDB := database.GetLocalDB()
+	if localDB == nil {
+		return info
+	}
+
+	tables := []struct {
+		name  string
+		label string
+	}{
+		{"config", "配置"},
+		{"cache", "缓存"},
+		{"stats_snapshots", "统计快照"},
+		{"security_audit", "安全审计"},
+		{"ai_audit_logs", "AI 审计"},
+		{"analytics_state", "分析状态"},
+		{"user_rankings", "用户排行"},
+		{"model_stats", "模型统计"},
+		{"aiban_whitelist", "AI Ban 白名单"},
+		{"aiban_audit_logs", "AI Ban 审计"},
+		{"aiban_config", "AI Ban 配置"},
+	}
+
+	var tableInfos []map[string]interface{}
+	totalRows := int64(0)
+
+	for _, t := range tables {
+		var count int64
+		if err := localDB.Raw("SELECT COUNT(*) FROM " + t.name).Scan(&count).Error; err == nil {
+			tableInfos = append(tableInfos, map[string]interface{}{
+				"name":  t.name,
+				"label": t.label,
+				"rows":  count,
+			})
+			totalRows += count
+		}
+	}
+
+	info["table_count"] = len(tableInfos)
+	info["total_rows"] = totalRows
+	info["tables"] = tableInfos
+
+	return info
+}
+
+// getLogsInfo 获取日志统计信息
+func (s *StorageService) getLogsInfo() map[string]interface{} {
+	info := map[string]interface{}{
+		"total_count": int64(0),
+		"today_count": int64(0),
+		"oldest_log":  "N/A",
+		"newest_log":  "N/A",
+	}
+
+	mainDB := database.GetMainDB()
+	if mainDB == nil {
+		return info
+	}
+
+	// 总日志数
+	var totalCount int64
+	mainDB.Model(&models.Log{}).Count(&totalCount)
+	info["total_count"] = totalCount
+
+	// 今日日志数
+	todayStart := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location()).Unix()
+	var todayCount int64
+	mainDB.Model(&models.Log{}).Where("created_at >= ?", todayStart).Count(&todayCount)
+	info["today_count"] = todayCount
+
+	// 最早日志时间
+	var oldestLog models.Log
+	if err := mainDB.Order("id ASC").Limit(1).Find(&oldestLog).Error; err == nil && oldestLog.ID > 0 {
+		info["oldest_log"] = time.Unix(oldestLog.CreatedAt, 0).Format("2006-01-02 15:04:05")
+	}
+
+	// 最新日志时间
+	var newestLog models.Log
+	if err := mainDB.Order("id DESC").Limit(1).Find(&newestLog).Error; err == nil && newestLog.ID > 0 {
+		info["newest_log"] = time.Unix(newestLog.CreatedAt, 0).Format("2006-01-02 15:04:05")
+	}
+
+	return info
+}
+
+// getCacheInfoInternal 获取缓存信息（内部方法）
+func (s *StorageService) getCacheInfoInternal() map[string]interface{} {
+	info := map[string]interface{}{
+		"type":      "redis",
+		"connected": cache.IsConnected(),
+		"key_count": int64(0),
+		"memory":    "N/A",
+	}
+
+	if cache.IsConnected() {
+		if redisInfo, err := cache.GetInfo(); err == nil {
+			info["key_count"] = redisInfo.KeyCount
+			info["memory"] = redisInfo.MemoryUsed
+			info["hit_rate"] = redisInfo.HitRate
+			info["uptime"] = redisInfo.Uptime
+		}
+	}
+
+	return info
 }
 
 // GetConfigByKey 获取单个配置项
@@ -192,15 +322,43 @@ func (s *StorageService) DeleteConfig(key string) error {
 }
 
 // GetCacheInfo 获取缓存信息
-// TODO: 实现实际的缓存键数量统计
 func (s *StorageService) GetCacheInfo() (map[string]interface{}, error) {
-	return map[string]interface{}{
+	info := map[string]interface{}{
 		"type":       "redis",
 		"connected":  cache.IsConnected(),
-		"key_count":  0,
+		"key_count":  int64(0),
 		"memory":     "N/A",
 		"checked_at": time.Now().Format("2006-01-02 15:04:05"),
-	}, nil
+	}
+
+	if cache.IsConnected() {
+		if redisInfo, err := cache.GetInfo(); err == nil {
+			info["key_count"] = redisInfo.KeyCount
+			info["memory"] = redisInfo.MemoryUsed
+			info["hit_rate"] = redisInfo.HitRate
+			info["miss_rate"] = 100 - redisInfo.HitRate
+			info["uptime"] = redisInfo.Uptime
+		}
+	}
+
+	// 获取 SQLite 缓存表统计
+	localDB := database.GetLocalDB()
+	if localDB != nil {
+		var cacheCount int64
+		var expiredCount int64
+		now := time.Now()
+
+		localDB.Raw("SELECT COUNT(*) FROM cache").Scan(&cacheCount)
+		localDB.Raw("SELECT COUNT(*) FROM cache WHERE expire_at < ?", now).Scan(&expiredCount)
+
+		info["sqlite_cache"] = map[string]interface{}{
+			"total_entries":   cacheCount,
+			"expired_entries": expiredCount,
+			"active_entries":  cacheCount - expiredCount,
+		}
+	}
+
+	return info, nil
 }
 
 // ClearAllCache 清空所有缓存
@@ -220,12 +378,51 @@ func (s *StorageService) ClearDashboardCache() error {
 
 // CleanupExpiredCache 清理过期缓存
 func (s *StorageService) CleanupExpiredCache() (map[string]interface{}, error) {
-	// Redis 自动处理过期，这里返回统计信息
-	return map[string]interface{}{
-		"cleaned":    0,
-		"message":    "Redis 自动处理过期缓存",
-		"cleaned_at": time.Now().Format("2006-01-02 15:04:05"),
-	}, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := map[string]interface{}{
+		"redis_cleaned":  int64(0),
+		"sqlite_cleaned": int64(0),
+		"message":        "",
+		"cleaned_at":     time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	var messages []string
+
+	// Redis 自动处理过期
+	if cache.IsConnected() {
+		messages = append(messages, "Redis 自动处理过期缓存")
+	}
+
+	// 清理 SQLite 缓存表中的过期条目
+	localDB := database.GetLocalDB()
+	if localDB != nil {
+		now := time.Now()
+
+		// 先统计过期条目数
+		var expiredCount int64
+		localDB.Raw("SELECT COUNT(*) FROM cache WHERE expire_at < ?", now).Scan(&expiredCount)
+
+		if expiredCount > 0 {
+			// 删除过期条目
+			if err := localDB.Exec("DELETE FROM cache WHERE expire_at < ?", now).Error; err == nil {
+				result["sqlite_cleaned"] = expiredCount
+				messages = append(messages, fmt.Sprintf("已清理 %d 条 SQLite 过期缓存", expiredCount))
+			}
+		} else {
+			messages = append(messages, "SQLite 缓存表无过期条目")
+		}
+	}
+
+	if len(messages) > 0 {
+		result["message"] = messages[0]
+		if len(messages) > 1 {
+			result["details"] = messages
+		}
+	}
+
+	return result, nil
 }
 
 // GetStorageInfo 获取存储信息

@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **GeoIP ASN 支持**：扩展 GeoIP 模块支持 ASN 数据库查询
+  - 新增 `GeoInfo.ASN`、`GeoInfo.Organization`、`GeoInfo.City` 字段
+  - 实现 ASN 数据库热重载机制（支持运行时更新）
+  - 新增 `LookupASN()`、`GetASNInfo()` 方法
+  - 涉及文件：`pkg/geoip/geoip.go`
+- **Risk 双栈识别**：实现 IPv4/IPv6 双栈切换检测
+  - 新增 `UserRiskAnalysis.RealSwitchCount`、`DualStackSwitches` 字段
+  - 实现基于 GeoIP 位置键的智能双栈识别逻辑
+  - 涉及文件：`internal/service/risk.go`
+- **AI Ban 白名单与审计日志**：完整实现 AI 封禁管理功能
+  - 新增 `AIBanWhitelist`、`AIBanAuditLog` 数据库模型
+  - 实现白名单 CRUD（添加/删除/查询）
+  - 实现审计日志查询和批量删除
+  - 涉及文件：`internal/models/models.go`、`internal/service/aiban.go`、`internal/database/database.go`
+- **Analytics 增量聚合**：实现日志增量处理系统
+  - 新增 `AnalyticsState` 状态追踪模型
+  - 实现 `last_processed_id` 断点续传
+  - 实现分批处理和一致性检查
+  - 涉及文件：`internal/service/analytics.go`
+- **Storage 存储统计**：实现完整的存储使用情况统计
+  - 本地 SQLite 数据库大小和表统计
+  - 主数据库日志统计（总数、今日、最早/最新）
+  - Redis 缓存信息（key 数量、内存、命中率）
+  - 涉及文件：`internal/service/storage.go`
+- **Redemption 增强生成**：实现完整的兑换码生成算法
+  - 结构化 32 位 Key 格式（随机+时间戳+计数器）
+  - 随机额度支持（min/max 范围）
+  - 多过期模式（never/days/date）
+  - 涉及文件：`internal/service/redemption.go`、`internal/models/models.go`
+
+### Changed
+- **Dashboard 周期口径修复**：`fetchUsageData` 现支持 `24h/3d/7d/14d` 周期格式
+  - 兼容前端和 warmup 任务使用的周期参数
+  - 涉及文件：`internal/service/dashboard.go`
+- **IP Monitoring 窗口过滤**：所有 IP 监控 API 现支持时间窗口参数
+  - `GetSharedIPs`、`GetMultiIPTokens`、`GetMultiIPUsers` 添加 `windowSeconds` 参数
+  - warmup 任务正确传递时间窗口配置
+  - 涉及文件：`internal/service/ip.go`、`internal/tasks/warmup.go`
+- **GeoIP 更新任务增强**：自动下载并加载 ASN 数据库
+  - 涉及文件：`internal/tasks/aiban.go`
+
+### Fixed
+- **IP 监控详情查询一致性**：修复时间窗口过滤未应用于子查询的问题
+  - `GetSharedIPs` 的用户列表查询现正确应用 `windowSeconds` 过滤
+  - `GetMultiIPTokens` 的 IP 列表查询现正确应用 `windowSeconds` 过滤
+  - 涉及文件：`internal/service/ip.go`
+
+### Added
 - 完善后台任务系统，新增多阶段渐进式缓存预热机制（8 个阶段）
   - restore: 从 SQLite 恢复缓存到 Redis
   - check: 检查缓存有效性
