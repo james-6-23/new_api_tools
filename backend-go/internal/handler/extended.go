@@ -290,19 +290,29 @@ func GetAnalyticsStateHandler(c *gin.Context) {
 
 // ProcessLogsHandler 处理日志
 func ProcessLogsHandler(c *gin.Context) {
-	var req struct {
-		BatchSize int `json:"batch_size"`
-	}
-	c.ShouldBindJSON(&req)
-
-	data, err := analyticsService.ProcessLogs(req.BatchSize)
+	processed, lastLogID, err := analyticsService.ProcessLegacy()
 	if err != nil {
 		logger.Error("处理日志失败", zap.Error(err))
-		Error(c, 500, "处理失败")
+		c.JSON(200, gin.H{"success": false, "message": "处理失败: " + err.Error()})
 		return
 	}
 
-	Success(c, data)
+	if processed == 0 {
+		c.JSON(200, gin.H{
+			"success":     true,
+			"processed":   0,
+			"message":     "No new logs to process",
+			"last_log_id": lastLogID,
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success":     true,
+		"processed":   processed,
+		"message":     "Processed new logs",
+		"last_log_id": lastLogID,
+	})
 }
 
 // GetUserRequestRankingHandler 获取用户请求排行
@@ -352,9 +362,8 @@ func GetModelStatsHandler(c *gin.Context) {
 
 // GetAnalyticsSummaryHandler 获取分析摘要
 func GetAnalyticsSummaryHandler(c *gin.Context) {
-	period := c.DefaultQuery("period", "today")
-
-	data, err := analyticsService.GetSummary(period)
+	// 使用 GetFullSummary 返回前端期望的完整数据结构
+	data, err := analyticsService.GetFullSummary()
 	if err != nil {
 		logger.Error("获取分析摘要失败", zap.Error(err))
 		Error(c, 500, "获取摘要失败")
@@ -366,13 +375,13 @@ func GetAnalyticsSummaryHandler(c *gin.Context) {
 
 // ResetAnalyticsHandler 重置分析
 func ResetAnalyticsHandler(c *gin.Context) {
-	if err := analyticsService.Reset(); err != nil {
+	if err := analyticsService.ResetLegacy(); err != nil {
 		logger.Error("重置分析失败", zap.Error(err))
-		Error(c, 500, "重置失败")
+		c.JSON(200, gin.H{"success": false, "message": "重置失败: " + err.Error()})
 		return
 	}
 
-	Success(c, gin.H{"message": "重置成功"})
+	c.JSON(200, gin.H{"success": true, "message": "重置成功"})
 }
 
 // ==================== Model Status Handlers ====================
@@ -926,24 +935,18 @@ func GetStorageInfoHandler(c *gin.Context) {
 
 // BatchProcessLogsHandler 批量处理日志
 func BatchProcessLogsHandler(c *gin.Context) {
-	var req struct {
-		BatchSize int `json:"batch_size"`
-	}
-	c.ShouldBindJSON(&req)
-	if req.BatchSize <= 0 {
-		req.BatchSize = 1000
-	}
-	data, err := analyticsService.BatchProcessLogs(req.BatchSize)
+	maxIterations, _ := strconv.Atoi(c.DefaultQuery("max_iterations", "100"))
+	data, err := analyticsService.BatchProcessLegacy(maxIterations)
 	if err != nil {
-		Error(c, 500, "处理失败")
+		c.JSON(200, gin.H{"success": false, "message": "处理失败: " + err.Error()})
 		return
 	}
-	Success(c, data)
+	c.JSON(200, data)
 }
 
 // GetSyncStatusHandler 获取同步状态
 func GetSyncStatusHandler(c *gin.Context) {
-	data, err := analyticsService.GetSyncStatus()
+	data, err := analyticsService.GetLegacySyncStatus()
 	if err != nil {
 		Error(c, 500, "获取失败")
 		return
@@ -953,12 +956,36 @@ func GetSyncStatusHandler(c *gin.Context) {
 
 // CheckConsistencyHandler 检查数据一致性
 func CheckConsistencyHandler(c *gin.Context) {
-	data, err := analyticsService.CheckConsistency()
-	if err != nil {
-		Error(c, 500, "检查失败")
+	autoReset, _ := strconv.ParseBool(c.DefaultQuery("auto_reset", "false"))
+
+	if autoReset {
+		result, err := analyticsService.CheckAndAutoResetLegacy(true)
+		if err != nil {
+			c.JSON(200, gin.H{"success": false, "message": "检查失败: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{
+			"success":            true,
+			"reset":              result.Reset,
+			"reason":             result.Reason,
+			"old_last_log_id":    result.OldLastLogID,
+			"current_max_log_id": result.CurrentMaxLogID,
+		})
 		return
 	}
-	Success(c, data)
+
+	status, err := analyticsService.GetLegacySyncStatus()
+	if err != nil {
+		c.JSON(200, gin.H{"success": false, "message": "检查失败: " + err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{
+		"success":           true,
+		"data_inconsistent": status.DataInconsistent,
+		"needs_reset":       status.NeedsReset,
+		"last_log_id":       status.LastLogID,
+		"max_log_id":        status.MaxLogID,
+	})
 }
 
 // ==================== TopUp Extended Handlers ====================

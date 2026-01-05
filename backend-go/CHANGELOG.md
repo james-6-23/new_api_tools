@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **修复 /analytics 页面 TypeError 错误**：后端 `/api/analytics/summary` 返回数据结构与前端期望不一致
+  - 新增 `GetFullSummary()` 方法返回完整的 `state`、`user_request_ranking`、`user_quota_ranking`、`model_statistics` 数据
+  - 新增 `ModelStatistics`、`UserRanking`、`AnalyticsSummaryResponse` 等前端期望的数据结构
+  - 修复 `fetchModelStatisticsForSummary` 中字面量 `5` 改为 `models.LogTypeFailure` 常量
+  - 为 `fetchUserRankingForSummary` 和 `fetchModelStatisticsForSummary` 添加数据库错误检查
+  - 涉及文件：`internal/service/analytics.go`、`internal/handler/extended.go`
+- **修复 analytics_state 表无限增长**：`updateStateInDB` 从追加写入改为 upsert 模式
+  - 涉及文件：`internal/service/analytics.go`
+
+### Added
+- **Legacy Analytics 方法**：新增完整的 Legacy 分析功能支持前端同步状态显示
+  - `ProcessLegacy()`、`BatchProcessLegacy()`、`ResetLegacy()`、`GetLegacySyncStatus()`、`CheckAndAutoResetLegacy()`
+  - 支持动态批量配置、初始化截止点、数据一致性检查
+  - 涉及文件：`internal/service/analytics.go`
+- **analytics_meta 表**：新增元数据表用于存储初始化截止点等配置
+  - 涉及文件：`internal/database/database.go`
+
+### Fixed
 - **修复 users 表 created_at 列不存在错误**：NewAPI 原始 users 表没有 created_at 列，Go 后端错误引用导致 SQL 报错
   - 移除 `models.User` 结构体中不存在的 `CreatedAt` 字段
   - 修复 `GetUsers()` 函数中对 `u.created_at` 的日期过滤和排序引用，改用 `u.id DESC`

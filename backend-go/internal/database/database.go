@@ -190,6 +190,17 @@ func migrateLocalTables(db *gorm.DB) error {
 		return err
 	}
 
+	// 日志分析元数据表（用于初始化截止点、轻量缓存等）
+	if err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS analytics_meta (
+			key TEXT PRIMARY KEY,
+			value INTEGER DEFAULT 0,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`).Error; err != nil {
+		return err
+	}
+
 	// 用户排行缓存表
 	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_rankings (
