@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Dashboard 占位接口实现**：修复 3 个 Go 后端占位接口，与 Python 行为对齐
+  - `POST /api/dashboard/cache/invalidate`：实现真实 Redis 缓存清除逻辑，支持按 key 模式删除，返回实际删除的 key 数量
+  - `GET /api/dashboard/refresh-estimate`：实现基于系统规模的查询时间估算，大型系统返回详细信息
+  - `POST /api/ip/enable-all`：实现批量开启用户 IP 记录，支持 PostgreSQL jsonb 和 MySQL JSON_SET
+  - 涉及文件：`internal/handler/dashboard.go`、`internal/service/system.go`、`internal/service/ip.go`
+- **Redis KEYS 命令阻塞问题**：`DeletePattern` 改用 SCAN 迭代删除，避免大数据量下阻塞 Redis
+  - 新增 `ScanKeys` 函数用于安全获取匹配键列表
+  - `DeletePattern` 现返回 `(int64, error)`，表示实际删除的键数量
+  - 涉及文件：`internal/cache/cache.go`、`internal/cache/slot.go`、`internal/service/storage.go`、`internal/service/analytics.go`
 - **用户状态常量恢复**：恢复 `UserStatusDisabled=2`、`UserStatusBanned=3`，保持与历史数据库兼容
   - 涉及文件：`internal/models/models.go`
 - **日志类型常量统一**：将 `LogTypeFailure=5` 从 `risk.go` 移至 `models.go` 统一管理

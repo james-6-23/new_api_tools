@@ -371,7 +371,7 @@ func (s *StorageService) ClearAllCache() error {
 func (s *StorageService) ClearDashboardCache() error {
 	patterns := []string{"dashboard:*", "overview:*", "usage:*", "trends:*"}
 	for _, pattern := range patterns {
-		cache.DeleteByPattern(pattern)
+		_, _ = cache.DeleteByPattern(pattern) // 忽略返回值
 	}
 	return nil
 }

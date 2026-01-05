@@ -247,7 +247,7 @@ func (m *CacheManager) ClearSlotCache(window, sortBy string) error {
 	// L1: Redis
 	if m.redisAvailable {
 		pattern := CacheKey("slot", fmt.Sprintf("%s:%s:*", window, sortBy))
-		DeletePattern(pattern)
+		_, _ = DeletePattern(pattern) // 忽略返回值，清除失败不影响后续操作
 	}
 
 	// L2: SQLite

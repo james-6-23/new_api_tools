@@ -123,22 +123,61 @@ func TTL(key string) (time.Duration, error) {
 }
 
 // Keys 获取匹配的键列表
+// 注意：此函数使用 KEYS 命令，在大数据量下可能阻塞 Redis，建议使用 ScanKeys
 func Keys(pattern string) ([]string, error) {
 	return rdb.Keys(ctx, pattern).Result()
 }
 
-// DeletePattern 删除匹配模式的所有键
-func DeletePattern(pattern string) error {
-	keys, err := Keys(pattern)
-	if err != nil {
-		return err
+// ScanKeys 使用 SCAN 迭代获取匹配的键列表（生产环境推荐）
+// 不会阻塞 Redis，适合大数据量场景
+func ScanKeys(pattern string) ([]string, error) {
+	var keys []string
+	var cursor uint64
+	var err error
+
+	for {
+		var batch []string
+		batch, cursor, err = rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("SCAN 获取键失败: %w", err)
+		}
+		keys = append(keys, batch...)
+		if cursor == 0 {
+			break
+		}
 	}
 
-	if len(keys) > 0 {
-		return Delete(keys...)
+	return keys, nil
+}
+
+// DeletePattern 删除匹配模式的所有键（使用 SCAN，不阻塞 Redis）
+// 返回实际删除的键数量
+func DeletePattern(pattern string) (int64, error) {
+	var totalDeleted int64
+	var cursor uint64
+	var err error
+
+	for {
+		var batch []string
+		batch, cursor, err = rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return totalDeleted, fmt.Errorf("SCAN 获取键失败: %w", err)
+		}
+
+		if len(batch) > 0 {
+			deleted, delErr := rdb.Del(ctx, batch...).Result()
+			if delErr != nil {
+				return totalDeleted, fmt.Errorf("删除键失败: %w", delErr)
+			}
+			totalDeleted += deleted
+		}
+
+		if cursor == 0 {
+			break
+		}
 	}
 
-	return nil
+	return totalDeleted, nil
 }
 
 // Incr 自增
@@ -327,7 +366,7 @@ func IsConnected() bool {
 }
 
 // DeleteByPattern 按模式删除缓存
-func DeleteByPattern(pattern string) error {
+func DeleteByPattern(pattern string) (int64, error) {
 	return DeletePattern(pattern)
 }
 

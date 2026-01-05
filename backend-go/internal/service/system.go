@@ -547,3 +547,109 @@ func sprintf(format string, args ...interface{}) string {
 	}
 	return ""
 }
+
+// RefreshEstimate 刷新时间估算
+type RefreshEstimate struct {
+	EstimatedSeconds int         `json:"estimated_seconds"`
+	LastRefresh      interface{} `json:"last_refresh"`
+	Scale            string      `json:"scale,omitempty"`
+	EstimatedLogs    int64       `json:"estimated_logs,omitempty"`
+	LogsPerSecond    float64     `json:"logs_per_second,omitempty"`
+	QueryComplexity  string      `json:"query_complexity,omitempty"`
+}
+
+// GetRefreshEstimate 获取刷新时间估算
+// 对于大型/超大型系统，提供更详细的估算信息
+func (s *SystemService) GetRefreshEstimate(period string) (*RefreshEstimate, error) {
+	// 获取当前系统规模
+	scaleResult, err := s.DetectScale(false)
+	if err != nil {
+		// 如果无法检测，返回默认值
+		return &RefreshEstimate{
+			EstimatedSeconds: 30,
+			LastRefresh:      nil,
+		}, nil
+	}
+
+	scale := ScaleLevel(scaleResult.Scale)
+	estimate := &RefreshEstimate{
+		LastRefresh: nil,
+	}
+
+	// 只有大型/超大型系统才显示详细估算
+	if scale != ScaleLarge && scale != ScaleXLarge {
+		estimate.EstimatedSeconds = 30
+		return estimate, nil
+	}
+
+	// 计算详细估算
+	estimate.Scale = scaleResult.Scale
+
+	// 根据 period 估算日志数量
+	logs24h := scaleResult.Metrics.Logs24h
+	var estimatedLogs int64
+	var periodHours float64
+
+	switch period {
+	case "today", "24h":
+		estimatedLogs = logs24h
+		periodHours = 24
+	case "1h":
+		estimatedLogs = logs24h / 24
+		periodHours = 1
+	case "6h":
+		estimatedLogs = logs24h / 4
+		periodHours = 6
+	case "3d":
+		estimatedLogs = logs24h * 3
+		periodHours = 72
+	case "7d", "week":
+		estimatedLogs = logs24h * 7
+		periodHours = 168
+	case "14d":
+		estimatedLogs = logs24h * 14
+		periodHours = 336
+	case "month":
+		estimatedLogs = logs24h * 30
+		periodHours = 720
+	default:
+		estimatedLogs = logs24h
+		periodHours = 24
+	}
+
+	estimate.EstimatedLogs = estimatedLogs
+
+	// 计算每秒日志数
+	if periodHours > 0 {
+		estimate.LogsPerSecond = float64(estimatedLogs) / (periodHours * 3600)
+	}
+
+	// 基于日志数量估算查询时间
+	// 基准：10万条日志约需 1 秒，考虑索引和缓存
+	baseEstimate := float64(estimatedLogs) / 100000.0
+
+	// 根据规模调整
+	var scaleFactor float64
+	switch scale {
+	case ScaleXLarge:
+		scaleFactor = 1.5 // 超大型系统查询更慢
+		estimate.QueryComplexity = "high"
+	case ScaleLarge:
+		scaleFactor = 1.2
+		estimate.QueryComplexity = "medium"
+	default:
+		scaleFactor = 1.0
+		estimate.QueryComplexity = "low"
+	}
+
+	estimatedSeconds := int(baseEstimate * scaleFactor)
+	if estimatedSeconds < 5 {
+		estimatedSeconds = 5 // 最小 5 秒
+	} else if estimatedSeconds > 300 {
+		estimatedSeconds = 300 // 最大 5 分钟
+	}
+
+	estimate.EstimatedSeconds = estimatedSeconds
+
+	return estimate, nil
+}

@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/service"
 	"go.uber.org/zap"
@@ -137,21 +140,60 @@ func GetSystemInfo(c *gin.Context) {
 }
 
 // InvalidateCache 清除缓存
-// TODO: 实现实际的缓存清除逻辑
 func InvalidateCache(c *gin.Context) {
 	var req struct {
 		Keys []string `json:"keys"`
 	}
-	c.ShouldBindJSON(&req)
-	Success(c, gin.H{"message": "缓存已清除", "cleared": len(req.Keys)})
+
+	// 尝试绑定 JSON，忽略 EOF 错误（空 body 的情况）
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// io.EOF 表示空 body，这是允许的（清除所有缓存）
+		if !errors.Is(err, io.EOF) {
+			Error(c, 400, "请求格式错误: "+err.Error())
+			return
+		}
+	}
+
+	var totalCleared int64
+	if len(req.Keys) == 0 {
+		// 如果没有指定 keys，清除所有 dashboard 缓存
+		deleted, err := cache.DeletePattern(cache.CacheKey("dashboard", "*"))
+		if err != nil {
+			logger.Error("清除 dashboard 缓存失败", zap.Error(err))
+		}
+		totalCleared = deleted
+	} else {
+		// 根据指定的 keys 清除对应缓存
+		for _, key := range req.Keys {
+			pattern := cache.CacheKey("dashboard", key, "*")
+			deleted, err := cache.DeletePattern(pattern)
+			if err != nil {
+				logger.Warn("清除缓存失败", zap.String("key", key), zap.Error(err))
+			}
+			totalCleared += deleted
+		}
+	}
+
+	Success(c, gin.H{"message": "缓存已清除", "cleared": totalCleared})
 }
 
 // GetRefreshEstimate 获取刷新时间估算
 func GetRefreshEstimate(c *gin.Context) {
-	Success(c, gin.H{
-		"estimated_seconds": 30,
-		"last_refresh":      nil,
-	})
+	period := c.DefaultQuery("period", "24h")
+
+	systemService := service.NewSystemService()
+	data, err := systemService.GetRefreshEstimate(period)
+	if err != nil {
+		logger.Error("获取刷新时间估算失败", zap.Error(err))
+		// 返回默认值
+		Success(c, gin.H{
+			"estimated_seconds": 30,
+			"last_refresh":      nil,
+		})
+		return
+	}
+
+	Success(c, data)
 }
 
 // ==================== Top-Ups ====================
@@ -192,14 +234,18 @@ func GetSharedIPs(c *gin.Context)     { GetSharedIPsHandler(c) }
 func GetMultiIPTokens(c *gin.Context) { GetMultiIPTokensHandler(c) }
 func GetMultiIPUsers(c *gin.Context)  { GetMultiIPUsersHandler(c) }
 func EnableAllIPRecording(c *gin.Context) {
-	// Go 版本默认已记录 logs.ip；该接口主要用于兼容 Python 版本
+	ipService := service.NewIPService()
+	result, err := ipService.EnableAllIPRecording()
+	if err != nil {
+		logger.Error("批量开启 IP 记录失败", zap.Error(err))
+		Error(c, 500, "批量开启 IP 记录失败: "+err.Error())
+		return
+	}
+
 	c.JSON(200, Response{
 		Success: true,
-		Message: "已更新 0 个用户，跳过 0 个已开启的用户",
-		Data: gin.H{
-			"updated_count": 0,
-			"skipped_count": 0,
-		},
+		Message: "已更新 " + strconv.FormatInt(result.UpdatedCount, 10) + " 个用户，跳过 " + strconv.FormatInt(result.SkippedCount, 10) + " 个已开启的用户",
+		Data:    result,
 	})
 }
 func GetIPGeo(c *gin.Context)      { GetIPGeoHandler(c) }

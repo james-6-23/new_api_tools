@@ -562,7 +562,7 @@ func (s *AnalyticsService) Reset() error {
 	defer s.mu.Unlock()
 
 	// 清除所有分析相关缓存
-	cache.DeleteByPattern("analytics:*")
+	_, _ = cache.DeleteByPattern("analytics:*")
 
 	return nil
 }
@@ -703,7 +703,7 @@ func (s *AnalyticsService) ResetState() error {
 	}
 
 	// 清除分析相关缓存
-	cache.DeleteByPattern("analytics:*")
+	_, _ = cache.DeleteByPattern("analytics:*")
 
 	logger.Info("分析状态已重置")
 	return nil

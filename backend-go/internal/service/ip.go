@@ -741,3 +741,79 @@ func createIndex(db *gorm.DB, dialect string, tableName string, indexName string
 		return db.Exec(fmt.Sprintf("CREATE INDEX %s ON %s (%s)", indexName, tableName, columns)).Error
 	}
 }
+
+// EnableAllIPRecordingResult 批量开启 IP 记录结果
+type EnableAllIPRecordingResult struct {
+	UpdatedCount int64 `json:"updated_count"`
+	SkippedCount int64 `json:"skipped_count"`
+	TotalUsers   int64 `json:"total_users"`
+}
+
+// EnableAllIPRecording 为所有用户开启 IP 记录
+// 更新 users 表的 setting 字段，添加 record_ip_log: true
+func (s *IPService) EnableAllIPRecording() (*EnableAllIPRecordingResult, error) {
+	db := database.GetMainDB()
+	dialect := db.Dialector.Name()
+
+	result := &EnableAllIPRecordingResult{}
+
+	// 统计总用户数
+	if err := db.Model(&models.User{}).Where("deleted_at IS NULL").Count(&result.TotalUsers).Error; err != nil {
+		return nil, fmt.Errorf("统计总用户数失败: %w", err)
+	}
+
+	// 更新未开启的用户
+	// 对于无效 JSON 的行，重置为包含 record_ip_log 的新对象
+	var totalUpdated int64
+	if dialect == "postgres" {
+		// PostgreSQL: 分两步处理以避免无效 JSON 导致整个批量更新失败
+		// 第一步：将无效 JSON 或空值重置为默认值
+		step1Result := db.Exec(`
+			UPDATE users
+			SET setting = '{"record_ip_log": true}'
+			WHERE deleted_at IS NULL
+				AND (setting IS NULL OR setting = '' OR setting !~ '^\s*\{.*\}\s*$')
+		`)
+		if step1Result.Error == nil {
+			totalUpdated += step1Result.RowsAffected
+		}
+
+		// 第二步：更新有效 JSON 但未开启 record_ip_log 的用户
+		step2Result := db.Exec(`
+			UPDATE users
+			SET setting = (setting::jsonb || '{"record_ip_log": true}'::jsonb)::text
+			WHERE deleted_at IS NULL
+				AND setting IS NOT NULL AND setting <> '' AND setting ~ '^\s*\{.*\}\s*$'
+				AND ((setting::jsonb->>'record_ip_log') IS NULL OR (setting::jsonb->>'record_ip_log') <> 'true')
+		`)
+		if step2Result.Error != nil {
+			return nil, fmt.Errorf("批量更新用户设置失败: %w", step2Result.Error)
+		}
+		totalUpdated += step2Result.RowsAffected
+	} else {
+		// MySQL: 使用 JSON_VALID 检查，无效的直接替换
+		updateResult := db.Exec(`
+			UPDATE users
+			SET setting = CASE
+				WHEN setting IS NULL OR setting = '' OR NOT JSON_VALID(setting) THEN '{"record_ip_log": true}'
+				ELSE JSON_SET(setting, '$.record_ip_log', true)
+			END
+			WHERE deleted_at IS NULL
+				AND (setting IS NULL
+					OR setting = ''
+					OR NOT JSON_VALID(setting)
+					OR JSON_EXTRACT(setting, '$.record_ip_log') IS NULL
+					OR JSON_EXTRACT(setting, '$.record_ip_log') <> true)
+		`)
+		if updateResult.Error != nil {
+			return nil, fmt.Errorf("批量更新用户设置失败: %w", updateResult.Error)
+		}
+		totalUpdated = updateResult.RowsAffected
+	}
+
+	// 使用实际更新的行数
+	result.UpdatedCount = totalUpdated
+	result.SkippedCount = result.TotalUsers - result.UpdatedCount
+
+	return result, nil
+}
