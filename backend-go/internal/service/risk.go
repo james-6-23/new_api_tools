@@ -365,20 +365,47 @@ func (s *RiskService) GetBanRecords(page, pageSize int, userID int) ([]BanRecord
 		listTx = listTx.Where("id = ?", userID)
 	}
 	listTx.
-		Order("updated_at DESC").
+		Order("id DESC"). // users 表没有 updated_at，按 id 降序
 		Offset(offset).
 		Limit(pageSize).
 		Find(&users)
 
+	// 获取每个用户的最后请求时间（作为封禁时间的近似值）
+	userIDs := make([]int, len(users))
+	for i, u := range users {
+		userIDs[i] = u.ID
+	}
+
+	lastSeenMap := make(map[int]int64)
+	if len(userIDs) > 0 {
+		var logTimes []struct {
+			UserID   int   `gorm:"column:user_id"`
+			LastSeen int64 `gorm:"column:last_seen"`
+		}
+		db.Table("logs").
+			Select("user_id, MAX(created_at) as last_seen").
+			Where("user_id IN ?", userIDs).
+			Group("user_id").
+			Scan(&logTimes)
+		for _, lt := range logTimes {
+			lastSeenMap[lt.UserID] = lt.LastSeen
+		}
+	}
+
 	records := make([]BanRecord, len(users))
 	for i, u := range users {
+		bannedAt := ""
+		// 使用最后请求时间作为封禁时间的近似值（封禁后用户无法再请求）
+		if lastSeen, ok := lastSeenMap[u.ID]; ok && lastSeen > 0 {
+			bannedAt = time.Unix(lastSeen, 0).Format("2006-01-02 15:04:05")
+		}
 		records[i] = BanRecord{
 			ID:       u.ID,
 			UserID:   u.ID,
 			Username: u.Username,
 			BanType:  "manual",
 			BannedBy: "admin",
-			BannedAt: u.CreatedAt.Format("2006-01-02 15:04:05"), // 使用创建时间作为封禁时间的近似
+			BannedAt: bannedAt,
 		}
 	}
 

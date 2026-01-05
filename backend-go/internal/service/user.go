@@ -122,12 +122,8 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 	if query.InviterID > 0 {
 		tx = tx.Where("u.inviter_id = ?", query.InviterID)
 	}
-	if query.StartDate != "" {
-		tx = tx.Where("u.created_at >= ?", query.StartDate)
-	}
-	if query.EndDate != "" {
-		tx = tx.Where("u.created_at <= ?", query.EndDate+" 23:59:59")
-	}
+	// 注意：NewAPI 的 users 表没有 created_at 列，日期过滤暂不支持
+	// 如需按日期过滤，可考虑使用 logs 表的首次请求时间
 
 	// 获取总数
 	var total int64
@@ -135,8 +131,8 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		return nil, err
 	}
 
-	// 排序
-	orderClause := "u.created_at DESC"
+	// 排序（users 表没有 created_at，默认按 id 降序）
+	orderClause := "u.id DESC"
 	switch query.OrderBy {
 	case "quota":
 		orderClause = "u.quota DESC"
@@ -144,6 +140,8 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		orderClause = "u.used_quota DESC"
 	case "request_count":
 		orderClause = "u.request_count DESC"
+	case "id":
+		orderClause = "u.id DESC"
 	}
 
 	// 分页查询
@@ -182,6 +180,27 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		}
 	}
 
+	// 获取每个用户的首次请求时间和最后请求时间（从 logs 表）
+	// users 表没有 created_at，使用 logs 表的 MIN(created_at) 作为 first_seen
+	firstSeenMap := make(map[int]int64)
+	lastSeenMap := make(map[int]int64)
+	if len(userIDs) > 0 {
+		var logTimes []struct {
+			UserID    int   `gorm:"column:user_id"`
+			FirstSeen int64 `gorm:"column:first_seen"`
+			LastSeen  int64 `gorm:"column:last_seen"`
+		}
+		db.Table("logs").
+			Select("user_id, MIN(created_at) as first_seen, MAX(created_at) as last_seen").
+			Where("user_id IN ?", userIDs).
+			Group("user_id").
+			Scan(&logTimes)
+		for _, lt := range logTimes {
+			firstSeenMap[lt.UserID] = lt.FirstSeen
+			lastSeenMap[lt.UserID] = lt.LastSeen
+		}
+	}
+
 	// 转换为返回格式
 	records := make([]UserRecord, len(results))
 	for i, r := range results {
@@ -200,7 +219,14 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 			InviterName:  r.InviterName,
 			LinuxDoID:    r.LinuxDoID,
 		}
-		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
+		// 使用 logs 表的首次请求时间作为 created_at（first_seen）
+		if firstSeen, ok := firstSeenMap[r.ID]; ok && firstSeen > 0 {
+			records[i].CreatedAt = time.Unix(firstSeen, 0).Format("2006-01-02 15:04:05")
+		}
+		// 使用 logs 表的最后请求时间作为 last_login_at
+		if lastSeen, ok := lastSeenMap[r.ID]; ok && lastSeen > 0 {
+			records[i].LastLoginAt = time.Unix(lastSeen, 0).Format("2006-01-02 15:04:05")
+		}
 	}
 
 	// 计算总页数
@@ -252,23 +278,30 @@ func (s *UserService) fetchUserStatistics() (*UserStatistics, error) {
 		Where("deleted_at IS NULL AND status = ?", models.UserStatusBanned).
 		Count(&data.BannedUsers)
 
-	// 今日新增
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
-	db.Model(&models.User{}).
-		Where("deleted_at IS NULL AND created_at >= ?", today).
-		Count(&data.TodayNew)
+	// 使用 logs 表统计"新增用户"（首次请求时间在指定时间范围内的用户）
+	// 这是一个近似值，因为 users 表没有 created_at 列
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	weekStart := now.AddDate(0, 0, -7).Unix()
+	monthStart := now.AddDate(0, -1, 0).Unix()
 
-	// 本周新增
-	weekStart := time.Now().AddDate(0, 0, -7).Format("2006-01-02") + " 00:00:00"
-	db.Model(&models.User{}).
-		Where("deleted_at IS NULL AND created_at >= ?", weekStart).
-		Count(&data.WeekNew)
+	// 今日新增：首次请求时间在今天的用户数
+	db.Table("logs").
+		Select("COUNT(DISTINCT user_id)").
+		Where("user_id IN (SELECT user_id FROM logs GROUP BY user_id HAVING MIN(created_at) >= ?)", todayStart).
+		Scan(&data.TodayNew)
 
-	// 本月新增
-	monthStart := time.Now().AddDate(0, -1, 0).Format("2006-01-02") + " 00:00:00"
-	db.Model(&models.User{}).
-		Where("deleted_at IS NULL AND created_at >= ?", monthStart).
-		Count(&data.MonthNew)
+	// 本周新增：首次请求时间在最近7天的用户数
+	db.Table("logs").
+		Select("COUNT(DISTINCT user_id)").
+		Where("user_id IN (SELECT user_id FROM logs GROUP BY user_id HAVING MIN(created_at) >= ?)", weekStart).
+		Scan(&data.WeekNew)
+
+	// 本月新增：首次请求时间在最近30天的用户数
+	db.Table("logs").
+		Select("COUNT(DISTINCT user_id)").
+		Where("user_id IN (SELECT user_id FROM logs GROUP BY user_id HAVING MIN(created_at) >= ?)", monthStart).
+		Scan(&data.MonthNew)
 
 	// 总额度和已用额度
 	db.Model(&models.User{}).

@@ -6,6 +6,7 @@ import (
 )
 
 // User NewAPI 用户表
+// 注意：NewAPI 的 users 表没有 created_at 列
 type User struct {
 	ID               int        `gorm:"column:id;primaryKey" json:"id"`
 	Username         string     `gorm:"column:username" json:"username"`
@@ -28,7 +29,6 @@ type User struct {
 	AffQuota         int64      `gorm:"column:aff_quota" json:"aff_quota"`
 	AffHistory       int64      `gorm:"column:aff_history" json:"aff_history"`
 	InviterID        int        `gorm:"column:inviter_id" json:"inviter_id"`
-	CreatedAt        time.Time  `gorm:"column:created_at" json:"created_at"`
 	DeletedAt        *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
 }
 

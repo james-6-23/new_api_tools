@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **修复 users 表 created_at 列不存在错误**：NewAPI 原始 users 表没有 created_at 列，Go 后端错误引用导致 SQL 报错
+  - 移除 `models.User` 结构体中不存在的 `CreatedAt` 字段
+  - 修复 `GetUsers()` 函数中对 `u.created_at` 的日期过滤和排序引用，改用 `u.id DESC`
+  - 涉及文件：`internal/models/models.go`、`internal/service/user.go`、`internal/service/risk.go`
+- **基于 logs 表实现用户时间戳**：由于 users 表无 created_at，改用 logs 表提供时间信息
+  - `GetUsers()` 返回的 `created_at` 改为用户首次请求时间 (`MIN(logs.created_at)`)
+  - `GetUsers()` 返回的 `last_login_at` 改为用户最后请求时间 (`MAX(logs.created_at)`)
+  - `fetchUserStatistics()` 的今日/本周/本月新增用户统计改为基于首次请求时间
+  - `GetBanRecords()` 的 `banned_at` 改为用户最后请求时间（封禁后无法再请求）
+  - 涉及文件：`internal/service/user.go`、`internal/service/risk.go`
 - **Dashboard 占位接口实现**：修复 3 个 Go 后端占位接口，与 Python 行为对齐
   - `POST /api/dashboard/cache/invalidate`：实现真实 Redis 缓存清除逻辑，支持按 key 模式删除，返回实际删除的 key 数量
   - `GET /api/dashboard/refresh-estimate`：实现基于系统规模的查询时间估算，大型系统返回详细信息
