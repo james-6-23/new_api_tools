@@ -104,9 +104,10 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 	}
 
 	// 构建查询
+	// 注意：数据库中使用者 ID 字段名为 used_user_id（与 Python 版本一致）
 	tx := db.Table("redemptions").
 		Select("redemptions.*, users.username as redeemer_name").
-		Joins("LEFT JOIN users ON redemptions.redeemed_user_id = users.id")
+		Joins("LEFT JOIN users ON redemptions.used_user_id = users.id")
 
 	// 应用过滤条件
 	if query.Key != "" {
