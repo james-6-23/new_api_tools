@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import { RefreshCw, ShieldBan, ShieldCheck, ShieldX, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search, Timer } from 'lucide-react'
+import { RefreshCw, ShieldBan, ShieldCheck, ShieldX, Loader2, Activity, AlertTriangle, Clock, Globe, ChevronDown, Ban, Eye, EyeOff, Settings, Check, X, Search, Timer, Filter, Cpu, Tag } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
@@ -10,7 +10,7 @@ import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
 import { Select } from './ui/select'
 import { Input } from './ui/input'
-import { cn } from '../lib/utils'
+import { cn, isCloudflareIp } from '../lib/utils'
 
 type WindowKey = '1h' | '3h' | '6h' | '12h' | '24h' | '3d' | '7d'
 type SortKey = 'requests' | 'quota' | 'failure_rate'
@@ -362,7 +362,7 @@ export function RealtimeRanking() {
   })
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selected, setSelected] = useState<{ item: LeaderboardItem; window: WindowKey } | null>(null)
+  const [selected, setSelected] = useState<{ item: LeaderboardItem; window: WindowKey; endTime?: number } | null>(null)
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
@@ -438,6 +438,7 @@ export function RealtimeRanking() {
     type: 'ban' | 'unban'
     userId: number
     username: string
+    displayName?: string
     reason: string
     disableTokens: boolean
     enableTokens: boolean
@@ -458,6 +459,8 @@ export function RealtimeRanking() {
     default_prompt?: string
     whitelist_ips?: string[]
     blacklist_ips?: string[]
+    excluded_models?: string[]
+    excluded_groups?: string[]
     api_health?: {
       suspended: boolean
       consecutive_failures: number
@@ -465,6 +468,11 @@ export function RealtimeRanking() {
       cooldown_remaining: number
     }
   } | null>(null)
+
+  // 排除模型/分组配置
+  const [availableGroups, setAvailableGroups] = useState<Array<{ group_name: string; requests: number }>>([])
+  const [availableModelsForExclude, setAvailableModelsForExclude] = useState<Array<{ model_name: string; requests: number }>>([])
+  const [excludeConfigLoading, setExcludeConfigLoading] = useState(false)
 
   // AI 审查记录
   const [aiAuditLogs, setAiAuditLogs] = useState<Array<{
@@ -585,6 +593,9 @@ export function RealtimeRanking() {
   const [promptSaving, setPromptSaving] = useState(false)
   const [whitelistIpsInput, setWhitelistIpsInput] = useState('')
   const [blacklistIpsInput, setBlacklistIpsInput] = useState('')
+  // 排除模型/分组输入状态
+  const [excludedModelsInput, setExcludedModelsInput] = useState<string[]>([])
+  const [excludedGroupsInput, setExcludedGroupsInput] = useState<string[]>([])
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -825,6 +836,29 @@ export function RealtimeRanking() {
       }
     } catch (e) {
       console.error('Failed to fetch AI config:', e)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // 获取可用分组和模型列表（用于排除配置）
+  const fetchExcludeOptions = useCallback(async () => {
+    setExcludeConfigLoading(true)
+    try {
+      const [groupsRes, modelsRes] = await Promise.all([
+        fetch(`${apiUrl}/api/ai-ban/available-groups`, { headers: getAuthHeaders() }),
+        fetch(`${apiUrl}/api/ai-ban/available-models-for-exclude`, { headers: getAuthHeaders() }),
+      ])
+      const groupsData = await groupsRes.json()
+      const modelsData = await modelsRes.json()
+      if (groupsData.success) {
+        setAvailableGroups(groupsData.data?.items || [])
+      }
+      if (modelsData.success) {
+        setAvailableModelsForExclude(modelsData.data?.items || [])
+      }
+    } catch (e) {
+      console.error('Failed to fetch exclude options:', e)
+    } finally {
+      setExcludeConfigLoading(false)
     }
   }, [apiUrl, getAuthHeaders])
 
@@ -1174,6 +1208,11 @@ export function RealtimeRanking() {
     // 加载IP白名单和黑名单（每行一个IP）
     setWhitelistIpsInput((aiConfig?.whitelist_ips || []).join('\n'))
     setBlacklistIpsInput((aiConfig?.blacklist_ips || []).join('\n'))
+    // 加载排除模型和分组配置
+    setExcludedModelsInput(aiConfig?.excluded_models || [])
+    setExcludedGroupsInput(aiConfig?.excluded_groups || [])
+    // 获取可选的模型和分组列表
+    fetchExcludeOptions()
     setPromptDialogOpen(true)
   }
 
@@ -1192,6 +1231,8 @@ export function RealtimeRanking() {
           custom_prompt: promptContent,
           whitelist_ips: whitelistIps,
           blacklist_ips: blacklistIps,
+          excluded_models: excludedModelsInput,
+          excluded_groups: excludedGroupsInput,
         }),
       })
       const res = await response.json()
@@ -1334,8 +1375,8 @@ export function RealtimeRanking() {
     openUserDialog(mockItem, ipWindow)
   }
 
-  const openUserDialog = (item: LeaderboardItem, window: WindowKey) => {
-    setSelected({ item, window })
+  const openUserDialog = (item: LeaderboardItem, window: WindowKey, endTime?: number) => {
+    setSelected({ item, window, endTime })
     setDialogOpen(true)
     setAnalysis(null)
   }
@@ -1474,7 +1515,9 @@ export function RealtimeRanking() {
       if (!dialogOpen || !selected) return
       setAnalysisLoading(true)
       try {
-        const response = await fetch(`${apiUrl}/api/risk/users/${selected.item.user_id}/analysis?window=${selected.window}`, { headers: getAuthHeaders() })
+        // 如果有 endTime（如封禁时间点），则查询该时间点之前的数据
+        const endTimeParam = selected.endTime ? `&end_time=${selected.endTime}` : ''
+        const response = await fetch(`${apiUrl}/api/risk/users/${selected.item.user_id}/analysis?window=${selected.window}${endTimeParam}`, { headers: getAuthHeaders() })
         const res = await response.json()
         if (res.success) setAnalysis(res.data)
         else showToast('error', res.message || '加载分析失败')
@@ -2001,7 +2044,7 @@ export function RealtimeRanking() {
                               <TableCell className="py-4 pl-6">
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 flex items-center justify-center text-sm font-bold text-red-600 border border-red-100 dark:border-red-900/30 shadow-sm shrink-0">
-                                    {(user.username)[0]?.toUpperCase()}
+                                    {(user.display_name || user.username)[0]?.toUpperCase()}
                                   </div>
                                   <div className="flex flex-col min-w-0">
                                     <div className="flex items-center gap-2">
@@ -2020,15 +2063,22 @@ export function RealtimeRanking() {
                                             completion_tokens: 0,
                                             unique_ips: 0
                                           }
-                                          openUserDialog(mockItem, '24h')
+                                          // 传入封禁时间，查看封禁时刻的数据
+                                          openUserDialog(mockItem, '24h', user.banned_at || undefined)
                                         }}
+                                        title={user.display_name && user.display_name !== user.username ? `${user.display_name} (${user.username})` : user.username}
                                       >
-                                        {user.username}
+                                        {user.display_name || user.username}
                                       </span>
                                       <Badge variant="secondary" className="text-[10px] h-4 px-1 font-mono text-muted-foreground bg-muted hover:bg-muted">
                                         #{user.id}
                                       </Badge>
                                     </div>
+                                    {user.display_name && user.display_name !== user.username && (
+                                      <span className="text-xs text-muted-foreground/70 truncate max-w-[180px]">
+                                        @{user.username}
+                                      </span>
+                                    )}
                                     <span className="text-xs text-muted-foreground truncate max-w-[180px]">
                                       {user.email || '无邮箱'}
                                     </span>
@@ -2107,6 +2157,7 @@ export function RealtimeRanking() {
                                         type: 'unban',
                                         userId: user.id,
                                         username: user.username,
+                                        displayName: user.display_name || undefined,
                                         reason: '',
                                         disableTokens: false,
                                         enableTokens: true,
@@ -2132,7 +2183,8 @@ export function RealtimeRanking() {
                                         completion_tokens: 0,
                                         unique_ips: 0
                                       }
-                                      openUserDialog(mockItem, '24h')
+                                      // 传入封禁时间，查看封禁时刻的数据
+                                      openUserDialog(mockItem, '24h', user.banned_at || undefined)
                                     }}
                                     title="查看详情"
                                   >
@@ -2674,6 +2726,9 @@ export function RealtimeRanking() {
                               >
                                 <div className="flex items-center gap-3">
                                   <code className="text-sm bg-muted px-2 py-1 rounded font-mono text-foreground border border-border/50">{item.ip}</code>
+                                  {isCloudflareIp(item.ip) && (
+                                    <Badge className="bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100 px-1.5 py-0 text-[10px] font-bold">CF</Badge>
+                                  )}
                                   <div className="flex gap-2">
                                     <Badge variant="outline" className="font-normal bg-background">{item.token_count} 令牌</Badge>
                                     <Badge variant="outline" className="font-normal bg-background">{item.user_count} 用户</Badge>
@@ -2851,7 +2906,12 @@ export function RealtimeRanking() {
                                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                         {item.ips.map((ip) => (
                                           <div key={ip.ip} className="flex items-center justify-between text-xs bg-background/50 rounded-md px-3 py-2 border border-border/40 hover:border-primary/20 transition-colors">
-                                            <code className="font-mono text-foreground font-semibold text-xs">{ip.ip}</code>
+                                            <div className="flex items-center gap-1.5">
+                                              <code className="font-mono text-foreground font-semibold text-xs">{ip.ip}</code>
+                                              {isCloudflareIp(ip.ip) && (
+                                                <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
+                                              )}
+                                            </div>
                                             <div className="flex items-center gap-1.5">
                                               <span className="text-primary font-bold tabular-nums font-mono">{formatNumber(ip.request_count)}</span>
                                               <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tighter opacity-60">reqs</span>
@@ -2959,9 +3019,14 @@ export function RealtimeRanking() {
                                 <TableCell className="hidden md:table-cell py-2.5">
                                   <div className="flex flex-wrap gap-1.5">
                                     {item.top_ips.slice(0, 2).map((ip) => (
-                                      <code key={ip.ip} className="text-xs font-medium bg-muted/80 px-2 py-1 rounded font-mono border border-border/50 text-foreground/90 tabular-nums">
-                                        {ip.ip}
-                                      </code>
+                                      <div key={ip.ip} className="flex items-center gap-1">
+                                        <code className="text-xs font-medium bg-muted/80 px-2 py-1 rounded font-mono border border-border/50 text-foreground/90 tabular-nums">
+                                          {ip.ip}
+                                        </code>
+                                        {isCloudflareIp(ip.ip) && (
+                                          <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0.5 text-[9px] font-bold rounded">CF</span>
+                                        )}
+                                      </div>
                                     ))}
                                     {item.ip_count > 2 && (
                                       <button
@@ -3336,9 +3401,14 @@ export function RealtimeRanking() {
                     {aiSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
                     保存
                   </Button>
-                  <Button onClick={handleOpenPromptDialog} variant="outline" className="min-w-[120px]">
+                  <Button onClick={handleOpenPromptDialog} variant="outline" className="min-w-[120px] relative">
                     <Settings className="h-4 w-4 mr-2" />
-                    自定义提示词
+                    高级配置
+                    {((aiConfig?.excluded_models?.length || 0) > 0 || (aiConfig?.excluded_groups?.length || 0) > 0 || aiConfig?.custom_prompt) && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-purple-500 rounded-full text-[10px] text-white flex items-center justify-center">
+                        {(aiConfig?.excluded_models?.length || 0) + (aiConfig?.excluded_groups?.length || 0) + (aiConfig?.custom_prompt ? 1 : 0)}
+                      </span>
+                    )}
                   </Button>
                 </div>
               </div>
@@ -4176,6 +4246,9 @@ export function RealtimeRanking() {
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-muted-foreground w-5">{idx + 1}</span>
                             <code className="text-xs font-mono bg-muted/60 px-2 py-0.5 rounded border border-border/40 text-foreground">{ip.ip}</code>
+                            {isCloudflareIp(ip.ip) && (
+                              <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0.5 text-[9px] font-bold rounded">CF</span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="py-3 text-right">
@@ -4240,6 +4313,11 @@ export function RealtimeRanking() {
                 <DialogTitle className="text-xl">用户行为分析</DialogTitle>
                 <DialogDescription className="mt-1.5 flex items-center gap-2 flex-wrap">
                   <Badge variant="outline">{selected ? WINDOW_LABELS[selected.window] : '-'}</Badge>
+                  {selected?.endTime && (
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800">
+                      封禁时刻: {new Date(selected.endTime * 1000).toLocaleString('zh-CN')}
+                    </Badge>
+                  )}
                   <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
                   {analysis?.user.linux_do_id && (
                     <a
@@ -4344,7 +4422,12 @@ export function RealtimeRanking() {
                         return (
                           <div key={ip.ip} className="space-y-1.5">
                             <div className="flex justify-between text-xs">
-                              <span className="font-medium truncate">{ip.ip}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium truncate">{ip.ip}</span>
+                                {isCloudflareIp(ip.ip) && (
+                                  <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded shrink-0">CF</span>
+                                )}
+                              </div>
                               <span className="text-muted-foreground">{formatNumber(ip.requests)} ({pct.toFixed(0)}%)</span>
                             </div>
                             <Progress value={pct} className="h-1.5" />
@@ -4458,6 +4541,9 @@ export function RealtimeRanking() {
                                   <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
                                     {detail.from_ip}
                                   </code>
+                                  {isCloudflareIp(detail.from_ip) && (
+                                    <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
+                                  )}
                                   {detail.from_version && (
                                     <span className={cn(
                                       "text-[10px] px-1 py-0.5 rounded",
@@ -4477,6 +4563,9 @@ export function RealtimeRanking() {
                                   <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
                                     {detail.to_ip}
                                   </code>
+                                  {isCloudflareIp(detail.to_ip) && (
+                                    <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
+                                  )}
                                   {detail.to_version && (
                                     <span className={cn(
                                       "text-[10px] px-1 py-0.5 rounded",
@@ -4606,6 +4695,7 @@ export function RealtimeRanking() {
                         type: 'unban',
                         userId: analysis.user.id,
                         username: analysis.user.username,
+                        displayName: analysis.user.display_name || undefined,
                         reason: '',
                         disableTokens: false,
                         enableTokens: true,
@@ -4627,6 +4717,7 @@ export function RealtimeRanking() {
                         type: 'ban',
                         userId: analysis.user.id,
                         username: analysis.user.username,
+                        displayName: analysis.user.display_name || undefined,
                         reason: '',
                         disableTokens: true,
                         enableTokens: false,
@@ -4683,8 +4774,8 @@ export function RealtimeRanking() {
             </DialogTitle>
             <DialogDescription className="text-sm">
               {banConfirmDialog.type === 'ban'
-                ? <span className="block break-words">即将封禁用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>
-                : <span className="block break-words">即将解封用户 <span className="font-medium text-foreground">{banConfirmDialog.username}</span></span>}
+                ? <span className="block break-words">即将封禁用户 <span className="font-medium text-foreground">{banConfirmDialog.displayName || banConfirmDialog.username}</span>{banConfirmDialog.displayName && banConfirmDialog.displayName !== banConfirmDialog.username && <span className="text-muted-foreground"> (@{banConfirmDialog.username})</span>}</span>
+                : <span className="block break-words">即将解封用户 <span className="font-medium text-foreground">{banConfirmDialog.displayName || banConfirmDialog.username}</span>{banConfirmDialog.displayName && banConfirmDialog.displayName !== banConfirmDialog.username && <span className="text-muted-foreground"> (@{banConfirmDialog.username})</span>}</span>}
             </DialogDescription>
           </DialogHeader>
 
@@ -4876,13 +4967,13 @@ export function RealtimeRanking() {
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-600">
-                            {user.username.charAt(0).toUpperCase()}
+                            {(user.display_name || user.username).charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{user.username}</span>
+                              <span className="font-medium text-sm">{user.display_name || user.username}</span>
                               {user.display_name && user.display_name !== user.username && (
-                                <span className="text-xs text-muted-foreground">({user.display_name})</span>
+                                <span className="text-xs text-muted-foreground">@{user.username}</span>
                               )}
                               {user.is_admin && (
                                 <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-amber-100 text-amber-700">
@@ -4953,10 +5044,13 @@ export function RealtimeRanking() {
                           <TableCell className="py-2.5">
                             <div className="flex items-center gap-2">
                               <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-medium text-slate-600">
-                                {user.username.charAt(0).toUpperCase()}
+                                {(user.display_name || user.username).charAt(0).toUpperCase()}
                               </div>
                               <div>
-                                <div className="font-medium text-sm">{user.username}</div>
+                                <div className="font-medium text-sm">{user.display_name || user.username}</div>
+                                {user.display_name && user.display_name !== user.username && (
+                                  <div className="text-xs text-muted-foreground/70">@{user.username}</div>
+                                )}
                                 <div className="text-xs text-muted-foreground">ID: {user.user_id}</div>
                               </div>
                             </div>
@@ -5023,17 +5117,24 @@ export function RealtimeRanking() {
               <div>
                 <DialogTitle className="text-xl flex items-center gap-2">
                   <Settings className="h-5 w-5 text-purple-500" />
-                  自定义 AI 评估提示词
+                  AI 封禁高级配置
                 </DialogTitle>
                 <DialogDescription className="mt-1">
-                  自定义提示词用于指导 AI 如何分析用户行为和做出封禁决策。留空则使用系统默认提示词。
+                  配置 IP 白名单/黑名单、排除模型/分组、自定义 AI 评估提示词等高级选项。
                 </DialogDescription>
               </div>
-              {aiConfig?.custom_prompt && (
-                <Badge variant="secondary" className="px-3 py-1 bg-purple-100 text-purple-700">
-                  已自定义
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {((aiConfig?.excluded_models?.length || 0) > 0 || (aiConfig?.excluded_groups?.length || 0) > 0) && (
+                  <Badge variant="secondary" className="px-3 py-1 bg-amber-100 text-amber-700">
+                    排除规则 {(aiConfig?.excluded_models?.length || 0) + (aiConfig?.excluded_groups?.length || 0)}
+                  </Badge>
+                )}
+                {aiConfig?.custom_prompt && (
+                  <Badge variant="secondary" className="px-3 py-1 bg-purple-100 text-purple-700">
+                    已自定义提示词
+                  </Badge>
+                )}
+              </div>
             </div>
           </DialogHeader>
 
@@ -5142,6 +5243,116 @@ export function RealtimeRanking() {
               </div>
             </div>
 
+            {/* 排除模型/分组配置 */}
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+              <h4 className="font-semibold text-amber-800 flex items-center gap-2 mb-3">
+                <Filter className="h-4 w-4" />
+                排除模型 / 分组配置
+                {excludeConfigLoading && <Loader2 className="h-3 w-3 animate-spin text-amber-500" />}
+              </h4>
+              <div className="text-xs text-amber-700 mb-3 bg-white/50 rounded p-2 border border-amber-200">
+                配置的模型或分组请求不计入风险分析。当用户的排除请求占比 ≥ 80% 时，该用户将跳过 AI 审查。
+                适用于嵌入式模型、翻译模型等高并发场景。
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 排除模型 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-amber-700 flex items-center gap-1">
+                    <Cpu className="h-3.5 w-3.5" />
+                    排除模型（不计入风险分析）
+                  </label>
+                  <div className="bg-white border border-amber-200 rounded-lg p-2 max-h-32 overflow-y-auto space-y-1">
+                    {availableModelsForExclude.length === 0 ? (
+                      <div className="text-xs text-slate-400 p-2 text-center">
+                        {excludeConfigLoading ? '加载中...' : '暂无可用模型数据'}
+                      </div>
+                    ) : (
+                      availableModelsForExclude.map((model) => (
+                        <label
+                          key={model.model_name}
+                          className="flex items-center gap-2 p-1.5 rounded hover:bg-amber-50 cursor-pointer text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={excludedModelsInput.includes(model.model_name)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setExcludedModelsInput([...excludedModelsInput, model.model_name])
+                              } else {
+                                setExcludedModelsInput(excludedModelsInput.filter(m => m !== model.model_name))
+                              }
+                            }}
+                            className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                          />
+                          <span className="flex-1 truncate font-mono">{model.model_name}</span>
+                          <span className="text-slate-400 text-[10px]">{model.requests.toLocaleString()} 次</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>已选 {excludedModelsInput.length} 个模型</span>
+                    {excludedModelsInput.length > 0 && (
+                      <button
+                        onClick={() => setExcludedModelsInput([])}
+                        className="text-amber-600 hover:text-amber-700"
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 排除分组 */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-amber-700 flex items-center gap-1">
+                    <Tag className="h-3.5 w-3.5" />
+                    排除分组（不计入风险分析）
+                  </label>
+                  <div className="bg-white border border-amber-200 rounded-lg p-2 max-h-32 overflow-y-auto space-y-1">
+                    {availableGroups.length === 0 ? (
+                      <div className="text-xs text-slate-400 p-2 text-center">
+                        {excludeConfigLoading ? '加载中...' : '暂无可用分组数据'}
+                      </div>
+                    ) : (
+                      availableGroups.map((group) => (
+                        <label
+                          key={group.group_name}
+                          className="flex items-center gap-2 p-1.5 rounded hover:bg-amber-50 cursor-pointer text-xs"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={excludedGroupsInput.includes(group.group_name)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setExcludedGroupsInput([...excludedGroupsInput, group.group_name])
+                              } else {
+                                setExcludedGroupsInput(excludedGroupsInput.filter(g => g !== group.group_name))
+                              }
+                            }}
+                            className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                          />
+                          <span className="flex-1 truncate">{group.group_name}</span>
+                          <span className="text-slate-400 text-[10px]">{group.requests.toLocaleString()} 次</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>已选 {excludedGroupsInput.length} 个分组</span>
+                    {excludedGroupsInput.length > 0 && (
+                      <button
+                        onClick={() => setExcludedGroupsInput([])}
+                        className="text-amber-600 hover:text-amber-700"
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* 提示词编辑区 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -5173,7 +5384,7 @@ export function RealtimeRanking() {
 
           <DialogFooter className="p-4 border-t bg-muted/5 flex justify-between items-center">
             <div className="text-xs text-slate-500">
-              * 修改提示词后，下次 AI 评估将使用新的提示词
+              * 修改配置后，下次 AI 评估将使用新的配置
             </div>
             <div className="flex gap-3">
               <Button
@@ -5189,7 +5400,7 @@ export function RealtimeRanking() {
                 className="bg-purple-600 hover:bg-purple-700 text-white min-w-[100px]"
               >
                 {promptSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
-                保存提示词
+                保存配置
               </Button>
             </div>
           </DialogFooter>

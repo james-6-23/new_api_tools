@@ -31,6 +31,8 @@ class SaveConfigRequest(BaseModel):
     custom_prompt: Optional[str] = None  # 自定义 AI 评估提示词
     whitelist_ips: Optional[list] = None  # IP 白名单（可信IP，如办公室、机房IP）
     blacklist_ips: Optional[list] = None  # IP 黑名单（已知恶意IP）
+    excluded_models: Optional[list] = None  # 排除模型列表（这些模型的请求不计入风险分析）
+    excluded_groups: Optional[list] = None  # 排除分组列表（这些分组的请求不计入风险分析）
 
 
 class FetchModelsRequest(BaseModel):
@@ -98,6 +100,10 @@ async def save_config(
         config["whitelist_ips"] = request.whitelist_ips
     if request.blacklist_ips is not None:
         config["blacklist_ips"] = request.blacklist_ips
+    if request.excluded_models is not None:
+        config["excluded_models"] = request.excluded_models
+    if request.excluded_groups is not None:
+        config["excluded_groups"] = request.excluded_groups
 
     if not config:
         raise HTTPException(status_code=400, detail="没有要保存的配置")
@@ -153,6 +159,40 @@ async def clear_audit_logs(
         "success": True,
         "message": f"已清空 {count} 条记录",
         "count": count,
+    }
+
+
+@router.get("/available-groups")
+async def get_available_groups(
+    days: int = Query(default=7, ge=1, le=30, description="查询最近多少天的数据"),
+    _: str = Depends(verify_auth),
+):
+    """获取最近使用的分组列表（用于配置排除分组）"""
+    service = get_ai_auto_ban_service()
+    groups = service.get_available_groups(days=days)
+    return {
+        "success": True,
+        "data": {
+            "items": groups,
+            "total": len(groups),
+        },
+    }
+
+
+@router.get("/available-models-for-exclude")
+async def get_available_models_for_exclude(
+    days: int = Query(default=7, ge=1, le=30, description="查询最近多少天的数据"),
+    _: str = Depends(verify_auth),
+):
+    """获取最近使用的模型列表（用于配置排除模型，与 AI API 的模型列表不同）"""
+    service = get_ai_auto_ban_service()
+    models = service.get_available_models(days=days)
+    return {
+        "success": True,
+        "data": {
+            "items": models,
+            "total": len(models),
+        },
     }
 
 

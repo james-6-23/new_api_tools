@@ -101,10 +101,11 @@ DEFAULT_ASSESSMENT_PROMPT = """你是一个 API 风控系统的 AI 助手。请�
 
 ## 判断标准
 1. **IP 切换异常**：几秒内频繁切换 IP 是明显异常（可能是多人共用账号）
-2. **Token 轮换**：使用多个 Token 且每个 Token 请求很少，可能在规避限制
-3. **双栈用户**：同一位置的 IPv4/IPv6 切换是正常行为，不应视为风险
-4. 多项风险标签叠加时风险更高
-5. 该用户已通过请求量门槛（>= 50次），属于活跃用户
+2. **长停留时间豁免**：如果平均 IP 停留时间 >= 300秒（5分钟），即使有快速切换也可能是网络波动，应降低风险
+3. **Token 轮换**：使用多个 Token 且每个 Token 请求很少，可能在规避限制
+4. **双栈用户**：同一位置的 IPv4/IPv6 切换是正常行为，不应视为风险
+5. 多项风险标签叠加时风险更高
+6. 该用户已通过请求量门槛（>= 50次），属于活跃用户
 
 注意：空回复率和失败率不作为判断依据，因为嵌入模型本身不返回文本内容。
 
@@ -166,6 +167,11 @@ class AIAutoBanService:
         # IP 白名单和黑名单（用于提示词变量，帮助 AI 做出更准确的判断）
         self._whitelist_ips = stored_config.get("whitelist_ips", [])
         self._blacklist_ips = stored_config.get("blacklist_ips", [])
+
+        # 排除模型列表（这些模型的请求不计入风险分析，如嵌入、翻译模型）
+        self._excluded_models = stored_config.get("excluded_models", [])
+        # 排除分组列表（这些分组的请求不计入风险分析，如高并发专用分组）
+        self._excluded_groups = stored_config.get("excluded_groups", [])
 
         # 白名单用户ID（从本地存储读取）
         whitelist_ids = stored_config.get("whitelist_ids", [])
@@ -392,6 +398,7 @@ class AIAutoBanService:
            - IP数量过多 (>= 10)
            - IP快速切换 (>= 3次/60秒内)
            - IP跳动异常 (平均停留<30秒且切换>=3次)
+        3. 排除的模型/分组请求占比 < 80%（主要使用排除模型/分组的用户不进入可疑列表）
 
         注意：空回复率和失败率不作为筛选条件，因为嵌入模型本身不返回文本内容
         """
@@ -412,6 +419,8 @@ class AIAutoBanService:
         ip_risk_flags = {"MANY_IPS", "IP_RAPID_SWITCH", "IP_HOPPING"}
         # 最低请求量门槛
         min_requests_threshold = 50
+        # 排除模型/分组的请求占比阈值（超过此比例则跳过）
+        excluded_ratio_threshold = 0.8
 
         for user in candidates:
             user_id = user.get("user_id")
@@ -430,6 +439,11 @@ class AIAutoBanService:
             if total_requests < min_requests_threshold:
                 continue
 
+            # 检查排除的模型/分组
+            if self._should_exclude_by_model_or_group(analysis, total_requests, excluded_ratio_threshold):
+                logger.debug(f"AI封禁: 用户 {user_id} 主要使用排除的模型/分组，跳过")
+                continue
+
             risk_flags = set(analysis.get("risk", {}).get("risk_flags", []))
 
             # 判断是否可疑 - 只检查 IP 相关风险
@@ -446,6 +460,58 @@ class AIAutoBanService:
                     break
 
         return suspicious
+
+    def _should_exclude_by_model_or_group(
+        self,
+        analysis: Dict[str, Any],
+        total_requests: int,
+        threshold: float = 0.8
+    ) -> bool:
+        """
+        检查用户是否应该因为主要使用排除的模型/分组而被排除
+
+        Args:
+            analysis: 用户分析数据
+            total_requests: 用户总请求数
+            threshold: 排除阈值，排除请求占比超过此值则返回 True
+
+        Returns:
+            True 表示应该排除（跳过该用户），False 表示不排除
+        """
+        if not self._excluded_models and not self._excluded_groups:
+            return False
+
+        if total_requests <= 0:
+            return False
+
+        excluded_requests = 0
+
+        # 检查排除的模型
+        if self._excluded_models:
+            top_models = analysis.get("top_models", [])
+            for model in top_models:
+                model_name = model.get("model_name", "")
+                # 支持前缀匹配（如 text-embedding-* 匹配所有嵌入模型）
+                for excluded in self._excluded_models:
+                    if excluded.endswith("*"):
+                        if model_name.startswith(excluded[:-1]):
+                            excluded_requests += model.get("requests", 0)
+                            break
+                    elif model_name == excluded:
+                        excluded_requests += model.get("requests", 0)
+                        break
+
+        # 检查排除的分组
+        if self._excluded_groups:
+            top_groups = analysis.get("top_groups", [])
+            for group in top_groups:
+                group_name = group.get("group_name", "")
+                if group_name in self._excluded_groups:
+                    excluded_requests += group.get("requests", 0)
+
+        # 计算排除请求占比
+        excluded_ratio = excluded_requests / total_requests
+        return excluded_ratio >= threshold
 
     def _build_assessment_prompt(self, analysis: Dict[str, Any]) -> str:
         """构建 AI 评估 Prompt（支持自定义提示词）"""
@@ -1284,6 +1350,9 @@ class AIAutoBanService:
             # IP 白名单/黑名单
             "whitelist_ips": self._whitelist_ips,
             "blacklist_ips": self._blacklist_ips,
+            # 排除模型/分组（这些请求不计入风险分析）
+            "excluded_models": self._excluded_models,
+            "excluded_groups": self._excluded_groups,
             # API 健康状态
             "api_health": {
                 "suspended": self._api_suspended,
@@ -1315,6 +1384,83 @@ class AIAutoBanService:
     def get_scan_interval(self) -> int:
         """获取定时扫描间隔（分钟），0 表示关闭"""
         return self._scan_interval_minutes
+
+    def get_available_groups(self, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        获取最近使用的分组列表（用于配置排除分组）
+
+        Args:
+            days: 查询最近多少天的数据
+
+        Returns:
+            分组列表，包含分组名称和请求数
+        """
+        from .database import get_db_manager, DatabaseEngine
+
+        try:
+            db = get_db_manager()
+            db.connect()
+
+            is_pg = db.config.engine == DatabaseEngine.POSTGRESQL
+            group_col = '"group"' if is_pg else '`group`'
+
+            now = int(time.time())
+            start_time = now - (days * 24 * 3600)
+
+            sql = f"""
+                SELECT COALESCE({group_col}, 'default') as group_name, COUNT(*) as requests
+                FROM logs
+                WHERE created_at >= :start_time AND type IN (2, 5)
+                GROUP BY COALESCE({group_col}, 'default')
+                ORDER BY requests DESC
+                LIMIT 50
+            """
+
+            rows = db.execute(sql, {"start_time": start_time})
+            return [
+                {"group_name": r.get("group_name") or "default", "requests": int(r.get("requests") or 0)}
+                for r in (rows or [])
+            ]
+        except Exception as e:
+            logger.error(f"获取可用分组列表失败: {e}")
+            return []
+
+    def get_available_models(self, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        获取最近使用的模型列表（用于配置排除模型）
+
+        Args:
+            days: 查询最近多少天的数据
+
+        Returns:
+            模型列表，包含模型名称和请求数
+        """
+        from .database import get_db_manager
+
+        try:
+            db = get_db_manager()
+            db.connect()
+
+            now = int(time.time())
+            start_time = now - (days * 24 * 3600)
+
+            sql = """
+                SELECT COALESCE(model_name, 'unknown') as model_name, COUNT(*) as requests
+                FROM logs
+                WHERE created_at >= :start_time AND type IN (2, 5)
+                GROUP BY COALESCE(model_name, 'unknown')
+                ORDER BY requests DESC
+                LIMIT 100
+            """
+
+            rows = db.execute(sql, {"start_time": start_time})
+            return [
+                {"model_name": r.get("model_name") or "unknown", "requests": int(r.get("requests") or 0)}
+                for r in (rows or [])
+            ]
+        except Exception as e:
+            logger.error(f"获取可用模型列表失败: {e}")
+            return []
 
 
 # 全局实例
