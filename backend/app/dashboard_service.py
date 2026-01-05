@@ -385,10 +385,6 @@ class DashboardService:
                     quota_used=0,
                     unique_users=0,
                 ))
-                    request_count=0,
-                    quota_used=0,
-                    unique_users=0,
-                ))
 
         return trends
 
