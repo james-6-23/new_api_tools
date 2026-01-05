@@ -345,20 +345,26 @@ func (s *RiskService) GetUserRiskAnalysis(userID int) (*UserRiskAnalysis, error)
 	return analysis, nil
 }
 
-// GetBanRecords 获取封禁记录
-func (s *RiskService) GetBanRecords(page, pageSize int) ([]BanRecord, int64, error) {
+// GetBanRecords 获取封禁记录（简化版：以 users.status=ban 为准）
+func (s *RiskService) GetBanRecords(page, pageSize int, userID int) ([]BanRecord, int64, error) {
 	db := database.GetMainDB()
 
 	// 查询被封禁的用户
 	var users []models.User
 	var total int64
 
-	db.Model(&models.User{}).
-		Where("status = ? AND deleted_at IS NULL", models.UserStatusBanned).
-		Count(&total)
+	tx := db.Model(&models.User{}).Where("status = ? AND deleted_at IS NULL", models.UserStatusBanned)
+	if userID > 0 {
+		tx = tx.Where("id = ?", userID)
+	}
+	tx.Count(&total)
 
 	offset := (page - 1) * pageSize
-	db.Where("status = ? AND deleted_at IS NULL", models.UserStatusBanned).
+	listTx := db.Where("status = ? AND deleted_at IS NULL", models.UserStatusBanned)
+	if userID > 0 {
+		listTx = listTx.Where("id = ?", userID)
+	}
+	listTx.
 		Order("updated_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -379,94 +385,550 @@ func (s *RiskService) GetBanRecords(page, pageSize int) ([]BanRecord, int64, err
 	return records, total, nil
 }
 
-// GetTokenRotation 获取令牌轮换情况
-func (s *RiskService) GetTokenRotation(limit int) ([]TokenRotation, error) {
+// GetTokenRotationUsers 检测 Token 轮换行为（与 Python /api/risk/token-rotation 对齐）
+func (s *RiskService) GetTokenRotationUsers(windowSeconds int64, minTokens int, maxRequestsPerToken int, limit int) (map[string]interface{}, error) {
 	db := database.GetMainDB()
+	now := time.Now().Unix()
+	startTime := now - windowSeconds
 
-	// 获取24小时内令牌变动较大的用户（Unix 时间戳）
-	yesterday := time.Now().Add(-24 * time.Hour).Unix()
-
-	var results []struct {
-		UserID     int
-		Username   string
-		TokenCount int
-		NewTokens  int
+	if minTokens <= 0 {
+		minTokens = 5
+	}
+	if maxRequestsPerToken <= 0 {
+		maxRequestsPerToken = 10
+	}
+	if limit <= 0 {
+		limit = 50
 	}
 
-	db.Table("users").
+	type row struct {
+		UserID        int
+		Username      string
+		TokenCount    int
+		TotalRequests int64
+	}
+
+	var rows []row
+	if err := db.Table("logs").
 		Select(`
-			users.id as user_id,
-			users.username,
-			(SELECT COUNT(*) FROM tokens WHERE tokens.user_id = users.id AND tokens.deleted_at IS NULL) as token_count,
-			(SELECT COUNT(*) FROM tokens WHERE tokens.user_id = users.id AND tokens.created_at >= ?) as new_tokens
-		`, yesterday).
-		Where("users.deleted_at IS NULL").
-		Order("new_tokens DESC").
+			logs.user_id as user_id,
+			MAX(users.username) as username,
+			COUNT(DISTINCT logs.token_id) as token_count,
+			COUNT(*) as total_requests
+		`).
+		Joins("LEFT JOIN users ON logs.user_id = users.id").
+		Where("logs.created_at >= ? AND logs.created_at <= ? AND logs.type IN ? AND logs.user_id IS NOT NULL AND logs.token_id IS NOT NULL AND logs.token_id > 0",
+			startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure},
+		).
+		Group("logs.user_id").
+		Having("COUNT(DISTINCT logs.token_id) >= ?", minTokens).
+		Order("token_count DESC, total_requests DESC").
 		Limit(limit).
-		Scan(&results)
-
-	rotations := make([]TokenRotation, len(results))
-	for i, r := range results {
-		rotationRate := float64(0)
-		if r.TokenCount > 0 {
-			rotationRate = float64(r.NewTokens) / float64(r.TokenCount) * 100
-		}
-		rotations[i] = TokenRotation{
-			UserID:       r.UserID,
-			Username:     r.Username,
-			TokenCount:   r.TokenCount,
-			NewTokens:    r.NewTokens,
-			RotationRate: rotationRate,
-		}
+		Scan(&rows).Error; err != nil {
+		return nil, err
 	}
 
-	return rotations, nil
+	items := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		if r.TokenCount <= 0 {
+			continue
+		}
+		avg := float64(r.TotalRequests) / float64(r.TokenCount)
+		if avg > float64(maxRequestsPerToken) {
+			continue
+		}
+
+		// Token 详情（最多 10 个）
+		type tokenRow struct {
+			TokenID   int
+			TokenName string
+			Requests  int64
+			FirstUsed int64
+			LastUsed  int64
+		}
+		var tokenRows []tokenRow
+		db.Table("logs").
+			Select(`
+				token_id as token_id,
+				MAX(token_name) as token_name,
+				COUNT(*) as requests,
+				MIN(created_at) as first_used,
+				MAX(created_at) as last_used
+			`).
+			Where("created_at >= ? AND created_at <= ? AND user_id = ? AND token_id IS NOT NULL AND token_id > 0 AND type IN ?",
+				startTime, now, r.UserID, []int{models.LogTypeConsume, models.LogTypeFailure},
+			).
+			Group("token_id").
+			Order("requests DESC").
+			Limit(10).
+			Scan(&tokenRows)
+
+		tokens := make([]map[string]interface{}, 0, len(tokenRows))
+		for _, t := range tokenRows {
+			tokens = append(tokens, map[string]interface{}{
+				"token_id":   t.TokenID,
+				"token_name": t.TokenName,
+				"requests":   t.Requests,
+				"first_used": t.FirstUsed,
+				"last_used":  t.LastUsed,
+			})
+		}
+
+		riskLevel := "medium"
+		if r.TokenCount >= 10 {
+			riskLevel = "high"
+		}
+
+		items = append(items, map[string]interface{}{
+			"user_id":                r.UserID,
+			"username":               r.Username,
+			"token_count":            r.TokenCount,
+			"total_requests":         r.TotalRequests,
+			"avg_requests_per_token": avg,
+			"tokens":                 tokens,
+			"risk_level":             riskLevel,
+		})
+	}
+
+	return map[string]interface{}{
+		"items":          items,
+		"total":          len(items),
+		"window_seconds": windowSeconds,
+		"thresholds": map[string]interface{}{
+			"min_tokens":             minTokens,
+			"max_requests_per_token": maxRequestsPerToken,
+		},
+	}, nil
 }
 
-// GetAffiliatedAccounts 获取关联账户
-func (s *RiskService) GetAffiliatedAccounts(userID int) ([]map[string]interface{}, error) {
+// GetAffiliatedAccounts 检测关联账号（邀请链）（与 Python /api/risk/affiliated-accounts 对齐）
+func (s *RiskService) GetAffiliatedAccounts(minInvited int, includeActivity bool, limit int) (map[string]interface{}, error) {
 	db := database.GetMainDB()
 
-	// 获取该用户使用过的 IP
-	var userIPs []string
-	db.Model(&models.Log{}).
-		Where("user_id = ?", userID).
-		Distinct("ip").
-		Limit(100).
-		Pluck("ip", &userIPs)
-
-	if len(userIPs) == 0 {
-		return []map[string]interface{}{}, nil
+	if minInvited <= 0 {
+		minInvited = 3
+	}
+	if limit <= 0 {
+		limit = 50
 	}
 
-	// 查找使用相同 IP 的其他用户
-	var results []struct {
-		UserID    int
-		Username  string
-		SharedIPs int
+	type inviterRow struct {
+		InviterID    int
+		InvitedCount int64
+	}
+	var inviters []inviterRow
+	if err := db.Model(&models.User{}).
+		Select("inviter_id as inviter_id, COUNT(*) as invited_count").
+		Where("inviter_id IS NOT NULL AND inviter_id <> 0 AND deleted_at IS NULL AND status != ?", models.UserStatusBanned).
+		Group("inviter_id").
+		Having("COUNT(*) >= ?", minInvited).
+		Order("invited_count DESC").
+		Limit(limit).
+		Scan(&inviters).Error; err != nil {
+		return nil, err
 	}
 
-	db.Table("logs").
-		Select("logs.user_id, users.username, COUNT(DISTINCT logs.ip) as shared_ips").
-		Joins("LEFT JOIN users ON logs.user_id = users.id").
-		Where("logs.ip IN ? AND logs.user_id != ?", userIPs, userID).
-		Group("logs.user_id, users.username").
-		Having("shared_ips >= 3").
-		Order("shared_ips DESC").
-		Limit(20).
-		Scan(&results)
+	items := make([]map[string]interface{}, 0, len(inviters))
+	for _, row := range inviters {
+		// inviter info
+		var inviter models.User
+		db.Where("id = ? AND deleted_at IS NULL", row.InviterID).First(&inviter)
 
-	accounts := make([]map[string]interface{}, len(results))
-	for i, r := range results {
-		accounts[i] = map[string]interface{}{
-			"user_id":    r.UserID,
-			"username":   r.Username,
-			"shared_ips": r.SharedIPs,
-			"relation":   "shared_ip",
+		// invited users (include banned for risk stats)
+		var invited []models.User
+		db.Where("inviter_id = ? AND deleted_at IS NULL", row.InviterID).
+			Order("id").
+			Find(&invited)
+
+		invitedUsers := make([]map[string]interface{}, 0, len(invited))
+		totalUsedQuota := int64(0)
+		totalRequests := int64(0)
+		activeCount := 0
+		bannedCount := 0
+
+		for _, u := range invited {
+			invitedUsers = append(invitedUsers, map[string]interface{}{
+				"user_id":       u.ID,
+				"username":      u.Username,
+				"display_name":  u.DisplayName,
+				"status":        u.Status,
+				"used_quota":    u.UsedQuota,
+				"request_count": u.RequestCount,
+				"group":         u.Group,
+			})
+
+			totalUsedQuota += u.UsedQuota
+			totalRequests += int64(u.RequestCount)
+			if u.RequestCount > 0 {
+				activeCount++
+			}
+			if u.Status == models.UserStatusBanned {
+				bannedCount++
+			}
 		}
+
+		riskLevel := "low"
+		riskReasons := []string{}
+		if row.InvitedCount >= 10 {
+			riskLevel = "high"
+			riskReasons = append(riskReasons, fmt.Sprintf("邀请账号数量过多(%d)", row.InvitedCount))
+		} else if row.InvitedCount >= 5 {
+			riskLevel = "medium"
+			riskReasons = append(riskReasons, fmt.Sprintf("邀请账号数量较多(%d)", row.InvitedCount))
+		}
+		if includeActivity && activeCount > 0 && float64(totalRequests)/float64(activeCount) < 10 {
+			if riskLevel == "low" {
+				riskLevel = "medium"
+			} else {
+				riskLevel = "high"
+			}
+			riskReasons = append(riskReasons, "被邀请账号活跃度低")
+		}
+		if bannedCount > 0 {
+			riskLevel = "high"
+			riskReasons = append(riskReasons, fmt.Sprintf("有%d个账号已被封禁", bannedCount))
+		}
+
+		items = append(items, map[string]interface{}{
+			"inviter_id":       row.InviterID,
+			"inviter_username": inviter.Username,
+			"inviter_status":   inviter.Status,
+			"invited_count":    row.InvitedCount,
+			"invited_users":    invitedUsers,
+			"stats": map[string]interface{}{
+				"total_used_quota": totalUsedQuota,
+				"total_requests":   totalRequests,
+				"active_count":     activeCount,
+				"banned_count":     bannedCount,
+			},
+			"risk_level":   riskLevel,
+			"risk_reasons": riskReasons,
+		})
 	}
 
-	return accounts, nil
+	return map[string]interface{}{
+		"items": items,
+		"total": len(items),
+		"thresholds": map[string]interface{}{
+			"min_invited": minInvited,
+		},
+	}, nil
+}
+
+// GetSameIPRegistrations 检测同 IP 注册（以窗口内首次请求 IP 近似）（与 Python /api/risk/same-ip-registrations 对齐）
+func (s *RiskService) GetSameIPRegistrations(windowSeconds int64, minUsers int, limit int) (map[string]interface{}, error) {
+	db := database.GetMainDB()
+	now := time.Now().Unix()
+	startTime := now - windowSeconds
+
+	if minUsers <= 0 {
+		minUsers = 3
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	firstTimes := db.Table("logs").
+		Select("user_id, MIN(created_at) as first_request_time").
+		Where("created_at >= ? AND created_at <= ? AND user_id IS NOT NULL AND ip IS NOT NULL AND ip <> ''", startTime, now).
+		Group("user_id")
+
+	type ipRow struct {
+		IP        string
+		UserCount int64
+	}
+	var ipRows []ipRow
+	if err := db.Table("(?) t", firstTimes).
+		Select("l.ip as ip, COUNT(*) as user_count").
+		Joins("JOIN logs l ON l.user_id = t.user_id AND l.created_at = t.first_request_time").
+		Group("l.ip").
+		Having("COUNT(*) >= ?", minUsers).
+		Order("user_count DESC").
+		Limit(limit).
+		Scan(&ipRows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]map[string]interface{}, 0, len(ipRows))
+	for _, r := range ipRows {
+		// user_ids under this ip
+		var userIDs []int
+		db.Table("(?) t", firstTimes).
+			Select("t.user_id").
+			Joins("JOIN logs l ON l.user_id = t.user_id AND l.created_at = t.first_request_time").
+			Where("l.ip = ?", r.IP).
+			Order("t.first_request_time ASC").
+			Pluck("t.user_id", &userIDs)
+
+		var users []models.User
+		if len(userIDs) > 0 {
+			db.Where("id IN ? AND deleted_at IS NULL", userIDs).Find(&users)
+		}
+
+		userItems := make([]map[string]interface{}, 0, len(users))
+		bannedCount := 0
+		for _, u := range users {
+			userItems = append(userItems, map[string]interface{}{
+				"user_id":       u.ID,
+				"username":      u.Username,
+				"status":        u.Status,
+				"used_quota":    u.UsedQuota,
+				"request_count": u.RequestCount,
+			})
+			if u.Status == models.UserStatusBanned {
+				bannedCount++
+			}
+		}
+
+		riskLevel := "medium"
+		if r.UserCount >= 5 || bannedCount > 0 {
+			riskLevel = "high"
+		}
+
+		items = append(items, map[string]interface{}{
+			"ip":           r.IP,
+			"user_count":   r.UserCount,
+			"users":        userItems,
+			"banned_count": bannedCount,
+			"risk_level":   riskLevel,
+		})
+	}
+
+	return map[string]interface{}{
+		"items":          items,
+		"total":          len(items),
+		"window_seconds": windowSeconds,
+		"thresholds": map[string]interface{}{
+			"min_users": minUsers,
+		},
+	}, nil
+}
+
+// GetRealtimeLeaderboard 获取单窗口实时排行（与 Python /api/risk/leaderboards 对齐）
+func (s *RiskService) GetRealtimeLeaderboard(windowSeconds int64, limit int, sortBy string) ([]map[string]interface{}, error) {
+	db := database.GetMainDB()
+	now := time.Now().Unix()
+	startTime := now - windowSeconds
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if sortBy == "" {
+		sortBy = "requests"
+	}
+
+	type row struct {
+		UserID           int
+		Username         string
+		UserStatus       int
+		TotalRequests    int64
+		FailureRequests  int64
+		QuotaUsed        int64
+		PromptTokens     int64
+		CompletionTokens int64
+		UniqueIPs        int64
+	}
+
+	var rows []row
+	orderClause := "total_requests DESC"
+	switch sortBy {
+	case "quota":
+		orderClause = "quota_used DESC"
+	case "failure_rate":
+		orderClause = "failure_requests DESC"
+	}
+
+	if err := db.Table("logs").
+		Select(`
+			logs.user_id as user_id,
+			MAX(users.username) as username,
+			MAX(users.status) as user_status,
+			COUNT(*) as total_requests,
+			SUM(CASE WHEN logs.type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			COALESCE(SUM(logs.quota), 0) as quota_used,
+			COALESCE(SUM(logs.prompt_tokens), 0) as prompt_tokens,
+			COALESCE(SUM(logs.completion_tokens), 0) as completion_tokens,
+			COUNT(DISTINCT NULLIF(logs.ip, '')) as unique_ips
+		`).
+		Joins("LEFT JOIN users ON logs.user_id = users.id").
+		Where("logs.created_at >= ? AND logs.created_at <= ? AND logs.type IN ? AND logs.user_id IS NOT NULL",
+			startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure},
+		).
+		Group("logs.user_id").
+		Order(orderClause).
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		total := r.TotalRequests
+		failureRate := float64(0)
+		if total > 0 {
+			failureRate = float64(r.FailureRequests) / float64(total)
+		}
+		items = append(items, map[string]interface{}{
+			"user_id":           r.UserID,
+			"username":          r.Username,
+			"user_status":       r.UserStatus,
+			"request_count":     r.TotalRequests,
+			"failure_requests":  r.FailureRequests,
+			"failure_rate":      failureRate,
+			"quota_used":        r.QuotaUsed,
+			"prompt_tokens":     r.PromptTokens,
+			"completion_tokens": r.CompletionTokens,
+			"unique_ips":        r.UniqueIPs,
+		})
+	}
+
+	return items, nil
+}
+
+// GetUserAnalysis 获取用户分析（与 Python /api/risk/users/{user_id}/analysis 对齐的简化版）
+func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[string]interface{}, error) {
+	db := database.GetMainDB()
+	now := time.Now().Unix()
+	startTime := now - windowSeconds
+
+	var user models.User
+	if err := db.Where("id = ? AND deleted_at IS NULL", userID).First(&user).Error; err != nil {
+		return nil, fmt.Errorf("用户不存在")
+	}
+
+	type summaryRow struct {
+		TotalRequests    int64
+		SuccessRequests  int64
+		FailureRequests  int64
+		QuotaUsed        int64
+		PromptTokens     int64
+		CompletionTokens int64
+		AvgUseTime       float64
+		UniqueIPs        int64
+		UniqueTokens     int64
+		UniqueModels     int64
+		UniqueChannels   int64
+		EmptyCount       int64
+	}
+	var summary summaryRow
+	if err := db.Table("logs").
+		Select(`
+			COUNT(*) as total_requests,
+			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
+			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			COALESCE(SUM(quota), 0) as quota_used,
+			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+			COALESCE(AVG(use_time), 0) as avg_use_time,
+			COUNT(DISTINCT NULLIF(ip, '')) as unique_ips,
+			COUNT(DISTINCT token_id) as unique_tokens,
+			COUNT(DISTINCT model_name) as unique_models,
+			COUNT(DISTINCT channel_id) as unique_channels,
+			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
+		`).
+		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND type IN ?", userID, startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure}).
+		Scan(&summary).Error; err != nil {
+		return nil, err
+	}
+
+	// top models
+	type modelRow struct {
+		ModelName       string
+		Requests        int64
+		QuotaUsed       int64
+		SuccessRequests int64
+		FailureRequests int64
+		EmptyCount      int64
+	}
+	var modelRows []modelRow
+	db.Table("logs").
+		Select(`
+			COALESCE(model_name, 'unknown') as model_name,
+			COUNT(*) as requests,
+			COALESCE(SUM(quota), 0) as quota_used,
+			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
+			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
+		`).
+		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND type IN ?", userID, startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure}).
+		Group("COALESCE(model_name, 'unknown')").
+		Order("requests DESC").
+		Limit(10).
+		Scan(&modelRows)
+
+	topModels := make([]map[string]interface{}, 0, len(modelRows))
+	for _, m := range modelRows {
+		topModels = append(topModels, map[string]interface{}{
+			"model_name":       m.ModelName,
+			"requests":         m.Requests,
+			"quota_used":       m.QuotaUsed,
+			"success_requests": m.SuccessRequests,
+			"failure_requests": m.FailureRequests,
+			"empty_count":      m.EmptyCount,
+		})
+	}
+
+	// top IPs
+	type ipRow struct {
+		IP       string
+		Requests int64
+	}
+	var ipRows []ipRow
+	db.Table("logs").
+		Select("ip, COUNT(*) as requests").
+		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND type IN ? AND ip IS NOT NULL AND ip <> ''", userID, startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure}).
+		Group("ip").
+		Order("requests DESC").
+		Limit(10).
+		Scan(&ipRows)
+
+	topIPs := make([]map[string]interface{}, 0, len(ipRows))
+	for _, ip := range ipRows {
+		topIPs = append(topIPs, map[string]interface{}{
+			"ip":       ip.IP,
+			"requests": ip.Requests,
+		})
+	}
+
+	return map[string]interface{}{
+		"user": map[string]interface{}{
+			"id":           user.ID,
+			"username":     user.Username,
+			"display_name": user.DisplayName,
+			"email":        user.Email,
+			"status":       user.Status,
+			"group":        user.Group,
+			"linux_do_id":  user.LinuxDoID,
+		},
+		"summary": map[string]interface{}{
+			"total_requests":    summary.TotalRequests,
+			"success_requests":  summary.SuccessRequests,
+			"failure_requests":  summary.FailureRequests,
+			"quota_used":        summary.QuotaUsed,
+			"prompt_tokens":     summary.PromptTokens,
+			"completion_tokens": summary.CompletionTokens,
+			"avg_use_time":      summary.AvgUseTime,
+			"unique_ips":        summary.UniqueIPs,
+			"unique_tokens":     summary.UniqueTokens,
+			"unique_models":     summary.UniqueModels,
+			"unique_channels":   summary.UniqueChannels,
+			"empty_count":       summary.EmptyCount,
+			"empty_rate": func() float64 {
+				if summary.SuccessRequests == 0 {
+					return 0
+				}
+				return float64(summary.EmptyCount) / float64(summary.SuccessRequests)
+			}(),
+			"failure_rate": func() float64 {
+				if summary.TotalRequests == 0 {
+					return 0
+				}
+				return float64(summary.FailureRequests) / float64(summary.TotalRequests)
+			}(),
+		},
+		"top_models": topModels,
+		"top_ips":    topIPs,
+	}, nil
 }
 
 // analyzeIPSwitches 分析用户 IP 切换行为
@@ -582,56 +1044,4 @@ func (s *RiskService) analyzeIPSwitches(userID int) *IPSwitchAnalysis {
 	analysis.Switches = switches
 
 	return analysis
-}
-
-// GetSameIPRegistrations 获取同 IP 注册用户
-func (s *RiskService) GetSameIPRegistrations(limit int) ([]map[string]interface{}, error) {
-	db := database.GetMainDB()
-
-	// 查找注册 IP 相同的用户组
-	// 注意：这里假设 users 表有 register_ip 字段
-	var results []struct {
-		RegisterIP string
-		UserCount  int
-	}
-
-	// 由于可能没有 register_ip 字段，这里使用 logs 表的首次访问 IP
-	db.Table("logs").
-		Select("ip as register_ip, COUNT(DISTINCT user_id) as user_count").
-		Group("ip").
-		Having("user_count > 1").
-		Order("user_count DESC").
-		Limit(limit).
-		Scan(&results)
-
-	data := make([]map[string]interface{}, len(results))
-	for i, r := range results {
-		// 获取该 IP 下的用户列表
-		var users []struct {
-			UserID   int
-			Username string
-		}
-		db.Table("logs").
-			Select("DISTINCT logs.user_id, users.username").
-			Joins("LEFT JOIN users ON logs.user_id = users.id").
-			Where("logs.ip = ?", r.RegisterIP).
-			Limit(10).
-			Scan(&users)
-
-		userList := make([]map[string]interface{}, len(users))
-		for j, u := range users {
-			userList[j] = map[string]interface{}{
-				"user_id":  u.UserID,
-				"username": u.Username,
-			}
-		}
-
-		data[i] = map[string]interface{}{
-			"ip":         r.RegisterIP,
-			"user_count": r.UserCount,
-			"users":      userList,
-		}
-	}
-
-	return data, nil
 }

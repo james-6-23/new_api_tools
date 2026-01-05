@@ -201,6 +201,7 @@ const (
 	LogTypeConsume = 2
 	LogTypeManage  = 3
 	LogTypeSystem  = 4
+	LogTypeFailure = 5 // 失败日志
 )
 
 // 渠道状态

@@ -1,12 +1,14 @@
 package service
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/database"
 	"github.com/ketches/new-api-tools/internal/models"
 	"github.com/ketches/new-api-tools/pkg/geoip"
+	"gorm.io/gorm"
 )
 
 // IPService IP 监控服务
@@ -594,42 +596,148 @@ type UserIPInfo struct {
 	GeoInfo    map[string]interface{} `json:"geo_info"`
 }
 
-// GetUserIPs 获取用户的 IP 列表
-func (s *IPService) GetUserIPs(userID int, limit int) ([]UserIPInfo, error) {
+// GetUserIPs 获取用户在时间窗口内的唯一 IP 列表（与 Python /api/ip/users/{user_id}/ips 对齐）
+func (s *IPService) GetUserIPs(userID int, limit int, windowSeconds int64) ([]string, error) {
 	db := database.GetMainDB()
 
 	if limit <= 0 {
 		limit = 100
 	}
-
-	var results []struct {
-		IP       string
-		Requests int64
-		LastAt   int64
+	if windowSeconds <= 0 {
+		windowSeconds = 24 * 3600
 	}
 
-	db.Model(&models.Log{}).
-		Select("ip, COUNT(*) as requests, MAX(created_at) as last_at").
-		Where("user_id = ?", userID).
-		Group("ip").
-		Order("requests DESC").
-		Limit(limit).
-		Scan(&results)
+	since := time.Now().Unix() - windowSeconds
 
-	ips := make([]UserIPInfo, len(results))
-	for i, r := range results {
-		geo := geoip.Lookup(r.IP)
-		ips[i] = UserIPInfo{
-			IP:         r.IP,
-			Requests:   r.Requests,
-			LastActive: time.Unix(r.LastAt, 0).Format("2006-01-02 15:04:05"),
-			GeoInfo: map[string]interface{}{
-				"country":      geo.Country,
-				"country_code": geo.CountryCode,
-				"continent":    geo.Continent,
-			},
-		}
+	var ips []string
+	if err := db.Model(&models.Log{}).
+		Select("ip").
+		Where("user_id = ? AND created_at >= ? AND ip IS NOT NULL AND ip <> ''", userID, since).
+		Group("ip").
+		Order("COUNT(*) DESC").
+		Limit(limit).
+		Pluck("ip", &ips).Error; err != nil {
+		return nil, err
 	}
 
 	return ips, nil
+}
+
+type IndexStatus struct {
+	Indexes  map[string]map[string]interface{} `json:"indexes"`
+	Total    int                               `json:"total"`
+	Existing int                               `json:"existing"`
+	Missing  int                               `json:"missing"`
+	AllReady bool                              `json:"all_ready"`
+}
+
+var ipRecommendedIndexes = []struct {
+	name    string
+	table   string
+	columns string
+}{
+	{"idx_logs_user_created_ip", "logs", "user_id, created_at, ip"},
+	{"idx_logs_created_token_ip", "logs", "created_at, token_id, ip"},
+	{"idx_logs_created_ip_token", "logs", "created_at, ip, token_id"},
+}
+
+// GetIndexStatus 获取 IP 监控推荐索引状态
+func (s *IPService) GetIndexStatus() (*IndexStatus, error) {
+	db := database.GetMainDB()
+	dialect := db.Dialector.Name()
+
+	status := &IndexStatus{
+		Indexes: map[string]map[string]interface{}{},
+		Total:   len(ipRecommendedIndexes),
+	}
+
+	for _, idx := range ipRecommendedIndexes {
+		exists, err := indexExists(db, dialect, idx.table, idx.name)
+		entry := map[string]interface{}{"exists": exists, "table": idx.table}
+		if err != nil {
+			entry["exists"] = false
+			entry["error"] = true
+		}
+		status.Indexes[idx.name] = entry
+		if exists {
+			status.Existing++
+		} else {
+			status.Missing++
+		}
+	}
+
+	status.AllReady = status.Missing == 0
+	return status, nil
+}
+
+// EnsureIndexes 确保 IP 监控推荐索引存在，返回每个索引是否新建
+func (s *IPService) EnsureIndexes() (map[string]bool, int, int, error) {
+	db := database.GetMainDB()
+	dialect := db.Dialector.Name()
+
+	results := make(map[string]bool, len(ipRecommendedIndexes))
+	created := 0
+	existing := 0
+
+	for _, idx := range ipRecommendedIndexes {
+		exists, err := indexExists(db, dialect, idx.table, idx.name)
+		if err == nil && exists {
+			results[idx.name] = false
+			existing++
+			continue
+		}
+
+		if err := createIndex(db, dialect, idx.table, idx.name, idx.columns); err != nil {
+			return nil, 0, 0, err
+		}
+
+		results[idx.name] = true
+		created++
+	}
+
+	return results, created, existing, nil
+}
+
+func indexExists(db *gorm.DB, dialect string, tableName string, indexName string) (bool, error) {
+	switch dialect {
+	case "postgres":
+		var count int64
+		if err := db.Raw(
+			"SELECT COUNT(1) FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?",
+			indexName,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	case "sqlite":
+		var count int64
+		if err := db.Raw(
+			fmt.Sprintf("SELECT COUNT(1) FROM pragma_index_list('%s') WHERE name = ?", tableName),
+			indexName,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	default: // mysql / mariadb
+		var count int64
+		if err := db.Raw(
+			`SELECT COUNT(1) FROM information_schema.statistics
+			 WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+			tableName, indexName,
+		).Scan(&count).Error; err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	}
+}
+
+func createIndex(db *gorm.DB, dialect string, tableName string, indexName string, columns string) error {
+	switch dialect {
+	case "postgres":
+		return db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON %s (%s)`, indexName, tableName, columns)).Error
+	case "sqlite":
+		return db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON %s (%s)`, indexName, tableName, columns)).Error
+	default:
+		return db.Exec(fmt.Sprintf("CREATE INDEX %s ON %s (%s)", indexName, tableName, columns)).Error
+	}
 }

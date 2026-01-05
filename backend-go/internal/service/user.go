@@ -17,6 +17,15 @@ func NewUserService() *UserService {
 	return &UserService{}
 }
 
+// ActivityStats 用户活跃度统计（与 Python /api/users/stats 对齐）
+type ActivityStats struct {
+	TotalUsers        int64 `json:"total_users"`
+	ActiveUsers       int64 `json:"active_users"`
+	InactiveUsers     int64 `json:"inactive_users"`
+	VeryInactiveUsers int64 `json:"very_inactive_users"`
+	NeverRequested    int64 `json:"never_requested"`
+}
+
 // UserRecord 用户记录
 type UserRecord struct {
 	ID           int    `json:"id"`
@@ -291,7 +300,7 @@ func (s *UserService) GetBannedUsers(page, pageSize int) (*UserListResult, error
 }
 
 // BanUser 封禁用户
-func (s *UserService) BanUser(userID int, reason string) error {
+func (s *UserService) BanUser(userID int, reason string, disableTokens bool) error {
 	db := database.GetMainDB()
 
 	result := db.Model(&models.User{}).
@@ -305,16 +314,18 @@ func (s *UserService) BanUser(userID int, reason string) error {
 		return fmt.Errorf("用户不存在")
 	}
 
-	// 同时禁用该用户的所有令牌
-	db.Model(&models.Token{}).
-		Where("user_id = ?", userID).
-		Update("status", models.TokenStatusDisabled)
+	if disableTokens {
+		// 同时禁用该用户的所有令牌
+		db.Model(&models.Token{}).
+			Where("user_id = ?", userID).
+			Update("status", models.TokenStatusDisabled)
+	}
 
 	return nil
 }
 
 // UnbanUser 解封用户
-func (s *UserService) UnbanUser(userID int) error {
+func (s *UserService) UnbanUser(userID int, enableTokens bool) error {
 	db := database.GetMainDB()
 
 	result := db.Model(&models.User{}).
@@ -328,7 +339,74 @@ func (s *UserService) UnbanUser(userID int) error {
 		return fmt.Errorf("用户不存在")
 	}
 
+	if enableTokens {
+		db.Model(&models.Token{}).
+			Where("user_id = ? AND status = ?", userID, models.TokenStatusDisabled).
+			Update("status", models.TokenStatusEnabled)
+	}
+
 	return nil
+}
+
+// GetActivityStats 获取用户活跃度统计（用 logs 作为“请求记录”来源）
+func (s *UserService) GetActivityStats(quick bool) (*ActivityStats, error) {
+	db := database.GetMainDB()
+	stats := &ActivityStats{}
+
+	if err := db.Model(&models.User{}).
+		Where("deleted_at IS NULL").
+		Count(&stats.TotalUsers).Error; err != nil {
+		return nil, err
+	}
+
+	// 统计有过请求的用户数（以 logs 表为准）
+	var requestedUsers int64
+	if err := db.Table("users u").
+		Joins("JOIN logs l ON l.user_id = u.id").
+		Where("u.deleted_at IS NULL").
+		Distinct("u.id").
+		Count(&requestedUsers).Error; err != nil {
+		return nil, err
+	}
+
+	stats.NeverRequested = stats.TotalUsers - requestedUsers
+	if quick {
+		return stats, nil
+	}
+
+	now := time.Now().Unix()
+	sevenDaysAgo := now - 7*24*3600
+	thirtyDaysAgo := now - 30*24*3600
+
+	lastLogSubquery := db.Table("logs").
+		Select("user_id, MAX(created_at) AS last_ts").
+		Group("user_id")
+
+	// active: 最近 7 天内有请求
+	if err := db.Table("users u").
+		Joins("JOIN (?) l ON l.user_id = u.id", lastLogSubquery).
+		Where("u.deleted_at IS NULL AND l.last_ts >= ?", sevenDaysAgo).
+		Count(&stats.ActiveUsers).Error; err != nil {
+		return nil, err
+	}
+
+	// inactive: 7-30 天内有请求
+	if err := db.Table("users u").
+		Joins("JOIN (?) l ON l.user_id = u.id", lastLogSubquery).
+		Where("u.deleted_at IS NULL AND l.last_ts < ? AND l.last_ts >= ?", sevenDaysAgo, thirtyDaysAgo).
+		Count(&stats.InactiveUsers).Error; err != nil {
+		return nil, err
+	}
+
+	// very_inactive: 超过 30 天有请求
+	if err := db.Table("users u").
+		Joins("JOIN (?) l ON l.user_id = u.id", lastLogSubquery).
+		Where("u.deleted_at IS NULL AND l.last_ts < ?", thirtyDaysAgo).
+		Count(&stats.VeryInactiveUsers).Error; err != nil {
+		return nil, err
+	}
+
+	return stats, nil
 }
 
 // DeleteUser 删除用户

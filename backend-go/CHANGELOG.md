@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **用户状态常量恢复**：恢复 `UserStatusDisabled=2`、`UserStatusBanned=3`，保持与历史数据库兼容
+  - 涉及文件：`internal/models/models.go`
+- **日志类型常量统一**：将 `LogTypeFailure=5` 从 `risk.go` 移至 `models.go` 统一管理
+  - 涉及文件：`internal/models/models.go`、`internal/service/risk.go`
+- **接口路径参数兼容性修复**：修复多个接口因路径参数名与 handler 读取不一致导致必然 400 错误
+  - `/api/users/:user_id/ban`、`/unban`、`DELETE /:user_id`：handler 现使用 `c.Param("user_id")`
+  - `/api/users/tokens/:token_id/disable`：handler 现使用 `c.Param("token_id")`
+  - `/api/ip/geo/:ip`：同时支持路径参数和 query 参数读取
+  - `/api/risk/affiliated-accounts`：改为 query 参数接口（`min_invited`、`include_activity`、`limit`）
+  - 涉及文件：`internal/handler/modules.go`
+- **IP 监控参数兼容性修复**：`GetSharedIPs` 同时支持 `min_tokens`（Python）和 `min_users`（Go）参数名
+  - 涉及文件：`internal/handler/modules.go`
+- **model-status/status/batch 请求体兼容**：同时支持数组格式 `["model1"]` 和对象格式 `{"models":["model1"]}`
+  - 涉及文件：`internal/handler/extended.go`
+
+### Changed
+- **parseWindowToSeconds 扩展**：新增 `3h`、`12h` 窗口支持，与 Python 版本对齐
+  - 涉及文件：`internal/handler/modules.go`
+- **风控排行榜重构**：`GetLeaderboards` 支持多窗口批量查询（`windows` 参数）和排序方式（`sort_by`）
+  - 涉及文件：`internal/handler/modules.go`、`internal/service/risk.go`
+- **用户封禁增强**：`BanUser`/`UnbanUser` 支持 `disable_tokens`/`enable_tokens` 选项
+  - 涉及文件：`internal/handler/modules.go`、`internal/service/user.go`
+
 ### Added
 - **GeoIP ASN 支持**：扩展 GeoIP 模块支持 ASN 数据库查询
   - 新增 `GeoInfo.ASN`、`GeoInfo.Organization`、`GeoInfo.City` 字段

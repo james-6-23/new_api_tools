@@ -187,13 +187,23 @@ func GetAffiliatedAccounts(c *gin.Context)  { GetAffiliatedAccountsHandler(c) }
 func GetSameIPRegistrations(c *gin.Context) { GetSameIPRegistrationsHandler(c) }
 
 // ==================== IP Monitoring ====================
-func GetIPStats(c *gin.Context)           { GetIPStatsHandler(c) }
-func GetSharedIPs(c *gin.Context)         { GetSharedIPsHandler(c) }
-func GetMultiIPTokens(c *gin.Context)     { GetMultiIPTokensHandler(c) }
-func GetMultiIPUsers(c *gin.Context)      { GetMultiIPUsersHandler(c) }
-func EnableAllIPRecording(c *gin.Context) { Success(c, gin.H{"message": "已开启"}) }
-func GetIPGeo(c *gin.Context)             { GetIPGeoHandler(c) }
-func BatchGetIPGeo(c *gin.Context)        { BatchGetIPGeoHandler(c) }
+func GetIPStats(c *gin.Context)       { GetIPStatsHandler(c) }
+func GetSharedIPs(c *gin.Context)     { GetSharedIPsHandler(c) }
+func GetMultiIPTokens(c *gin.Context) { GetMultiIPTokensHandler(c) }
+func GetMultiIPUsers(c *gin.Context)  { GetMultiIPUsersHandler(c) }
+func EnableAllIPRecording(c *gin.Context) {
+	// Go 版本默认已记录 logs.ip；该接口主要用于兼容 Python 版本
+	c.JSON(200, Response{
+		Success: true,
+		Message: "已更新 0 个用户，跳过 0 个已开启的用户",
+		Data: gin.H{
+			"updated_count": 0,
+			"skipped_count": 0,
+		},
+	})
+}
+func GetIPGeo(c *gin.Context)      { GetIPGeoHandler(c) }
+func BatchGetIPGeo(c *gin.Context) { BatchGetIPGeoHandler(c) }
 
 // ==================== AI Ban ====================
 func GetAIBanConfig(c *gin.Context)     { GetAIBanConfigHandler(c) }

@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	appcache "github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/service"
 	"github.com/ketches/new-api-tools/internal/tasks"
@@ -18,6 +21,43 @@ var (
 	systemService      = service.NewSystemService()
 	storageService     = service.NewStorageService()
 )
+
+const (
+	modelStatusSelectedModelsKey    = "model_status:selected_models"
+	modelStatusTimeWindowKey        = "model_status:time_window"
+	modelStatusThemeKey             = "model_status:theme"
+	modelStatusRefreshIntervalKey   = "model_status:refresh_interval"
+	defaultModelStatusTimeWindow    = "24h"
+	defaultModelStatusTheme         = "daylight"
+	defaultModelStatusRefreshSecond = 60
+)
+
+var (
+	modelStatusAvailableThemes = []string{
+		"daylight", "obsidian", "minimal", "neon", "forest", "ocean", "terminal", "cupertino", "material",
+		"openai", "anthropic", "vercel", "linear", "stripe", "github", "discord", "tesla",
+	}
+	modelStatusAvailableRefreshIntervals = []int{0, 30, 60, 120, 300}
+	modelStatusAvailableTimeWindows      = []string{"1h", "6h", "12h", "24h"}
+)
+
+func stringInSlice(v string, list []string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func intInSlice(v int, list []int) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
 
 // ==================== AI Ban Handlers ====================
 
@@ -339,64 +379,130 @@ func ResetAnalyticsHandler(c *gin.Context) {
 
 // GetAvailableModelsHandler 获取可用模型
 func GetAvailableModelsHandler(c *gin.Context) {
-	data, err := modelStatusService.GetAvailableModels()
+	data, err := modelStatusService.GetAvailableModelsWithStats24h()
 	if err != nil {
 		logger.Error("获取可用模型失败", zap.Error(err))
 		Error(c, 500, "获取模型失败")
 		return
 	}
-
-	Success(c, data)
+	c.JSON(200, gin.H{"success": true, "data": data})
 }
 
 // GetModelStatusHandler 获取模型状态
 func GetModelStatusHandler(c *gin.Context) {
 	modelName := c.Param("model_name")
 	if modelName == "" {
-		Error(c, 400, "缺少模型名称")
+		c.JSON(200, gin.H{"success": false, "message": "缺少模型名称"})
 		return
 	}
 
-	data, err := modelStatusService.GetModelStatus(modelName)
+	window := c.DefaultQuery("window", defaultModelStatusTimeWindow)
+	noCache, _ := strconv.ParseBool(c.DefaultQuery("no_cache", "false"))
+	if !stringInSlice(window, modelStatusAvailableTimeWindows) {
+		c.JSON(200, gin.H{"success": false, "message": "无效的时间窗口"})
+		return
+	}
+
+	data, err := modelStatusService.GetModelStatusItem(modelName, window, !noCache)
 	if err != nil {
 		logger.Error("获取模型状态失败", zap.Error(err))
-		Error(c, 500, err.Error())
+		c.JSON(200, gin.H{"success": false, "message": err.Error()})
 		return
 	}
 
-	Success(c, data)
+	if data == nil || data.TotalRequests == 0 {
+		c.JSON(200, gin.H{
+			"success": false,
+			"message": "Model not found or has no recent logs",
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{"success": true, "data": data})
 }
 
 // BatchGetModelStatusHandler 批量获取模型状态
 func BatchGetModelStatusHandler(c *gin.Context) {
-	var req struct {
-		Models []string `json:"models"`
+	window := c.DefaultQuery("window", defaultModelStatusTimeWindow)
+	noCache, _ := strconv.ParseBool(c.DefaultQuery("no_cache", "false"))
+	if !stringInSlice(window, modelStatusAvailableTimeWindows) {
+		c.JSON(200, gin.H{"success": false, "message": "无效的时间窗口"})
+		return
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+
+	raw, err := c.GetRawData()
+	if err != nil {
 		Error(c, 400, "参数错误")
 		return
 	}
 
-	data, err := modelStatusService.BatchGetModelStatus(req.Models)
+	var reqObj struct {
+		Models []string `json:"models"`
+	}
+	var modelNames []string
+	if json.Unmarshal(raw, &reqObj) == nil && len(reqObj.Models) > 0 {
+		modelNames = reqObj.Models
+	} else {
+		var arr []string
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			Error(c, 400, "参数错误")
+			return
+		}
+		modelNames = arr
+	}
+
+	items, err := modelStatusService.GetMultipleModelsStatusItems(modelNames, window, !noCache)
 	if err != nil {
 		logger.Error("批量获取模型状态失败", zap.Error(err))
 		Error(c, 500, "获取状态失败")
 		return
 	}
 
-	Success(c, data)
+	c.JSON(200, gin.H{
+		"success":     true,
+		"data":        items,
+		"time_window": window,
+		"cache_ttl":   60,
+	})
 }
 
 // GetSelectedModelsHandler 获取选中的模型
 func GetSelectedModelsHandler(c *gin.Context) {
-	data, err := modelStatusService.GetSelectedModels()
-	if err != nil {
-		logger.Error("获取选中模型失败", zap.Error(err))
-		Error(c, 500, "获取失败")
-		return
+	mgr := appcache.GetCacheManager()
+	var selected []string
+	if err := mgr.Get(modelStatusSelectedModelsKey, &selected); err != nil || len(selected) == 0 {
+		available, _ := modelStatusService.GetAvailableModelsWithStats24h()
+		for _, m := range available {
+			selected = append(selected, m.ModelName)
+		}
+		_ = mgr.Set(modelStatusSelectedModelsKey, selected, 365*24*time.Hour)
 	}
 
-	Success(c, data)
+	var timeWindow string
+	if err := mgr.Get(modelStatusTimeWindowKey, &timeWindow); err != nil || timeWindow == "" {
+		timeWindow = defaultModelStatusTimeWindow
+		_ = mgr.Set(modelStatusTimeWindowKey, timeWindow, 365*24*time.Hour)
+	}
+
+	var theme string
+	if err := mgr.Get(modelStatusThemeKey, &theme); err != nil || theme == "" {
+		theme = defaultModelStatusTheme
+		_ = mgr.Set(modelStatusThemeKey, theme, 365*24*time.Hour)
+	}
+
+	var refreshInterval int
+	if err := mgr.Get(modelStatusRefreshIntervalKey, &refreshInterval); err != nil || !intInSlice(refreshInterval, modelStatusAvailableRefreshIntervals) {
+		refreshInterval = defaultModelStatusRefreshSecond
+		_ = mgr.Set(modelStatusRefreshIntervalKey, refreshInterval, 365*24*time.Hour)
+	}
+
+	c.JSON(200, gin.H{
+		"success":          true,
+		"data":             selected,
+		"time_window":      timeWindow,
+		"theme":            theme,
+		"refresh_interval": refreshInterval,
+	})
 }
 
 // UpdateSelectedModelsHandler 更新选中的模型
@@ -408,65 +514,117 @@ func UpdateSelectedModelsHandler(c *gin.Context) {
 		Error(c, 400, "参数错误")
 		return
 	}
+	mgr := appcache.GetCacheManager()
+	_ = mgr.Set(modelStatusSelectedModelsKey, req.Models, 365*24*time.Hour)
 
-	if err := modelStatusService.UpdateSelectedModels(req.Models); err != nil {
-		logger.Error("更新选中模型失败", zap.Error(err))
-		Error(c, 500, err.Error())
-		return
-	}
-
-	Success(c, gin.H{"message": "更新成功"})
+	// 返回与 GetSelectedModelsHandler 一致的结构
+	GetSelectedModelsHandler(c)
 }
 
 // GetTimeWindowHandler 获取时间窗口
 func GetTimeWindowHandler(c *gin.Context) {
-	data, err := modelStatusService.GetTimeWindow()
-	if err != nil {
-		logger.Error("获取时间窗口失败", zap.Error(err))
-		Error(c, 500, "获取失败")
-		return
+	mgr := appcache.GetCacheManager()
+	var timeWindow string
+	if err := mgr.Get(modelStatusTimeWindowKey, &timeWindow); err != nil || timeWindow == "" {
+		timeWindow = defaultModelStatusTimeWindow
+		_ = mgr.Set(modelStatusTimeWindowKey, timeWindow, 365*24*time.Hour)
 	}
-
-	Success(c, data)
+	c.JSON(200, gin.H{"success": true, "time_window": timeWindow})
 }
 
 // UpdateTimeWindowHandler 更新时间窗口
 func UpdateTimeWindowHandler(c *gin.Context) {
 	var req struct {
-		Window string `json:"window"`
+		TimeWindow string `json:"time_window"`
+		Window     string `json:"window"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Error(c, 400, "参数错误")
 		return
 	}
-	Success(c, gin.H{"window": req.Window})
+	timeWindow := req.TimeWindow
+	if timeWindow == "" {
+		timeWindow = req.Window
+	}
+	if !stringInSlice(timeWindow, modelStatusAvailableTimeWindows) {
+		mgr := appcache.GetCacheManager()
+		var current string
+		if err := mgr.Get(modelStatusTimeWindowKey, &current); err != nil || current == "" {
+			current = defaultModelStatusTimeWindow
+		}
+		c.JSON(200, gin.H{
+			"success":     false,
+			"time_window": current,
+			"message":     "无效的时间窗口: " + timeWindow,
+		})
+		return
+	}
+
+	mgr := appcache.GetCacheManager()
+	_ = mgr.Set(modelStatusTimeWindowKey, timeWindow, 365*24*time.Hour)
+	c.JSON(200, gin.H{
+		"success":     true,
+		"time_window": timeWindow,
+		"message":     "已保存时间窗口: " + timeWindow,
+	})
 }
 
 // GetTimeWindowsHandler 获取所有时间窗口选项
 func GetTimeWindowsHandler(c *gin.Context) {
-	Success(c, gin.H{
-		"windows": []gin.H{
-			{"value": "1h", "label": "1 小时"},
-			{"value": "6h", "label": "6 小时"},
-			{"value": "24h", "label": "24 小时"},
-			{"value": "7d", "label": "7 天"},
-		},
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    modelStatusAvailableTimeWindows,
+		"default": defaultModelStatusTimeWindow,
 	})
 }
 
 // GetAllModelStatusHandler 获取所有模型状态
 func GetAllModelStatusHandler(c *gin.Context) {
-	data, err := modelStatusService.GetAllModelStatus()
+	window := c.DefaultQuery("window", defaultModelStatusTimeWindow)
+	noCache, _ := strconv.ParseBool(c.DefaultQuery("no_cache", "false"))
+	if !stringInSlice(window, modelStatusAvailableTimeWindows) {
+		c.JSON(200, gin.H{"success": false, "message": "无效的时间窗口"})
+		return
+	}
+
+	available, err := modelStatusService.GetAvailableModelsWithStats24h()
 	if err != nil {
 		Error(c, 500, "获取失败")
 		return
 	}
-	Success(c, data)
+
+	modelNames := make([]string, 0, len(available))
+	for _, m := range available {
+		modelNames = append(modelNames, m.ModelName)
+	}
+
+	items, err := modelStatusService.GetMultipleModelsStatusItems(modelNames, window, !noCache)
+	if err != nil {
+		Error(c, 500, "获取失败")
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success":     true,
+		"data":        items,
+		"time_window": window,
+		"cache_ttl":   60,
+	})
 }
 
 // GetThemeConfigHandler 获取主题配置
 func GetThemeConfigHandler(c *gin.Context) {
-	Success(c, gin.H{"theme": "light"})
+	mgr := appcache.GetCacheManager()
+	var theme string
+	if err := mgr.Get(modelStatusThemeKey, &theme); err != nil || theme == "" {
+		theme = defaultModelStatusTheme
+		_ = mgr.Set(modelStatusThemeKey, theme, 365*24*time.Hour)
+	}
+	c.JSON(200, gin.H{
+		"success":          true,
+		"theme":            theme,
+		"available_themes": modelStatusAvailableThemes,
+	})
 }
 
 // UpdateThemeConfigHandler 更新主题配置
@@ -474,22 +632,85 @@ func UpdateThemeConfigHandler(c *gin.Context) {
 	var req struct {
 		Theme string `json:"theme"`
 	}
-	c.ShouldBindJSON(&req)
-	Success(c, gin.H{"theme": req.Theme})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+	if !stringInSlice(req.Theme, modelStatusAvailableThemes) {
+		mgr := appcache.GetCacheManager()
+		var current string
+		if err := mgr.Get(modelStatusThemeKey, &current); err != nil || current == "" {
+			current = defaultModelStatusTheme
+		}
+		c.JSON(200, gin.H{
+			"success":          false,
+			"theme":            current,
+			"available_themes": modelStatusAvailableThemes,
+			"message":          "无效的主题: " + req.Theme,
+		})
+		return
+	}
+	mgr := appcache.GetCacheManager()
+	_ = mgr.Set(modelStatusThemeKey, req.Theme, 365*24*time.Hour)
+	c.JSON(200, gin.H{
+		"success":          true,
+		"theme":            req.Theme,
+		"available_themes": modelStatusAvailableThemes,
+		"message":          "已保存主题: " + req.Theme,
+	})
 }
 
 // GetRefreshIntervalHandler 获取刷新间隔
 func GetRefreshIntervalHandler(c *gin.Context) {
-	Success(c, gin.H{"interval": 30})
+	mgr := appcache.GetCacheManager()
+	var interval int
+	if err := mgr.Get(modelStatusRefreshIntervalKey, &interval); err != nil || !intInSlice(interval, modelStatusAvailableRefreshIntervals) {
+		interval = defaultModelStatusRefreshSecond
+		_ = mgr.Set(modelStatusRefreshIntervalKey, interval, 365*24*time.Hour)
+	}
+	c.JSON(200, gin.H{
+		"success":             true,
+		"refresh_interval":    interval,
+		"available_intervals": modelStatusAvailableRefreshIntervals,
+	})
 }
 
 // UpdateRefreshIntervalHandler 更新刷新间隔
 func UpdateRefreshIntervalHandler(c *gin.Context) {
 	var req struct {
-		Interval int `json:"interval"`
+		RefreshInterval int `json:"refresh_interval"`
+		Interval        int `json:"interval"`
 	}
-	c.ShouldBindJSON(&req)
-	Success(c, gin.H{"interval": req.Interval})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, 400, "参数错误")
+		return
+	}
+	interval := req.RefreshInterval
+	if interval == 0 && req.Interval != 0 {
+		interval = req.Interval
+	}
+	if !intInSlice(interval, modelStatusAvailableRefreshIntervals) {
+		mgr := appcache.GetCacheManager()
+		var current int
+		if err := mgr.Get(modelStatusRefreshIntervalKey, &current); err != nil || !intInSlice(current, modelStatusAvailableRefreshIntervals) {
+			current = defaultModelStatusRefreshSecond
+		}
+		c.JSON(200, gin.H{
+			"success":             false,
+			"refresh_interval":    current,
+			"available_intervals": modelStatusAvailableRefreshIntervals,
+			"message":             "无效的刷新间隔: " + strconv.Itoa(interval),
+		})
+		return
+	}
+	mgr := appcache.GetCacheManager()
+	_ = mgr.Set(modelStatusRefreshIntervalKey, interval, 365*24*time.Hour)
+	c.JSON(200, gin.H{
+		"success":             true,
+		"refresh_interval":    interval,
+		"available_intervals": modelStatusAvailableRefreshIntervals,
+		"message":             "已保存刷新间隔: " + strconv.Itoa(interval) + "秒",
+	})
 }
 
 // ==================== System Handlers ====================

@@ -71,6 +71,69 @@ type SelectedModelsConfig struct {
 	UpdatedAt string   `json:"updated_at"`
 }
 
+// ModelWithStats Python 版本的模型列表项（24h 请求数）
+type ModelWithStats struct {
+	ModelName       string `json:"model_name"`
+	RequestCount24h int64  `json:"request_count_24h"`
+}
+
+// SlotStatusItem Python 版本的时间槽状态项
+type SlotStatusItem struct {
+	Slot          int     `json:"slot"`
+	StartTime     int64   `json:"start_time"`
+	EndTime       int64   `json:"end_time"`
+	TotalRequests int64   `json:"total_requests"`
+	SuccessCount  int64   `json:"success_count"`
+	SuccessRate   float64 `json:"success_rate"`
+	Status        string  `json:"status"`
+}
+
+// ModelStatusItem Python 版本的模型状态项
+type ModelStatusItem struct {
+	ModelName     string           `json:"model_name"`
+	DisplayName   string           `json:"display_name"`
+	TimeWindow    string           `json:"time_window"`
+	TotalRequests int64            `json:"total_requests"`
+	SuccessCount  int64            `json:"success_count"`
+	SuccessRate   float64          `json:"success_rate"`
+	CurrentStatus string           `json:"current_status"`
+	SlotData      []SlotStatusItem `json:"slot_data"`
+}
+
+var modelStatusTimeWindows = map[string]struct {
+	totalSeconds int64
+	numSlots     int
+	slotSeconds  int64
+}{
+	"1h":  {totalSeconds: 3600, numSlots: 60, slotSeconds: 60},
+	"6h":  {totalSeconds: 21600, numSlots: 24, slotSeconds: 900},
+	"12h": {totalSeconds: 43200, numSlots: 24, slotSeconds: 1800},
+	"24h": {totalSeconds: 86400, numSlots: 24, slotSeconds: 3600},
+}
+
+const defaultModelStatusWindow = "24h"
+
+func getModelStatusWindowConfig(window string) (int64, int, int64) {
+	cfg, ok := modelStatusTimeWindows[window]
+	if !ok {
+		cfg = modelStatusTimeWindows[defaultModelStatusWindow]
+	}
+	return cfg.totalSeconds, cfg.numSlots, cfg.slotSeconds
+}
+
+func getStatusColor(successRate float64, totalRequests int64) string {
+	if totalRequests == 0 {
+		return "green"
+	}
+	if successRate >= 95 {
+		return "green"
+	}
+	if successRate >= 80 {
+		return "yellow"
+	}
+	return "red"
+}
+
 // TimeWindowConfig 时间窗口配置
 type TimeWindowConfig struct {
 	Window      string `json:"window"`
@@ -128,6 +191,159 @@ func (s *ModelStatusService) fetchAvailableModels() ([]AvailableModel, error) {
 	}
 
 	return availableModels, nil
+}
+
+// GetAvailableModelsWithStats24h 获取模型列表（24h 请求数，与 Python /api/model-status/models 对齐）
+func (s *ModelStatusService) GetAvailableModelsWithStats24h() ([]ModelWithStats, error) {
+	db := database.GetMainDB()
+	now := time.Now().Unix()
+	start := now - 24*3600
+
+	var results []struct {
+		ModelName string
+		Requests  int64
+	}
+
+	if err := db.Table("logs").
+		Select("model_name as model_name, COUNT(*) as requests").
+		Where("created_at >= ? AND created_at <= ? AND type IN ?", start, now, []int{models.LogTypeConsume, 5}).
+		Group("model_name").
+		Order("requests DESC").
+		Scan(&results).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]ModelWithStats, 0, len(results))
+	for _, r := range results {
+		if r.ModelName == "" {
+			continue
+		}
+		items = append(items, ModelWithStats{
+			ModelName:       r.ModelName,
+			RequestCount24h: r.Requests,
+		})
+	}
+
+	return items, nil
+}
+
+// GetModelStatusItem 获取模型状态（时间槽版，与 Python /api/model-status/status/{model_name} 对齐）
+func (s *ModelStatusService) GetModelStatusItem(modelName string, window string, useCache bool) (*ModelStatusItem, error) {
+	totalSeconds, numSlots, slotSeconds := getModelStatusWindowConfig(window)
+	now := time.Now().Unix()
+	startWindow := now - totalSeconds
+
+	cacheKey := cache.CacheKey("model_status", "item", window, modelName)
+	if useCache {
+		var cached ModelStatusItem
+		if err := cache.Get(cacheKey, &cached); err == nil {
+			return &cached, nil
+		}
+	}
+
+	// 只取必要字段，避免拉全行
+	type logRow struct {
+		CreatedAt int64
+		Type      int
+	}
+	var logs []logRow
+
+	db := database.GetMainDB()
+	if err := db.Table("logs").
+		Select("created_at, type").
+		Where("model_name = ? AND created_at >= ? AND created_at <= ? AND type IN ?", modelName, startWindow, now, []int{models.LogTypeConsume, 5}).
+		Scan(&logs).Error; err != nil {
+		return nil, err
+	}
+
+	slotTotals := make([]int64, numSlots)
+	slotSuccess := make([]int64, numSlots)
+
+	for _, l := range logs {
+		idx := int((l.CreatedAt - startWindow) / slotSeconds)
+		if idx < 0 {
+			continue
+		}
+		if idx >= numSlots {
+			idx = numSlots - 1
+		}
+		slotTotals[idx]++
+		if l.Type == models.LogTypeConsume {
+			slotSuccess[idx]++
+		}
+	}
+
+	slotData := make([]SlotStatusItem, numSlots)
+	var totalRequests int64
+	var successCount int64
+
+	for i := 0; i < numSlots; i++ {
+		slotStart := startWindow + int64(i)*slotSeconds
+		slotEnd := slotStart + slotSeconds
+		if slotEnd > now {
+			slotEnd = now
+		}
+
+		total := slotTotals[i]
+		success := slotSuccess[i]
+		successRate := float64(100)
+		if total > 0 {
+			successRate = float64(success) / float64(total) * 100
+		}
+
+		slotData[i] = SlotStatusItem{
+			Slot:          i,
+			StartTime:     slotStart,
+			EndTime:       slotEnd,
+			TotalRequests: total,
+			SuccessCount:  success,
+			SuccessRate:   successRate,
+			Status:        getStatusColor(successRate, total),
+		}
+
+		totalRequests += total
+		successCount += success
+	}
+
+	overallRate := float64(100)
+	if totalRequests > 0 {
+		overallRate = float64(successCount) / float64(totalRequests) * 100
+	}
+
+	item := &ModelStatusItem{
+		ModelName:     modelName,
+		DisplayName:   modelName,
+		TimeWindow:    window,
+		TotalRequests: totalRequests,
+		SuccessCount:  successCount,
+		SuccessRate:   overallRate,
+		CurrentStatus: getStatusColor(overallRate, totalRequests),
+		SlotData:      slotData,
+	}
+
+	if useCache {
+		_ = cache.Set(cacheKey, item, 60*time.Second)
+	}
+
+	return item, nil
+}
+
+// GetMultipleModelsStatusItems 批量获取模型状态（与 Python /api/model-status/status/batch 对齐）
+func (s *ModelStatusService) GetMultipleModelsStatusItems(modelNames []string, window string, useCache bool) ([]ModelStatusItem, error) {
+	items := make([]ModelStatusItem, 0, len(modelNames))
+	for _, name := range modelNames {
+		if name == "" {
+			continue
+		}
+		item, err := s.GetModelStatusItem(name, window, useCache)
+		if err != nil {
+			continue
+		}
+		if item != nil {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
 }
 
 // GetModelStatus 获取单个模型状态

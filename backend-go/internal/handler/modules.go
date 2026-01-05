@@ -2,9 +2,11 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ketches/new-api-tools/internal/logger"
+	"github.com/ketches/new-api-tools/internal/models"
 	"github.com/ketches/new-api-tools/internal/service"
 	"github.com/ketches/new-api-tools/pkg/geoip"
 	"go.uber.org/zap"
@@ -24,8 +26,12 @@ func parseWindowToSeconds(window string) int64 {
 	switch window {
 	case "1h":
 		return 3600
+	case "3h":
+		return 3 * 3600
 	case "6h":
 		return 6 * 3600
+	case "12h":
+		return 12 * 3600
 	case "24h":
 		return 24 * 3600
 	case "3d":
@@ -36,6 +42,15 @@ func parseWindowToSeconds(window string) int64 {
 		return 14 * 24 * 3600
 	default:
 		return 24 * 3600 // 默认 24 小时
+	}
+}
+
+func isSupportedWindow(window string) bool {
+	switch window {
+	case "1h", "3h", "6h", "12h", "24h", "3d", "7d", "14d":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -212,22 +227,38 @@ func GetUsersHandler(c *gin.Context) {
 
 // GetUserStatsHandler 获取用户统计
 func GetUserStatsHandler(c *gin.Context) {
-	data, err := userService.GetUserStatistics()
+	quick, _ := strconv.ParseBool(c.DefaultQuery("quick", "false"))
+
+	data, err := userService.GetActivityStats(quick)
 	if err != nil {
 		logger.Error("获取用户统计失败", zap.Error(err))
 		Error(c, 500, "获取用户统计失败")
 		return
 	}
 
-	Success(c, data)
+	Success(c, gin.H{
+		"total_users":         data.TotalUsers,
+		"active_users":        data.ActiveUsers,
+		"inactive_users":      data.InactiveUsers,
+		"very_inactive_users": data.VeryInactiveUsers,
+		"never_requested":     data.NeverRequested,
+	})
 }
 
 // GetBannedUsersHandler 获取封禁用户列表
 func GetBannedUsersHandler(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	search := c.Query("search")
 
-	data, err := userService.GetBannedUsers(page, pageSize)
+	query := &service.UserQuery{
+		Page:     page,
+		PageSize: pageSize,
+		Status:   models.UserStatusBanned,
+		Search:   search,
+	}
+
+	data, err := userService.GetUsers(query)
 	if err != nil {
 		logger.Error("获取封禁用户列表失败", zap.Error(err))
 		Error(c, 500, "获取封禁用户列表失败")
@@ -239,18 +270,24 @@ func GetBannedUsersHandler(c *gin.Context) {
 
 // BanUserHandler 封禁用户
 func BanUserHandler(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil {
 		Error(c, 400, "无效的用户 ID")
 		return
 	}
 
 	var req struct {
-		Reason string `json:"reason"`
+		Reason        string `json:"reason"`
+		DisableTokens *bool  `json:"disable_tokens"`
 	}
 	c.ShouldBindJSON(&req)
 
-	if err := userService.BanUser(id, req.Reason); err != nil {
+	disableTokens := true
+	if req.DisableTokens != nil {
+		disableTokens = *req.DisableTokens
+	}
+
+	if err := userService.BanUser(id, req.Reason, disableTokens); err != nil {
 		logger.Error("封禁用户失败", zap.Error(err))
 		Error(c, 500, err.Error())
 		return
@@ -261,13 +298,23 @@ func BanUserHandler(c *gin.Context) {
 
 // UnbanUserHandler 解封用户
 func UnbanUserHandler(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil {
 		Error(c, 400, "无效的用户 ID")
 		return
 	}
 
-	if err := userService.UnbanUser(id); err != nil {
+	var req struct {
+		EnableTokens *bool `json:"enable_tokens"`
+	}
+	c.ShouldBindJSON(&req)
+
+	enableTokens := false
+	if req.EnableTokens != nil {
+		enableTokens = *req.EnableTokens
+	}
+
+	if err := userService.UnbanUser(id, enableTokens); err != nil {
 		logger.Error("解封用户失败", zap.Error(err))
 		Error(c, 500, err.Error())
 		return
@@ -278,7 +325,7 @@ func UnbanUserHandler(c *gin.Context) {
 
 // DeleteUserHandler 删除用户
 func DeleteUserHandler(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil {
 		Error(c, 400, "无效的用户 ID")
 		return
@@ -322,7 +369,7 @@ func BatchDeleteUsersHandler(c *gin.Context) {
 
 // DisableTokenHandler 禁用令牌
 func DisableTokenHandler(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("token_id"))
 	if err != nil {
 		Error(c, 400, "无效的令牌 ID")
 		return
@@ -363,14 +410,36 @@ func GetInvitedUsersHandler(c *gin.Context) {
 
 // GetLeaderboardsHandler 获取排行榜
 func GetLeaderboardsHandler(c *gin.Context) {
-	period := c.DefaultQuery("period", "today")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	windows := c.DefaultQuery("windows", "1h,3h,6h,12h,24h")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	sortBy := c.DefaultQuery("sort_by", "requests")
 
-	data, err := riskService.GetLeaderboards(period, limit)
-	if err != nil {
-		logger.Error("获取排行榜失败", zap.Error(err))
-		Error(c, 500, "获取排行榜失败")
+	if sortBy != "requests" && sortBy != "quota" && sortBy != "failure_rate" {
+		Error(c, 400, "无效的 sort_by")
 		return
+	}
+
+	windowList := []string{}
+	for _, w := range strings.Split(windows, ",") {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		windowList = append(windowList, w)
+	}
+
+	data := map[string]interface{}{}
+	for _, w := range windowList {
+		if !isSupportedWindow(w) {
+			continue
+		}
+		items, err := riskService.GetRealtimeLeaderboard(parseWindowToSeconds(w), limit, sortBy)
+		if err != nil {
+			logger.Error("获取排行榜失败", zap.Error(err))
+			Error(c, 500, "获取排行榜失败")
+			return
+		}
+		data[w] = items
 	}
 
 	Success(c, data)
@@ -384,7 +453,13 @@ func GetUserRiskAnalysisHandler(c *gin.Context) {
 		return
 	}
 
-	data, err := riskService.GetUserRiskAnalysis(userID)
+	window := c.DefaultQuery("window", "24h")
+	if !isSupportedWindow(window) {
+		Error(c, 400, "无效的 window")
+		return
+	}
+
+	data, err := riskService.GetUserAnalysis(userID, parseWindowToSeconds(window))
 	if err != nil {
 		logger.Error("获取用户风险分析失败", zap.Error(err))
 		Error(c, 500, err.Error())
@@ -397,17 +472,36 @@ func GetUserRiskAnalysisHandler(c *gin.Context) {
 // GetBanRecordsHandler 获取封禁记录
 func GetBanRecordsHandler(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	action := c.Query("action")
+	userID, _ := strconv.Atoi(c.DefaultQuery("user_id", "0"))
+
+	if action != "" && action != "ban" && action != "unban" {
+		Error(c, 400, "无效的 action")
+		return
+	}
 
 	// 防止除零 panic
 	if page <= 0 {
 		page = 1
 	}
 	if pageSize <= 0 {
-		pageSize = 20
+		pageSize = 50
 	}
 
-	data, total, err := riskService.GetBanRecords(page, pageSize)
+	// Go 版仅实现 ban（基于 users.status），unban 记录需要审计日志支持
+	if action == "unban" {
+		Success(c, gin.H{
+			"items":       []interface{}{},
+			"total":       0,
+			"page":        page,
+			"page_size":   pageSize,
+			"total_pages": 0,
+		})
+		return
+	}
+
+	data, total, err := riskService.GetBanRecords(page, pageSize, userID)
 	if err != nil {
 		logger.Error("获取封禁记录失败", zap.Error(err))
 		Error(c, 500, "获取封禁记录失败")
@@ -428,9 +522,16 @@ func GetBanRecordsHandler(c *gin.Context) {
 
 // GetTokenRotationHandler 获取令牌轮换情况
 func GetTokenRotationHandler(c *gin.Context) {
+	window := c.DefaultQuery("window", "24h")
+	if !isSupportedWindow(window) {
+		Error(c, 400, "无效的 window")
+		return
+	}
+	minTokens, _ := strconv.Atoi(c.DefaultQuery("min_tokens", "5"))
+	maxRequestsPerToken, _ := strconv.Atoi(c.DefaultQuery("max_requests_per_token", "10"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
-	data, err := riskService.GetTokenRotation(limit)
+	data, err := riskService.GetTokenRotationUsers(parseWindowToSeconds(window), minTokens, maxRequestsPerToken, limit)
 	if err != nil {
 		logger.Error("获取令牌轮换失败", zap.Error(err))
 		Error(c, 500, "获取令牌轮换失败")
@@ -442,13 +543,11 @@ func GetTokenRotationHandler(c *gin.Context) {
 
 // GetAffiliatedAccountsHandler 获取关联账户
 func GetAffiliatedAccountsHandler(c *gin.Context) {
-	userID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		Error(c, 400, "无效的用户 ID")
-		return
-	}
+	minInvited, _ := strconv.Atoi(c.DefaultQuery("min_invited", "3"))
+	includeActivity, _ := strconv.ParseBool(c.DefaultQuery("include_activity", "true"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
-	data, err := riskService.GetAffiliatedAccounts(userID)
+	data, err := riskService.GetAffiliatedAccounts(minInvited, includeActivity, limit)
 	if err != nil {
 		logger.Error("获取关联账户失败", zap.Error(err))
 		Error(c, 500, "获取关联账户失败")
@@ -460,9 +559,15 @@ func GetAffiliatedAccountsHandler(c *gin.Context) {
 
 // GetSameIPRegistrationsHandler 获取同 IP 注册用户
 func GetSameIPRegistrationsHandler(c *gin.Context) {
+	window := c.DefaultQuery("window", "7d")
+	if !isSupportedWindow(window) {
+		Error(c, 400, "无效的 window")
+		return
+	}
+	minUsers, _ := strconv.Atoi(c.DefaultQuery("min_users", "3"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
-	data, err := riskService.GetSameIPRegistrations(limit)
+	data, err := riskService.GetSameIPRegistrations(parseWindowToSeconds(window), minUsers, limit)
 	if err != nil {
 		logger.Error("获取同 IP 注册用户失败", zap.Error(err))
 		Error(c, 500, "获取同 IP 注册用户失败")
@@ -488,12 +593,16 @@ func GetIPStatsHandler(c *gin.Context) {
 
 // GetSharedIPsHandler 获取共享 IP
 func GetSharedIPsHandler(c *gin.Context) {
-	minUsers, _ := strconv.Atoi(c.DefaultQuery("min_users", "2"))
+	minTokensStr := c.Query("min_tokens")
+	if minTokensStr == "" {
+		minTokensStr = c.DefaultQuery("min_users", "2")
+	}
+	minTokens, _ := strconv.Atoi(minTokensStr)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	window := c.DefaultQuery("window", "24h")
 	windowSeconds := parseWindowToSeconds(window)
 
-	data, err := ipService.GetSharedIPs(minUsers, limit, windowSeconds)
+	data, err := ipService.GetSharedIPs(minTokens, limit, windowSeconds)
 	if err != nil {
 		logger.Error("获取共享 IP 失败", zap.Error(err))
 		Error(c, 500, "获取共享 IP 失败")
@@ -539,7 +648,10 @@ func GetMultiIPUsersHandler(c *gin.Context) {
 
 // GetIPGeoHandler 获取单个 IP 地理信息
 func GetIPGeoHandler(c *gin.Context) {
-	ip := c.Query("ip")
+	ip := c.Param("ip")
+	if ip == "" {
+		ip = c.Query("ip")
+	}
 	if ip == "" {
 		Error(c, 400, "缺少 IP 参数")
 		return
@@ -629,22 +741,46 @@ func GetUserIPsHandler(c *gin.Context) {
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	window := c.DefaultQuery("window", "24h")
+	windowSeconds := parseWindowToSeconds(window)
 
-	data, err := ipService.GetUserIPs(userID, limit)
+	ips, err := ipService.GetUserIPs(userID, limit, windowSeconds)
 	if err != nil {
 		logger.Error("获取用户 IP 失败", zap.Error(err))
 		Error(c, 500, "获取用户 IP 失败")
 		return
 	}
-	Success(c, data)
+
+	Success(c, gin.H{"items": ips})
 }
 
 // GetIPIndexStatusHandler 获取 IP 索引状态
 func GetIPIndexStatusHandler(c *gin.Context) {
-	Success(c, gin.H{"all_ready": true, "indexes": []string{}})
+	status, err := ipService.GetIndexStatus()
+	if err != nil {
+		logger.Error("获取 IP 索引状态失败", zap.Error(err))
+		Error(c, 500, "获取 IP 索引状态失败")
+		return
+	}
+	Success(c, status)
 }
 
 // EnsureIPIndexesHandler 确保 IP 索引
 func EnsureIPIndexesHandler(c *gin.Context) {
-	Success(c, gin.H{"message": "索引已就绪"})
+	results, created, existing, err := ipService.EnsureIndexes()
+	if err != nil {
+		logger.Error("确保 IP 索引失败", zap.Error(err))
+		Error(c, 500, "确保 IP 索引失败")
+		return
+	}
+
+	c.JSON(200, Response{
+		Success: true,
+		Message: "索引处理完成",
+		Data: gin.H{
+			"indexes":  results,
+			"created":  created,
+			"existing": existing,
+		},
+	})
 }
