@@ -1317,7 +1317,7 @@ func (s *AnalyticsService) processLogsWithCutoff(batchSize int, maxID *int64) (p
 	lastProcessedID := dbState.LastProcessedID
 	totalProcessed := dbState.TotalProcessed
 
-	query := mainDB.Where("id > ? AND type IN (?)", lastProcessedID, []int{models.LogTypeConsume, models.LogTypeFailure})
+	query := mainDB.Model(&models.Log{}).Where("id > ? AND type IN (?)", lastProcessedID, []int{models.LogTypeConsume, models.LogTypeFailure})
 	if maxID != nil && *maxID > 0 {
 		query = query.Where("id <= ?", *maxID)
 	}
