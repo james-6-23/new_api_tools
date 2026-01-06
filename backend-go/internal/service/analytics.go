@@ -196,44 +196,67 @@ func (s *AnalyticsService) GetState() (*AnalyticsState, error) {
 }
 
 // getStateFromDB 从数据库获取分析状态
+// 兼容 Python 版本的 key-value 表结构
 func (s *AnalyticsService) getStateFromDB(db *gorm.DB) *AnalyticsStateDB {
 	state := &AnalyticsStateDB{}
 
-	var row struct {
-		LastProcessedID int64
-		LastProcessedAt *time.Time
-		TotalProcessed  int64
-	}
+	// Python 版本使用 key-value 结构: key TEXT PRIMARY KEY, value INTEGER, updated_at INTEGER
+	var lastLogID, totalProcessed, lastProcessedAt int64
 
-	err := db.Table("analytics_state").
-		Select("last_processed_id, last_processed_at, total_processed").
-		Order("id DESC").
-		Limit(1).
-		Scan(&row).Error
+	db.Table("analytics_state").
+		Select("value").
+		Where("key = ?", "last_log_id").
+		Scan(&lastLogID)
 
-	if err == nil && row.LastProcessedAt != nil {
-		state.LastProcessedID = row.LastProcessedID
-		state.LastProcessedAt = *row.LastProcessedAt
-		state.TotalProcessed = row.TotalProcessed
+	db.Table("analytics_state").
+		Select("value").
+		Where("key = ?", "total_processed").
+		Scan(&totalProcessed)
+
+	db.Table("analytics_state").
+		Select("value").
+		Where("key = ?", "last_processed_at").
+		Scan(&lastProcessedAt)
+
+	state.LastProcessedID = lastLogID
+	state.TotalProcessed = totalProcessed
+	if lastProcessedAt > 0 {
+		t := time.Unix(lastProcessedAt, 0)
+		state.LastProcessedAt = t
 	}
 
 	return state
 }
 
 // updateStateInDB 更新数据库中的分析状态
+// 兼容 Python 版本的 key-value 表结构
 func (s *AnalyticsService) updateStateInDB(db *gorm.DB, lastID int64, processed int64) error {
-	now := time.Now()
+	now := time.Now().Unix()
 
-	// 使用 upsert 模式，避免表无限增长
-	return db.Exec(`
-		INSERT INTO analytics_state (id, last_processed_id, last_processed_at, total_processed, updated_at)
-		VALUES (1, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			last_processed_id = excluded.last_processed_id,
-			last_processed_at = excluded.last_processed_at,
-			total_processed = excluded.total_processed,
-			updated_at = excluded.updated_at
-	`, lastID, now, processed, now).Error
+	// 使用 Python 版本的 key-value 结构
+	// INSERT OR REPLACE 兼容 SQLite
+	if err := db.Exec(`
+		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
+		VALUES ('last_log_id', ?, ?)
+	`, lastID, now).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
+		VALUES ('last_processed_at', ?, ?)
+	`, now, now).Error; err != nil {
+		return err
+	}
+
+	if err := db.Exec(`
+		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
+		VALUES ('total_processed', ?, ?)
+	`, processed, now).Error; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // ProcessLogs 处理日志（增量处理）

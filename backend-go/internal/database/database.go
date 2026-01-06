@@ -177,14 +177,12 @@ func migrateLocalTables(db *gorm.DB) error {
 		return err
 	}
 
-	// 日志分析状态表
+	// 日志分析状态表（兼容 Python 版本的 key-value 结构）
 	if err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS analytics_state (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			last_processed_id INTEGER DEFAULT 0,
-			last_processed_at DATETIME,
-			total_processed INTEGER DEFAULT 0,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			key TEXT PRIMARY KEY,
+			value INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
 		)
 	`).Error; err != nil {
 		return err

@@ -236,32 +236,23 @@ type AnalyticsState struct {
 func (s *AnalyticsService) GetState() (*AnalyticsState, error) {
 	db := database.GetLocalDB()
 
-	var state struct {
-		LastProcessedID int64
-		LastProcessedAt *time.Time
-		TotalProcessed  int64
-	}
+	// 兼容 Python 版本的 key-value 表结构
+	var lastLogID, totalProcessed, lastProcessedAt int64
 
-	err := db.Raw(`
-		SELECT last_processed_id, last_processed_at, total_processed
-		FROM analytics_state
-		ORDER BY id DESC LIMIT 1
-	`).Scan(&state).Error
-
-	if err != nil {
-		return &AnalyticsState{NeedsInitialSync: true}, nil
-	}
+	db.Raw(`SELECT value FROM analytics_state WHERE key = 'last_log_id'`).Scan(&lastLogID)
+	db.Raw(`SELECT value FROM analytics_state WHERE key = 'total_processed'`).Scan(&totalProcessed)
+	db.Raw(`SELECT value FROM analytics_state WHERE key = 'last_processed_at'`).Scan(&lastProcessedAt)
 
 	return &AnalyticsState{
-		LastProcessedID: state.LastProcessedID,
+		LastProcessedID: lastLogID,
 		LastProcessedAt: func() time.Time {
-			if state.LastProcessedAt != nil {
-				return *state.LastProcessedAt
+			if lastProcessedAt > 0 {
+				return time.Unix(lastProcessedAt, 0)
 			}
 			return time.Time{}
 		}(),
-		TotalProcessed:   state.TotalProcessed,
-		NeedsInitialSync: state.LastProcessedID == 0,
+		TotalProcessed:   totalProcessed,
+		NeedsInitialSync: lastLogID == 0,
 	}, nil
 }
 
@@ -291,21 +282,34 @@ func (s *AnalyticsService) ProcessNewLogs(limit int) (int, error) {
 		return 0, nil
 	}
 
-	// 更新状态
+	// 更新状态（兼容 Python 版本的 key-value 结构）
 	lastID := logs[len(logs)-1].ID
-	now := time.Now()
+	now := time.Now().Unix()
 
-	err = localDB.Exec(`
-		INSERT INTO analytics_state (last_processed_id, last_processed_at, total_processed, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			last_processed_id = excluded.last_processed_id,
-			last_processed_at = excluded.last_processed_at,
-			total_processed = analytics_state.total_processed + ?,
-			updated_at = excluded.updated_at
-	`, lastID, now, len(logs), now, len(logs)).Error
+	// 更新 last_log_id
+	if err = localDB.Exec(`
+		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
+		VALUES ('last_log_id', ?, ?)
+	`, lastID, now).Error; err != nil {
+		return 0, err
+	}
 
-	if err != nil {
+	// 更新 last_processed_at
+	if err = localDB.Exec(`
+		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
+		VALUES ('last_processed_at', ?, ?)
+	`, now, now).Error; err != nil {
+		return 0, err
+	}
+
+	// 更新 total_processed（累加）
+	if err = localDB.Exec(`
+		INSERT INTO analytics_state (key, value, updated_at)
+		VALUES ('total_processed', ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value = analytics_state.value + ?,
+			updated_at = ?
+	`, len(logs), now, len(logs), now).Error; err != nil {
 		return 0, err
 	}
 
