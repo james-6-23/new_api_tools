@@ -882,50 +882,36 @@ class UserManagementService:
         Returns:
             分页的被封禁用户列表，按封禁时间倒序排列
         """
-        offset = (page - 1) * page_size
-        
         try:
             self._db.connect()
             
             # 构建查询条件
-            where_clauses = ["u.status = 2", "u.deleted_at IS NULL"]
-            params: Dict[str, Any] = {
-                "limit": page_size,
-                "offset": offset,
-            }
+            where_clauses = ["status = 2", "deleted_at IS NULL"]
+            params: Dict[str, Any] = {}
             
             if search:
-                where_clauses.append("(u.username LIKE :search OR u.email LIKE :search)")
+                where_clauses.append("(username LIKE :search OR email LIKE :search)")
                 params["search"] = f"%{search}%"
             
             where_sql = " AND ".join(where_clauses)
             
-            # 使用子查询获取每个用户最新的封禁记录时间，按封禁时间排序
+            # 先查询所有被封禁用户（不分页），获取封禁信息后再排序分页
             sql = f"""
-                SELECT u.id, u.username, u.display_name, u.email, u.status, u.quota, u.used_quota, u.request_count,
-                       (SELECT MAX(sa.created_at) FROM security_audit sa 
-                        WHERE sa.user_id = u.id AND sa.action = 'ban') as latest_ban_time
-                FROM users u
+                SELECT id, username, display_name, email, status, quota, used_quota, request_count
+                FROM users
                 WHERE {where_sql}
-                ORDER BY latest_ban_time DESC NULLS LAST, u.id DESC
-                LIMIT :limit OFFSET :offset
             """
             result = self._db.execute(sql, params)
             
-            # 查询总数
-            count_sql = f"SELECT COUNT(*) as cnt FROM users u WHERE {where_sql}"
-            count_result = self._db.execute(count_sql, params)
-            total = int(count_result[0]["cnt"]) if count_result else 0
-            
-            # 获取每个用户最近的封禁记录
-            items = []
+            # 获取每个用户的封禁信息并构建列表
+            all_items = []
             for row in result:
                 user_id = int(row["id"])
                 
-                # 从 security_audit 获取最近的封禁记录
+                # 从本地存储获取最近的封禁记录
                 ban_info = self._storage.get_latest_ban_record(user_id)
                 
-                items.append({
+                all_items.append({
                     "id": user_id,
                     "username": row.get("username") or "",
                     "display_name": row.get("display_name") or "",
@@ -938,6 +924,14 @@ class UserManagementService:
                     "ban_operator": ban_info.get("operator") if ban_info else None,
                     "ban_context": ban_info.get("context") if ban_info else None,
                 })
+            
+            # 按封禁时间倒序排序（无封禁时间的排在最后）
+            all_items.sort(key=lambda x: (x["banned_at"] is None, -(x["banned_at"] or 0)))
+            
+            # 计算分页
+            total = len(all_items)
+            offset = (page - 1) * page_size
+            items = all_items[offset:offset + page_size]
             
             return {
                 "items": items,
