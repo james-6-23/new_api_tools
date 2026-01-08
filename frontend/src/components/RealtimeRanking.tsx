@@ -953,7 +953,7 @@ export function RealtimeRanking() {
 
   // ... (其他状态)
 
-  const fetchAiAuditLogs = useCallback(async (showSuccessToast = false, page = aiAuditLogsPage) => {
+  const fetchAiAuditLogs = useCallback(async (showSuccessToast = false, page = 1) => {
     setAiAuditLogsLoading(true)
     try {
       const offset = (page - 1) * aiAuditLogsLimit
@@ -969,14 +969,14 @@ export function RealtimeRanking() {
     } finally {
       setAiAuditLogsLoading(false)
     }
-  }, [apiUrl, getAuthHeaders, showToast, aiAuditLogsLimit, aiAuditLogsPage])
+  }, [apiUrl, getAuthHeaders, showToast, aiAuditLogsLimit])
 
   // 当页码改变时重新获取数据
   useEffect(() => {
-    if (view === 'audit_logs') {
+    if (view === 'ai_ban') {
       fetchAiAuditLogs(false, aiAuditLogsPage)
     }
-  }, [aiAuditLogsPage, view])
+  }, [aiAuditLogsPage, view, fetchAiAuditLogs])
 
   const handleClearAuditLogs = async () => {
     setConfirmDialog({
@@ -1729,7 +1729,7 @@ export function RealtimeRanking() {
           {riskTabs.map(({ id, label, icon: Icon }, index) => (
             <button
               key={id}
-              ref={el => tabsRef.current[index] = el}
+              ref={el => { tabsRef.current[index] = el }}
               onClick={() => setView(id)}
               className={cn(
                 "relative z-10 inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",

@@ -880,7 +880,7 @@ class UserManagementService:
             search: 搜索关键词 (用户名)
             
         Returns:
-            分页的被封禁用户列表
+            分页的被封禁用户列表，按封禁时间倒序排列
         """
         offset = (page - 1) * page_size
         
@@ -888,30 +888,32 @@ class UserManagementService:
             self._db.connect()
             
             # 构建查询条件
-            where_clauses = ["status = 2", "deleted_at IS NULL"]
+            where_clauses = ["u.status = 2", "u.deleted_at IS NULL"]
             params: Dict[str, Any] = {
                 "limit": page_size,
                 "offset": offset,
             }
             
             if search:
-                where_clauses.append("(username LIKE :search OR email LIKE :search)")
+                where_clauses.append("(u.username LIKE :search OR u.email LIKE :search)")
                 params["search"] = f"%{search}%"
             
             where_sql = " AND ".join(where_clauses)
             
-            # 查询被封禁用户
+            # 使用子查询获取每个用户最新的封禁记录时间，按封禁时间排序
             sql = f"""
-                SELECT id, username, display_name, email, status, quota, used_quota, request_count
-                FROM users
+                SELECT u.id, u.username, u.display_name, u.email, u.status, u.quota, u.used_quota, u.request_count,
+                       (SELECT MAX(sa.created_at) FROM security_audit sa 
+                        WHERE sa.user_id = u.id AND sa.action = 'ban') as latest_ban_time
+                FROM users u
                 WHERE {where_sql}
-                ORDER BY id DESC
+                ORDER BY latest_ban_time DESC NULLS LAST, u.id DESC
                 LIMIT :limit OFFSET :offset
             """
             result = self._db.execute(sql, params)
             
             # 查询总数
-            count_sql = f"SELECT COUNT(*) as cnt FROM users WHERE {where_sql}"
+            count_sql = f"SELECT COUNT(*) as cnt FROM users u WHERE {where_sql}"
             count_result = self._db.execute(count_sql, params)
             total = int(count_result[0]["cnt"]) if count_result else 0
             

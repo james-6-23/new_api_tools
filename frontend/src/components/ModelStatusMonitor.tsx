@@ -1,11 +1,17 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
+import {
+  OpenAI, Gemini, DeepSeek, SiliconCloud, Groq, Ollama, Claude, Mistral,
+  Minimax, Baichuan, Moonshot, Spark, Qwen, Yi, Hunyuan, Stepfun, ZeroOne,
+  Zhipu, ChatGLM, Cohere, Perplexity, Together, OpenRouter, Fireworks,
+  Ai360, Doubao, Wenxin, Meta, Coze, Cerebras, Kimi, NewAPI, ZAI, ModelScope
+} from '@lobehub/icons'
 
 interface SlotStatus {
   slot: number
@@ -37,6 +43,123 @@ const STATUS_COLORS = {
   yellow: 'bg-yellow-500',
   red: 'bg-red-500',
   empty: 'bg-gray-200 dark:bg-gray-700',  // No requests - neutral gray
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IconComponent = React.ComponentType<any>
+
+// Model logo mapping - maps model name patterns to logo components
+const MODEL_LOGO_MAP: Record<string, IconComponent> = {
+  // OpenAI models
+  'gpt': OpenAI,
+  'openai': OpenAI,
+  'o1': OpenAI,
+  'o3': OpenAI,
+  'chatgpt': OpenAI,
+  'dall-e': OpenAI,
+  'whisper': OpenAI,
+  'tts': OpenAI,
+  
+  // Google models
+  'gemini': Gemini,
+  'gemma': Gemini,
+  'palm': Gemini,
+  'bard': Gemini,
+  
+  // Anthropic models
+  'claude': Claude,
+  'anthropic': Claude,
+  
+  // DeepSeek models
+  'deepseek': DeepSeek,
+  
+  // Meta models
+  'llama': Meta,
+  'meta': Meta,
+  
+  // Mistral models
+  'mistral': Mistral,
+  'mixtral': Mistral,
+  'codestral': Mistral,
+  'pixtral': Mistral,
+  
+  // Chinese models
+  'qwen': Qwen,
+  'tongyi': Qwen,
+  'yi': Yi,
+  '01-ai': Yi,
+  'baichuan': Baichuan,
+  'glm': ChatGLM,
+  'chatglm': ChatGLM,
+  'zhipu': Zhipu,
+  'moonshot': Moonshot,
+  'kimi': Kimi,
+  'spark': Spark,
+  'xunfei': Spark,
+  'hunyuan': Hunyuan,
+  'tencent': Hunyuan,
+  'doubao': Doubao,
+  'bytedance': Doubao,
+  'wenxin': Wenxin,
+  'ernie': Wenxin,
+  'baidu': Wenxin,
+  'minimax': Minimax,
+  'abab': Minimax,
+  'stepfun': Stepfun,
+  'step': Stepfun,
+  'zeroone': ZeroOne,
+  '01': ZeroOne,
+  '360': Ai360,
+  'modelscope': ModelScope,
+  
+  // Other providers
+  'groq': Groq,
+  'ollama': Ollama,
+  'cohere': Cohere,
+  'command': Cohere,
+  'perplexity': Perplexity,
+  'pplx': Perplexity,
+  'together': Together,
+  'openrouter': OpenRouter,
+  'fireworks': Fireworks,
+  'siliconcloud': SiliconCloud,
+  'silicon': SiliconCloud,
+  'cerebras': Cerebras,
+  'coze': Coze,
+  'newapi': NewAPI,
+  'zai': ZAI,
+}
+
+// Get model logo component based on model name
+function getModelLogo(modelName: string): IconComponent | null {
+  const lowerName = modelName.toLowerCase()
+  
+  // Check each pattern in order of specificity
+  for (const [pattern, Logo] of Object.entries(MODEL_LOGO_MAP)) {
+    if (lowerName.includes(pattern)) {
+      return Logo
+    }
+  }
+  
+  return null
+}
+
+// Model Logo component with fallback
+interface ModelLogoProps {
+  modelName: string
+  size?: number
+  className?: string
+}
+
+function ModelLogo({ modelName, size = 20, className }: ModelLogoProps) {
+  const Logo = useMemo(() => getModelLogo(modelName), [modelName])
+  
+  if (Logo) {
+    return <Logo size={size} className={className} />
+  }
+  
+  // Fallback to generic AI icon
+  return <Brain size={size} className={cn("text-muted-foreground", className)} />
 }
 
 const STATUS_LABELS = {
@@ -610,12 +733,17 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                             selectedModels.includes(model.model_name) && "bg-accent"
                           )}
                         >
-                          <span className={cn(
-                            "truncate",
-                            model.request_count_24h === 0 && "text-muted-foreground"
-                          )}>
-                            {model.model_name}
-                          </span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                              <ModelLogo modelName={model.model_name} size={16} />
+                            </div>
+                            <span className={cn(
+                              "truncate",
+                              model.request_count_24h === 0 && "text-muted-foreground"
+                            )}>
+                              {model.model_name}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
                             {model.request_count_24h > 0 ? (
                               <span className="text-xs text-muted-foreground">
@@ -999,6 +1127,9 @@ function ModelStatusCard({ model }: ModelStatusCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-muted/50 flex-shrink-0">
+              <ModelLogo modelName={model.model_name} size={20} />
+            </div>
             <CardTitle className="text-base font-medium truncate max-w-md" title={model.model_name}>
               {model.model_name}
             </CardTitle>

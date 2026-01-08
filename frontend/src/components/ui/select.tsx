@@ -20,10 +20,11 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       const opts: { value: string; label: string; disabled?: boolean }[] = []
       React.Children.forEach(children, (child) => {
         if (React.isValidElement(child) && child.type === 'option') {
+          const props = child.props as { value?: string | number; children?: React.ReactNode; disabled?: boolean }
           opts.push({
-            value: child.props.value?.toString() || '',
-            label: child.props.children?.toString() || child.props.value?.toString() || '',
-            disabled: child.props.disabled
+            value: props.value?.toString() || '',
+            label: props.children?.toString() || props.value?.toString() || '',
+            disabled: props.disabled
           })
         }
       })
