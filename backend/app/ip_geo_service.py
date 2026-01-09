@@ -12,7 +12,6 @@ import time
 import asyncio
 import ipaddress
 import httpx
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -79,14 +78,15 @@ IP_GEO_CACHE_PREFIX = "ip_geo:"
 
 # GeoIP 数据库路径配置
 GEOIP_DATA_DIR = os.environ.get("GEOIP_DATA_DIR", "/app/data/geoip")
-GEOIP_CITY_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-City.mmdb")
+# 使用 Country 数据库替代 City 数据库，内存占用从 ~70MB 降至 ~4MB
+GEOIP_COUNTRY_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-Country.mmdb")
 GEOIP_ASN_DB = os.path.join(GEOIP_DATA_DIR, "GeoLite2-ASN.mmdb")
 
 # GeoIP 数据库下载 URL
 GEOIP_DOWNLOAD_URLS = {
-    "city": [
-        "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
-        "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb",
+    "country": [
+        "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
+        "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-Country.mmdb",
     ],
     "asn": [
         "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb",
@@ -125,10 +125,18 @@ class IPGeoService:
     
     def __init__(self):
         self._storage = get_local_storage()
-        self._city_reader: Optional["geoip2.database.Reader"] = None
+        # 使用 Country 数据库替代 City 数据库，大幅降低内存占用
+        self._country_reader: Optional["geoip2.database.Reader"] = None
         self._asn_reader: Optional["geoip2.database.Reader"] = None
         self._db_available = False
+        self._db_checked = False  # 延迟加载标志
+
+    def _ensure_databases(self):
+        """延迟加载数据库（首次查询时）"""
+        if self._db_checked and self._db_available:
+            return
         self._init_databases()
+        self._db_checked = True
     
     def _init_databases(self):
         """初始化 GeoIP 数据库"""
@@ -136,27 +144,27 @@ class IPGeoService:
             logger.warning("geoip2 库未安装，无法使用本地 GeoIP 数据库")
             return
         
-        # 尝试加载 City 数据库
-        if os.path.exists(GEOIP_CITY_DB):
+        # 尝试加载 Country 数据库（比 City 数据库小很多，~4MB vs ~70MB）
+        if os.path.exists(GEOIP_COUNTRY_DB):
             try:
-                self._city_reader = geoip2.database.Reader(GEOIP_CITY_DB)
-                logger.success(f"GeoLite2-City 数据库已加载", path=GEOIP_CITY_DB)
+                self._country_reader = geoip2.database.Reader(GEOIP_COUNTRY_DB)
+                logger.success("GeoLite2-Country 数据库已加载", path=GEOIP_COUNTRY_DB)
             except Exception as e:
-                logger.fail(f"GeoLite2-City 数据库加载失败", error=str(e))
+                logger.fail("GeoLite2-Country 数据库加载失败", error=str(e))
         else:
-            logger.warn(f"GeoLite2-City 数据库不存在: {GEOIP_CITY_DB}")
+            logger.warn(f"GeoLite2-Country 数据库不存在: {GEOIP_COUNTRY_DB}")
 
         # 尝试加载 ASN 数据库
         if os.path.exists(GEOIP_ASN_DB):
             try:
                 self._asn_reader = geoip2.database.Reader(GEOIP_ASN_DB)
-                logger.success(f"GeoLite2-ASN 数据库已加载", path=GEOIP_ASN_DB)
+                logger.success("GeoLite2-ASN 数据库已加载", path=GEOIP_ASN_DB)
             except Exception as e:
-                logger.fail(f"GeoLite2-ASN 数据库加载失败", error=str(e))
+                logger.fail("GeoLite2-ASN 数据库加载失败", error=str(e))
         else:
             logger.warn(f"GeoLite2-ASN 数据库不存在: {GEOIP_ASN_DB}")
         
-        self._db_available = self._city_reader is not None
+        self._db_available = self._country_reader is not None
         
         if not self._db_available:
             logger.warning(
@@ -166,6 +174,7 @@ class IPGeoService:
     
     def is_available(self) -> bool:
         """检查 GeoIP 服务是否可用"""
+        self._ensure_databases()
         return self._db_available
     
     def _get_cached(self, ip: str) -> Optional[IPGeoInfo]:
@@ -240,25 +249,23 @@ class IPGeoService:
         """使用本地数据库查询 IP 信息"""
         country = ""
         country_code = ""
-        region = ""
-        city = ""
+        region = ""  # Country 数据库不提供区域信息
+        city = ""    # Country 数据库不提供城市信息
         isp = ""
         org = ""
         asn = ""
         
-        # 查询 City 数据库
-        if self._city_reader:
+        # 查询 Country 数据库（替代 City 数据库，节省内存）
+        if self._country_reader:
             try:
-                response = self._city_reader.city(ip)
+                response = self._country_reader.country(ip)
                 country = response.country.name or ""
                 country_code = response.country.iso_code or ""
-                if response.subdivisions:
-                    region = response.subdivisions.most_specific.name or ""
-                city = response.city.name or ""
+                # Country 数据库不包含 subdivisions 和 city 信息
             except geoip2.errors.AddressNotFoundError:
                 pass
             except Exception as e:
-                logger.debug(f"City 数据库查询失败 {ip}: {e}")
+                logger.debug(f"Country 数据库查询失败 {ip}: {e}")
         
         # 查询 ASN 数据库
         if self._asn_reader:
@@ -295,13 +302,16 @@ class IPGeoService:
         cached = self._get_cached(ip)
         if cached:
             return cached
-        
+
         # 私有 IP 不查询
         if is_private_ip(ip):
             info = self._create_private_ip_info(ip)
             self._set_cached(info)
             return info
-        
+
+        # 延迟加载数据库
+        self._ensure_databases()
+
         # 检查数据库是否可用
         if not self._db_available:
             return self._create_failed_info(ip, "GeoIP DB Not Available")
@@ -329,7 +339,10 @@ class IPGeoService:
         
         if total == 0:
             return results
-        
+
+        # 延迟加载数据库
+        self._ensure_databases()
+
         # 进度日志间隔（每处理 500 个 IP 输出一次）
         progress_interval = 500
         last_progress = 0
@@ -416,9 +429,9 @@ class IPGeoService:
     
     def close(self):
         """关闭数据库连接"""
-        if self._city_reader:
-            self._city_reader.close()
-            self._city_reader = None
+        if self._country_reader:
+            self._country_reader.close()
+            self._country_reader = None
         if self._asn_reader:
             self._asn_reader.close()
             self._asn_reader = None
@@ -433,14 +446,14 @@ class IPGeoService:
         """获取数据库信息"""
         info = {
             "available": self._db_available,
-            "city_db": None,
+            "country_db": None,
             "asn_db": None,
         }
         
-        if os.path.exists(GEOIP_CITY_DB):
-            stat = os.stat(GEOIP_CITY_DB)
-            info["city_db"] = {
-                "path": GEOIP_CITY_DB,
+        if os.path.exists(GEOIP_COUNTRY_DB):
+            stat = os.stat(GEOIP_COUNTRY_DB)
+            info["country_db"] = {
+                "path": GEOIP_COUNTRY_DB,
                 "size_mb": round(stat.st_size / (1024 * 1024), 2),
                 "modified_time": int(stat.st_mtime),
             }
@@ -461,7 +474,7 @@ async def download_geoip_database(db_type: str, force: bool = False) -> Tuple[bo
     下载 GeoIP 数据库
     
     Args:
-        db_type: 数据库类型 ("city" 或 "asn")
+        db_type: 数据库类型 ("country" 或 "asn")
         force: 是否强制下载（忽略已存在的文件）
     
     Returns:
@@ -470,8 +483,8 @@ async def download_geoip_database(db_type: str, force: bool = False) -> Tuple[bo
     if db_type not in GEOIP_DOWNLOAD_URLS:
         return False, f"未知的数据库类型: {db_type}"
     
-    db_path = GEOIP_CITY_DB if db_type == "city" else GEOIP_ASN_DB
-    db_name = "GeoLite2-City.mmdb" if db_type == "city" else "GeoLite2-ASN.mmdb"
+    db_path = GEOIP_COUNTRY_DB if db_type == "country" else GEOIP_ASN_DB
+    db_name = "GeoLite2-Country.mmdb" if db_type == "country" else "GeoLite2-ASN.mmdb"
     
     # 检查是否需要下载
     if not force and os.path.exists(db_path):
@@ -535,13 +548,13 @@ async def update_all_geoip_databases(force: bool = False) -> Dict[str, Any]:
     """
     results = {
         "success": True,
-        "city": {"success": False, "message": ""},
+        "country": {"success": False, "message": ""},
         "asn": {"success": False, "message": ""},
     }
     
-    # 下载 City 数据库
-    success, message = await download_geoip_database("city", force)
-    results["city"] = {"success": success, "message": message}
+    # 下载 Country 数据库（替代 City 数据库）
+    success, message = await download_geoip_database("country", force)
+    results["country"] = {"success": success, "message": message}
     if not success:
         results["success"] = False
     
@@ -552,7 +565,7 @@ async def update_all_geoip_databases(force: bool = False) -> Dict[str, Any]:
         results["success"] = False
     
     # 如果有更新，重新加载数据库
-    if results["city"]["success"] or results["asn"]["success"]:
+    if results["country"]["success"] or results["asn"]["success"]:
         service = get_ip_geo_service()
         service.reload_databases()
         logger.info("[GeoIP] 数据库已重新加载")

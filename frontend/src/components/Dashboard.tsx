@@ -441,12 +441,13 @@ export function Dashboard() {
   }
 
   const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
-  const formatNumber = (num: number) => {
+  const formatNumber = (num: number | undefined | null) => {
+    if (num == null) return '0'
     if (num >= 1000000) return `${(num / 1000000).toFixed(2)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
     return num.toString()
   }
-  const getMaxValue = (data: number[]) => Math.max(...data, 1)
+  const getMaxValue = (data: (number | undefined | null)[]) => Math.max(...data.map(d => d ?? 0), 1)
   const getPeriodLabel = () => period === '24h' ? '24小时' : period === '3d' ? '3天' : period === '7d' ? '7天' : '14天'
 
   if (loading) {
@@ -743,7 +744,7 @@ export function Dashboard() {
               <div className="h-full flex flex-col justify-around min-h-[300px] py-2">
                 {models.map((model, index) => {
                   const maxRequests = getMaxValue(models.map(m => m.request_count))
-                  const percentage = (model.request_count / maxRequests) * 100
+                  const percentage = ((model.request_count ?? 0) / maxRequests) * 100
                   const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500', 'bg-yellow-500', 'bg-rose-500']
                   return (
                     <div key={index} className="space-y-1 group">
@@ -774,13 +775,13 @@ export function Dashboard() {
 
       {/* Analytics Kings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <KingCard 
-          title="请求之王" 
-          subtitle={`${getPeriodLabel()}内请求数最多`} 
-          icon={Zap} 
-          user={analyticsSummary?.request_king} 
-          valueLabel="总请求数" 
-          value={analyticsSummary?.request_king?.request_count.toLocaleString()} 
+        <KingCard
+          title="请求之王"
+          subtitle={`${getPeriodLabel()}内请求数最多`}
+          icon={Zap}
+          user={analyticsSummary?.request_king}
+          valueLabel="总请求数"
+          value={analyticsSummary?.request_king?.request_count?.toLocaleString()}
           gradient="from-blue-600 to-indigo-600"
           accentColor="text-blue-100"
         />
@@ -790,7 +791,7 @@ export function Dashboard() {
           icon={Crown} 
           user={analyticsSummary?.quota_king} 
           valueLabel="总消耗额度" 
-          value={analyticsSummary?.quota_king ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} 
+          value={analyticsSummary?.quota_king?.quota_used != null ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} 
           gradient="from-emerald-600 to-teal-600" 
           accentColor="text-emerald-100"
         />
@@ -857,7 +858,7 @@ function StatCard({ title, value, rawValue, subValue, icon: Icon, color, variant
         <div className="flex justify-between items-start">
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="text-2xl font-bold tracking-tight">{value.toLocaleString()}</div>
+            <div className="text-2xl font-bold tracking-tight">{typeof value === 'number' ? value.toLocaleString() : value}</div>
           </div>
           <div className={cn("p-2.5 rounded-xl transition-colors duration-200", theme.bg)}>
             <Icon className="w-5 h-5" />
