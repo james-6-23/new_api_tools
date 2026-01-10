@@ -274,6 +274,51 @@ async def batch_delete_inactive_users(
     )
 
 
+class PurgeSoftDeletedRequest(BaseModel):
+    """清理软删除用户请求"""
+    dry_run: bool = True  # 预览模式
+
+
+@router.get("/soft-deleted/count", response_model=DeleteResponse)
+async def get_soft_deleted_count(
+    _: str = Depends(verify_auth),
+):
+    """获取已软删除用户的数量"""
+    service = get_user_management_service()
+    result = service.get_soft_deleted_users_count()
+    return DeleteResponse(
+        success=result["success"],
+        message=result.get("message", ""),
+        data={"count": result.get("count", 0)},
+    )
+
+
+@router.post("/soft-deleted/purge", response_model=DeleteResponse)
+async def purge_soft_deleted_users(
+    request: PurgeSoftDeletedRequest,
+    _: str = Depends(verify_auth),
+):
+    """
+    彻底清理已软删除的用户（物理删除）
+    
+    - **dry_run**: 预览模式，为 true 时只返回将被清理的用户数量
+    
+    **警告**: 此操作会永久删除用户及所有关联数据，不可恢复！
+    """
+    service = get_user_management_service()
+    result = service.purge_soft_deleted_users(dry_run=request.dry_run)
+    
+    return DeleteResponse(
+        success=result["success"],
+        message=result["message"],
+        data={
+            "count": result.get("count", 0),
+            "dry_run": result.get("dry_run", False),
+            "users": result.get("users", []),
+        } if result["success"] else None,
+    )
+
+
 @router.post("/{user_id}/ban", response_model=DeleteResponse)
 async def ban_user(
     user_id: int,

@@ -154,6 +154,10 @@ export function UserManagement() {
   const [deletingVeryInactive, setDeletingVeryInactive] = useState(false)
   const [deletingNever, setDeletingNever] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  
+  // 软删除用户清理
+  const [softDeletedCount, setSoftDeletedCount] = useState(0)
+  const [purgingSoftDeleted, setPurgingSoftDeleted] = useState(false)
 
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
@@ -218,6 +222,92 @@ export function UserManagement() {
       console.error('Failed to fetch stats:', error)
     }
   }, [apiUrl, getAuthHeaders])
+
+  // 获取软删除用户数量
+  const fetchSoftDeletedCount = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/users/soft-deleted/count`, { headers: getAuthHeaders() })
+      const data = await response.json()
+      if (data.success) {
+        setSoftDeletedCount(data.data?.count || 0)
+      }
+    } catch (error) {
+      console.error('Failed to fetch soft deleted count:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // 预览清理软删除用户
+  const previewPurgeSoftDeleted = async () => {
+    setHardDeleteConfirmText('')
+    setConfirmDialog({
+      isOpen: true,
+      title: '清理已软删除用户',
+      message: '正在查询已软删除的用户...',
+      type: 'danger',
+      loading: true,
+      hardDelete: true,
+      requireConfirmText: true,
+      onConfirm: () => executePurgeSoftDeleted(),
+    })
+
+    try {
+      const response = await fetch(`${apiUrl}/api/users/soft-deleted/purge`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ dry_run: true }),
+      })
+      const data = await response.json()
+      if (data.success && data.data) {
+        const count = data.data.count
+        const usernames = data.data.users || []
+        if (count === 0) {
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+          showToast('info', '没有需要清理的软删除用户')
+          return
+        }
+        setConfirmDialog(prev => ({
+          ...prev,
+          message: `确定要彻底清理 ${count} 个已软删除的用户吗？\n\n⚠️ 这些用户之前已被软删除，此操作将永久移除他们及所有关联数据，不可恢复！`,
+          details: { count, users: usernames },
+          loading: false,
+        }))
+      } else {
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+        showToast('error', data.message || '预览失败')
+      }
+    } catch (error) {
+      console.error('Failed to preview purge:', error)
+      setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+      showToast('error', '预览失败')
+    }
+  }
+
+  // 执行清理软删除用户
+  const executePurgeSoftDeleted = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+    setPurgingSoftDeleted(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/users/soft-deleted/purge`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ dry_run: false }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        showToast('success', data.message)
+        setSoftDeletedCount(0)
+        // 刷新统计
+        fetchStats()
+      } else {
+        showToast('error', data.message || '清理失败')
+      }
+    } catch (error) {
+      console.error('Failed to purge soft deleted:', error)
+      showToast('error', '清理失败')
+    } finally {
+      setPurgingSoftDeleted(false)
+    }
+  }
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -382,6 +472,10 @@ export function UserManagement() {
         // 并行刷新数据
         setPage(1)
         Promise.all([fetchUsers(), fetchStats()])
+        // 如果是软删除，刷新软删除计数
+        if (!hardDelete) {
+          fetchSoftDeletedCount()
+        }
       } else {
         showToast('error', data.message || '批量删除失败')
       }
@@ -404,7 +498,8 @@ export function UserManagement() {
 
   useEffect(() => {
     fetchStats(true)  // 首次加载使用快速模式
-  }, [fetchStats])
+    fetchSoftDeletedCount()  // 获取软删除用户数量
+  }, [fetchStats, fetchSoftDeletedCount])
 
   useEffect(() => {
     fetchUsers()
@@ -604,8 +699,8 @@ export function UserManagement() {
                   <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
                 </div>
                 <div>
-                  <h3 className="font-medium text-orange-800 dark:text-orange-200">批量清理不活跃用户</h3>
-                  <p className="text-sm text-orange-600 dark:text-orange-400">软删除：数据保留可恢复 | 彻底删除：永久移除不可恢复</p>
+                  <h3 className="font-medium text-orange-800 dark:text-orange-200">批量注销不活跃用户</h3>
+                  <p className="text-sm text-orange-600 dark:text-orange-400">注销：数据保留可恢复 | 彻底删除：永久移除不可恢复</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -617,7 +712,7 @@ export function UserManagement() {
                   disabled={deletingVeryInactive || !stats?.very_inactive_users}
                 >
                   {deletingVeryInactive ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
-                  清理非常不活跃 ({stats?.very_inactive_users || 0})
+                  注销非常不活跃 ({stats?.very_inactive_users || 0})
                 </Button>
                 <Button
                   variant="outline"
@@ -627,7 +722,7 @@ export function UserManagement() {
                   disabled={deletingNever || !stats?.never_requested}
                 >
                   {deletingNever ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
-                  清理从未请求 ({stats?.never_requested || 0})
+                  注销从未请求 ({stats?.never_requested || 0})
                 </Button>
               </div>
             </div>
@@ -667,6 +762,32 @@ export function UserManagement() {
                 </div>
               </div>
             </div>
+            {/* 清理已注销用户 */}
+            {softDeletedCount > 0 && (
+              <div className="border-t border-orange-200 dark:border-orange-800 pt-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                      <Trash2 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-purple-800 dark:text-purple-200">清理已注销用户</h3>
+                      <p className="text-sm text-purple-600 dark:text-purple-400">这些用户已被删除（注销），彻底清理可释放数据库空间</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-purple-300 text-purple-700 hover:bg-purple-100 hover:text-purple-800 dark:border-purple-800 dark:text-purple-300 dark:hover:bg-purple-900"
+                    onClick={previewPurgeSoftDeleted}
+                    disabled={purgingSoftDeleted}
+                  >
+                    {purgingSoftDeleted ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                    彻底清理注销用户 ({softDeletedCount})
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

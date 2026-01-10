@@ -981,6 +981,78 @@ class UserManagementService:
             logger.db_error(f"彻底删除用户失败: {e}")
             raise
 
+    def get_soft_deleted_users_count(self) -> Dict[str, Any]:
+        """
+        获取已软删除（注销）用户的数量
+        
+        注：封禁用户是 status=2 且 deleted_at IS NULL，不会被统计
+        """
+        try:
+            self._db.connect()
+            sql = "SELECT COUNT(*) as cnt FROM users WHERE deleted_at IS NOT NULL"
+            result = self._db.execute(sql, {})
+            count = int(result[0]["cnt"]) if result else 0
+            return {"success": True, "count": count}
+        except Exception as e:
+            logger.db_error(f"获取软删除用户数量失败: {e}")
+            return {"success": False, "count": 0, "message": str(e)}
+
+    def purge_soft_deleted_users(self, dry_run: bool = True) -> Dict[str, Any]:
+        """
+        彻底清理已软删除（注销）的用户（物理删除）
+        
+        注：封禁用户是 status=2 且 deleted_at IS NULL，不会被清理
+        
+        Args:
+            dry_run: 预览模式，不实际删除
+            
+        Returns:
+            删除结果
+        """
+        try:
+            self._db.connect()
+            
+            # 获取已软删除的用户
+            find_sql = "SELECT id, username FROM users WHERE deleted_at IS NOT NULL"
+            result = self._db.execute(find_sql, {})
+            user_ids = [row["id"] for row in result]
+            usernames = [row.get("username", "") for row in result]
+            
+            if dry_run:
+                return {
+                    "success": True,
+                    "dry_run": True,
+                    "count": len(user_ids),
+                    "users": usernames[:20],
+                    "message": f"预览：将彻底清理 {len(user_ids)} 个已注销的用户",
+                }
+            
+            if not user_ids:
+                return {
+                    "success": True,
+                    "count": 0,
+                    "message": "没有需要清理的注销用户",
+                }
+            
+            # 执行彻底删除
+            deleted_count = self._hard_delete_users(user_ids)
+            
+            # 清除缓存
+            self._storage.cache_delete(STATS_CACHE_KEY)
+            self.invalidate_activity_list_cache()
+            
+            logger.business("清理注销用户", count=deleted_count)
+            
+            return {
+                "success": True,
+                "count": deleted_count,
+                "message": f"已彻底清理 {deleted_count} 个注销用户",
+            }
+            
+        except Exception as e:
+            logger.db_error(f"清理注销用户失败: {e}")
+            return {"success": False, "message": f"清理失败: {str(e)}"}
+
     def get_banned_users(
         self,
         page: int = 1,
