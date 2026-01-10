@@ -792,36 +792,68 @@ class UserManagementService:
         self,
         activity_level: ActivityLevel = ActivityLevel.VERY_INACTIVE,
         dry_run: bool = True,
+        hard_delete: bool = False,
     ) -> Dict[str, Any]:
-        """批量删除不活跃用户"""
+        """
+        批量删除不活跃用户
+        
+        Args:
+            activity_level: 活跃度级别筛选
+            dry_run: 预览模式，不实际删除
+            hard_delete: 彻底删除模式，从数据库物理删除用户及关联数据
+        
+        性能优化：使用 EXISTS 子查询代替 LEFT JOIN + GROUP BY
+        """
         now = int(time.time())
         inactive_cutoff = now - INACTIVE_THRESHOLD
 
         try:
             self._db.connect()
 
-            # 查找要删除的用户
+            # 使用 EXISTS 子查询，与统计逻辑保持一致（性能优化）
             if activity_level == ActivityLevel.VERY_INACTIVE:
+                # 非常不活跃：超过30天无请求（但有请求记录）
                 find_sql = """
                     SELECT u.id, u.username
                     FROM users u
-                    LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
                     WHERE u.deleted_at IS NULL
-                    GROUP BY u.id, u.username
-                    HAVING MAX(l.created_at) < :cutoff
+                      AND u.request_count > 0
+                      AND NOT EXISTS (
+                        SELECT 1 FROM logs l 
+                        WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= :cutoff
+                        LIMIT 1
+                      )
                 """
-                params = {"cutoff": inactive_cutoff}
+                params: Dict[str, Any] = {"cutoff": inactive_cutoff}
             elif activity_level == ActivityLevel.NEVER:
-                # 使用 logs 表判断，与统计逻辑一致
+                # 从未请求：request_count = 0
                 find_sql = """
                     SELECT u.id, u.username
                     FROM users u
-                    LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
                     WHERE u.deleted_at IS NULL
-                    GROUP BY u.id, u.username
-                    HAVING MAX(l.created_at) IS NULL
+                      AND u.request_count = 0
                 """
                 params = {}
+            elif activity_level == ActivityLevel.INACTIVE:
+                # 不活跃：7-30天内有请求
+                active_cutoff = now - ACTIVE_THRESHOLD
+                find_sql = """
+                    SELECT u.id, u.username
+                    FROM users u
+                    WHERE u.deleted_at IS NULL
+                      AND u.request_count > 0
+                      AND NOT EXISTS (
+                        SELECT 1 FROM logs l 
+                        WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= :active_cutoff
+                        LIMIT 1
+                      )
+                      AND EXISTS (
+                        SELECT 1 FROM logs l 
+                        WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= :inactive_cutoff
+                        LIMIT 1
+                      )
+                """
+                params = {"active_cutoff": active_cutoff, "inactive_cutoff": inactive_cutoff}
             else:
                 return {"success": False, "message": "不支持的活跃度级别"}
 
@@ -835,7 +867,7 @@ class UserManagementService:
                     "dry_run": True,
                     "count": len(user_ids),
                     "users": usernames[:20],
-                    "message": f"预览：将删除 {len(user_ids)} 个用户",
+                    "message": f"预览：将{'彻底' if hard_delete else ''}删除 {len(user_ids)} 个用户",
                 }
 
             if not user_ids:
@@ -846,24 +878,108 @@ class UserManagementService:
                 }
 
             # 执行批量删除
-            for user_id in user_ids:
-                self.delete_user(user_id)
+            if hard_delete:
+                # 彻底删除：物理删除用户及关联数据
+                deleted_count = self._hard_delete_users(user_ids)
+            else:
+                # 软删除：逐个调用 delete_user
+                for user_id in user_ids:
+                    self.delete_user(user_id)
+                deleted_count = len(user_ids)
 
-            # 清除缓存（delete_user 已清除，但再次确保）
+            # 清除缓存
             self._storage.cache_delete(STATS_CACHE_KEY)
             self.invalidate_activity_list_cache()
 
-            logger.business("批量删除不活跃用户", count=len(user_ids), activity=activity_level.value)
+            action = "彻底删除" if hard_delete else "删除"
+            logger.business(f"批量{action}不活跃用户", count=deleted_count, activity=activity_level.value, hard_delete=hard_delete)
 
             return {
                 "success": True,
-                "count": len(user_ids),
-                "message": f"已删除 {len(user_ids)} 个不活跃用户",
+                "count": deleted_count,
+                "message": f"已{action} {deleted_count} 个不活跃用户",
             }
 
         except Exception as e:
             logger.db_error(f"批量删除用户失败: {e}")
             return {"success": False, "message": f"批量删除失败: {str(e)}"}
+
+    def _hard_delete_users(self, user_ids: List[int]) -> int:
+        """
+        彻底删除用户（物理删除）
+        
+        删除顺序（考虑外键约束）：
+        1. tokens - 用户的令牌
+        2. logs - 用户的日志（可选，数据量大时跳过）
+        3. quota_data - 用户的配额数据
+        4. midjourneys - 用户的 MJ 任务
+        5. tasks - 用户的任务
+        6. top_ups - 用户的充值记录
+        7. redemptions - 用户创建的兑换码
+        8. two_fas / two_fa_backup_codes - 2FA 相关
+        9. passkey_credentials - Passkey 凭证
+        10. users - 最后删除用户本身
+        """
+        if not user_ids:
+            return 0
+        
+        deleted_count = 0
+        
+        try:
+            self._db.connect()
+            
+            # 批量处理，每批 100 个用户
+            batch_size = 100
+            for i in range(0, len(user_ids), batch_size):
+                batch_ids = user_ids[i:i + batch_size]
+                placeholders = ", ".join([f":id_{j}" for j in range(len(batch_ids))])
+                params = {f"id_{j}": uid for j, uid in enumerate(batch_ids)}
+                
+                # 1. 删除 tokens
+                self._db.execute(f"DELETE FROM tokens WHERE user_id IN ({placeholders})", params)
+                
+                # 2. 删除 quota_data
+                self._db.execute(f"DELETE FROM quota_data WHERE user_id IN ({placeholders})", params)
+                
+                # 3. 删除 midjourneys
+                self._db.execute(f"DELETE FROM midjourneys WHERE user_id IN ({placeholders})", params)
+                
+                # 4. 删除 tasks
+                self._db.execute(f"DELETE FROM tasks WHERE user_id IN ({placeholders})", params)
+                
+                # 5. 删除 top_ups
+                self._db.execute(f"DELETE FROM top_ups WHERE user_id IN ({placeholders})", params)
+                
+                # 6. 删除用户创建的兑换码（user_id 是创建者）
+                self._db.execute(f"DELETE FROM redemptions WHERE user_id IN ({placeholders})", params)
+                
+                # 7. 删除 2FA 相关
+                self._db.execute(f"DELETE FROM two_fa_backup_codes WHERE user_id IN ({placeholders})", params)
+                self._db.execute(f"DELETE FROM two_fas WHERE user_id IN ({placeholders})", params)
+                
+                # 8. 删除 passkey_credentials
+                self._db.execute(f"DELETE FROM passkey_credentials WHERE user_id IN ({placeholders})", params)
+                
+                # 9. 最后删除用户
+                result = self._db.execute(f"DELETE FROM users WHERE id IN ({placeholders})", params)
+                
+                # 统计删除数量
+                if result and result[0]:
+                    affected = int(result[0].get("affected_rows", 0) or len(batch_ids))
+                    deleted_count += affected
+                else:
+                    deleted_count += len(batch_ids)
+                
+                logger.debug(f"[彻底删除] 批次 {i // batch_size + 1}: 删除 {len(batch_ids)} 个用户")
+            
+            # 注意：logs 表数据量可能很大，不删除用户日志
+            # 如果需要删除日志，可以单独执行或使用异步任务
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.db_error(f"彻底删除用户失败: {e}")
+            raise
 
     def get_banned_users(
         self,
