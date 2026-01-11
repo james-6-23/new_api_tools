@@ -1,6 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain } from 'lucide-react'
+import {
+  OpenAI, Gemini, DeepSeek, SiliconCloud, Groq, Ollama, Claude, Mistral,
+  Minimax, Baichuan, Moonshot, Spark, Qwen, Yi, Hunyuan, Stepfun, ZeroOne,
+  Zhipu, ChatGLM, Cohere, Perplexity, Together, OpenRouter, Fireworks,
+  Ai360, Doubao, Wenxin, Meta, Coze, Cerebras, Kimi, NewAPI, ZAI, ModelScope
+} from '@lobehub/icons'
 
 // ============================================================================
 // Types
@@ -35,6 +41,61 @@ interface ThemeConfig {
   nameEn: string
   icon: React.ComponentType<{ className?: string }>
   description: string
+}
+
+// ============================================================================
+// Model Logo Mapping
+// ============================================================================
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IconComponent = React.ComponentType<any>
+
+const MODEL_LOGO_MAP: Record<string, IconComponent> = {
+  // OpenAI models
+  'gpt': OpenAI, 'openai': OpenAI, 'o1': OpenAI, 'o3': OpenAI, 'chatgpt': OpenAI,
+  'dall-e': OpenAI, 'whisper': OpenAI, 'tts': OpenAI,
+  // Google models
+  'gemini': Gemini, 'gemma': Gemini, 'palm': Gemini, 'bard': Gemini,
+  // Anthropic models
+  'claude': Claude, 'anthropic': Claude,
+  // DeepSeek models
+  'deepseek': DeepSeek,
+  // Meta models
+  'llama': Meta, 'meta': Meta,
+  // Mistral models
+  'mistral': Mistral, 'mixtral': Mistral, 'codestral': Mistral, 'pixtral': Mistral,
+  // Chinese models
+  'qwen': Qwen, 'tongyi': Qwen, 'yi': Yi, '01-ai': Yi, 'baichuan': Baichuan,
+  'glm': ChatGLM, 'chatglm': ChatGLM, 'zhipu': Zhipu, 'moonshot': Moonshot, 'kimi': Kimi,
+  'spark': Spark, 'xunfei': Spark, 'hunyuan': Hunyuan, 'tencent': Hunyuan,
+  'doubao': Doubao, 'bytedance': Doubao, 'wenxin': Wenxin, 'ernie': Wenxin, 'baidu': Wenxin,
+  'minimax': Minimax, 'abab': Minimax, 'stepfun': Stepfun, 'step': Stepfun,
+  'zeroone': ZeroOne, '01': ZeroOne, '360': Ai360, 'modelscope': ModelScope,
+  // Other providers
+  'groq': Groq, 'ollama': Ollama, 'cohere': Cohere, 'command': Cohere,
+  'perplexity': Perplexity, 'pplx': Perplexity, 'together': Together,
+  'openrouter': OpenRouter, 'fireworks': Fireworks, 'siliconcloud': SiliconCloud,
+  'silicon': SiliconCloud, 'cerebras': Cerebras, 'coze': Coze, 'newapi': NewAPI, 'zai': ZAI,
+}
+
+function getModelLogo(modelName: string): IconComponent | null {
+  const lowerName = modelName.toLowerCase()
+  for (const [pattern, Logo] of Object.entries(MODEL_LOGO_MAP)) {
+    if (lowerName.includes(pattern)) return Logo
+  }
+  return null
+}
+
+interface ModelLogoProps {
+  modelName: string
+  size?: number
+  className?: string
+}
+
+function ModelLogo({ modelName, size = 20, className }: ModelLogoProps) {
+  const Logo = useMemo(() => getModelLogo(modelName), [modelName])
+  if (Logo) return <Logo size={size} className={className} />
+  return <Brain size={size} className={cn("text-current opacity-50", className)} />
 }
 
 // ============================================================================
@@ -1063,6 +1124,11 @@ function EmbedModelCard({ model, theme, styles, onHover, onLeave }: EmbedModelCa
         isMinimal ? 'mb-2' : 'mb-4'
       )}>
         <div className="flex items-center gap-3 min-w-0">
+          {!isMinimal && (
+            <div className="flex items-center justify-center w-7 h-7 rounded-md bg-current/5 flex-shrink-0">
+              <ModelLogo modelName={model.model_name} size={18} />
+            </div>
+          )}
           <h3 className={styles.modelName} title={model.model_name}>
             {model.model_name}
           </h3>

@@ -593,8 +593,11 @@ class RiskMonitoringService:
 
         # Query 3: Top models, channels, IPs combined using UNION ALL
         # This reduces 3 queries to 1 by using tagged results
-        combined_tops_sql = """
-            SELECT 'model' as category, COALESCE(model_name, 'unknown') as name, 
+        # 根据数据库类型选择 group 列名
+        group_col_logs = '"group"' if is_pg else '`group`'
+
+        combined_tops_sql = f"""
+            SELECT 'model' as category, COALESCE(model_name, 'unknown') as name,
                    COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota_used,
                    SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
                    SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
@@ -603,9 +606,9 @@ class RiskMonitoringService:
             FROM logs
             WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time AND type IN (2, 5)
             GROUP BY COALESCE(model_name, 'unknown')
-            
+
             UNION ALL
-            
+
             SELECT 'channel' as category, '' as name,
                    COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota_used,
                    0 as success_requests, 0 as failure_requests, 0 as empty_count,
@@ -613,17 +616,27 @@ class RiskMonitoringService:
             FROM logs
             WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time AND type IN (2, 5)
             GROUP BY channel_id
-            
+
             UNION ALL
-            
+
             SELECT 'ip' as category, ip as name,
                    COUNT(*) as requests, 0 as quota_used,
                    0 as success_requests, 0 as failure_requests, 0 as empty_count,
                    0 as channel_id, '' as channel_name
             FROM logs
-            WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time 
+            WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time
                 AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
             GROUP BY ip
+
+            UNION ALL
+
+            SELECT 'group' as category, COALESCE({group_col_logs}, 'default') as name,
+                   COUNT(*) as requests, COALESCE(SUM(quota), 0) as quota_used,
+                   0 as success_requests, 0 as failure_requests, 0 as empty_count,
+                   0 as channel_id, '' as channel_name
+            FROM logs
+            WHERE user_id = :user_id AND created_at >= :start_time AND created_at <= :end_time AND type IN (2, 5)
+            GROUP BY COALESCE({group_col_logs}, 'default')
         """
         combined_rows = self.db.execute(combined_tops_sql, params) or []
         
@@ -631,7 +644,8 @@ class RiskMonitoringService:
         top_models_raw = []
         top_channels_raw = []
         top_ips_raw = []
-        
+        top_groups_raw = []
+
         for r in combined_rows:
             category = r.get("category")
             if category == "model":
@@ -640,15 +654,19 @@ class RiskMonitoringService:
                 top_channels_raw.append(r)
             elif category == "ip":
                 top_ips_raw.append(r)
-        
+            elif category == "group":
+                top_groups_raw.append(r)
+
         # Sort and limit
         top_models_raw.sort(key=lambda x: x.get("requests", 0), reverse=True)
         top_channels_raw.sort(key=lambda x: x.get("requests", 0), reverse=True)
         top_ips_raw.sort(key=lambda x: x.get("requests", 0), reverse=True)
-        
+        top_groups_raw.sort(key=lambda x: x.get("requests", 0), reverse=True)
+
         top_models = top_models_raw[:10]
         top_channels = top_channels_raw[:10]
         top_ips = top_ips_raw[:10]
+        top_groups = top_groups_raw[:10]
 
         # Query 4: Recent logs (kept separate as it needs different columns)
         recent_sql = """
@@ -738,11 +756,14 @@ class RiskMonitoringService:
             risk_flags.append("MANY_IPS")
 
         # IP切换频率风险检测（使用排除双栈后的真实切换次数）
-        if ip_switch_analysis.get("rapid_switch_count", 0) >= 3:
+        # 快速切换风险：快速切换次数 >= 3 且平均停留时间 < 300秒（5分钟）
+        # 如果平均停留时间较长，说明用户大部分时间是稳定的，偶尔的快速切换可能是网络波动
+        avg_ip_duration = ip_switch_analysis.get("avg_ip_duration", float('inf'))
+        if ip_switch_analysis.get("rapid_switch_count", 0) >= 3 and avg_ip_duration < 300:
             risk_flags.append("IP_RAPID_SWITCH")
-        
+
         real_switch_count = ip_switch_analysis.get("real_switch_count", ip_switch_analysis.get("switch_count", 0))
-        if ip_switch_analysis.get("avg_ip_duration", float('inf')) < 30 and real_switch_count >= 3:
+        if avg_ip_duration < 30 and real_switch_count >= 3:
             risk_flags.append("IP_HOPPING")
 
         # 检查用户是否在白名单中（延迟导入避免循环依赖）
@@ -811,6 +832,10 @@ class RiskMonitoringService:
             "top_ips": [
                 {"ip": r.get("name") or "", "requests": int(r.get("requests") or 0)}
                 for r in top_ips
+            ],
+            "top_groups": [
+                {"group_name": r.get("name") or "default", "requests": int(r.get("requests") or 0)}
+                for r in top_groups
             ],
             "recent_logs": [
                 {

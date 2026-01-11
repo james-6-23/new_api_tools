@@ -50,6 +50,7 @@ def get_leaderboards(
 def get_user_analysis(
     user_id: int,
     window: str = Query(default="24h", description="分析窗口 (1h/3h/6h/12h/24h)"),
+    end_time: Optional[int] = Query(default=None, description="结束时间点(Unix时间戳)，用于查看历史数据如封禁时刻"),
     _: str = Depends(verify_auth),
 ):
     seconds = WINDOW_SECONDS.get(window)
@@ -57,7 +58,8 @@ def get_user_analysis(
         raise InvalidParamsError(message=f"Invalid window: {window}")
 
     service = get_risk_monitoring_service()
-    data = service.get_user_analysis(user_id=user_id, window_seconds=seconds)
+    # 如果指定了 end_time，则以该时间为基准查询历史数据
+    data = service.get_user_analysis(user_id=user_id, window_seconds=seconds, now=end_time)
     return UserAnalysisResponse(success=True, data=data)
 
 

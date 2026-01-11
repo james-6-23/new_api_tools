@@ -42,8 +42,9 @@ class DeleteResponse(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     """批量删除请求"""
-    activity_level: str = "very_inactive"  # very_inactive 或 never
+    activity_level: str = "very_inactive"  # very_inactive, inactive 或 never
     dry_run: bool = True  # 预演模式
+    hard_delete: bool = False  # 彻底删除模式（物理删除）
 
 
 class BanRequest(BaseModel):
@@ -223,10 +224,15 @@ async def batch_delete_inactive_users(
     """
     批量删除不活跃用户
 
-    - **activity_level**: 要删除的活跃度级别 (very_inactive 或 never)
+    - **activity_level**: 要删除的活跃度级别 (very_inactive, inactive 或 never)
     - **dry_run**: 预演模式，为 true 时只返回将被删除的用户数量，不实际删除
+    - **hard_delete**: 彻底删除模式，为 true 时物理删除用户及所有关联数据
 
-    **警告**: 此操作不可恢复（软删除）。建议先使用 dry_run=true 预览。
+    **警告**: 
+    - 软删除（hard_delete=false）：用户数据保留，可通过数据库恢复
+    - 彻底删除（hard_delete=true）：永久删除用户及关联数据，不可恢复！
+    
+    建议先使用 dry_run=true 预览。
     """
     # 转换活跃度级别
     try:
@@ -237,16 +243,17 @@ async def batch_delete_inactive_users(
             message=f"无效的活跃度级别: {request.activity_level}",
         )
 
-    if level not in [ActivityLevel.VERY_INACTIVE, ActivityLevel.NEVER]:
+    if level not in [ActivityLevel.VERY_INACTIVE, ActivityLevel.INACTIVE, ActivityLevel.NEVER]:
         return DeleteResponse(
             success=False,
-            message="只能批量删除 very_inactive 或 never 级别的用户",
+            message="只能批量删除 very_inactive、inactive 或 never 级别的用户",
         )
 
     service = get_user_management_service()
     result = service.batch_delete_inactive_users(
         activity_level=level,
         dry_run=request.dry_run,
+        hard_delete=request.hard_delete,
     )
 
     if request.dry_run:
@@ -256,6 +263,51 @@ async def batch_delete_inactive_users(
             count=result.get("count", 0)
         )
 
+    return DeleteResponse(
+        success=result["success"],
+        message=result["message"],
+        data={
+            "count": result.get("count", 0),
+            "dry_run": result.get("dry_run", False),
+            "users": result.get("users", []),
+        } if result["success"] else None,
+    )
+
+
+class PurgeSoftDeletedRequest(BaseModel):
+    """清理软删除用户请求"""
+    dry_run: bool = True  # 预览模式
+
+
+@router.get("/soft-deleted/count", response_model=DeleteResponse)
+async def get_soft_deleted_count(
+    _: str = Depends(verify_auth),
+):
+    """获取已软删除用户的数量"""
+    service = get_user_management_service()
+    result = service.get_soft_deleted_users_count()
+    return DeleteResponse(
+        success=result["success"],
+        message=result.get("message", ""),
+        data={"count": result.get("count", 0)},
+    )
+
+
+@router.post("/soft-deleted/purge", response_model=DeleteResponse)
+async def purge_soft_deleted_users(
+    request: PurgeSoftDeletedRequest,
+    _: str = Depends(verify_auth),
+):
+    """
+    彻底清理已软删除的用户（物理删除）
+    
+    - **dry_run**: 预览模式，为 true 时只返回将被清理的用户数量
+    
+    **警告**: 此操作会永久删除用户及所有关联数据，不可恢复！
+    """
+    service = get_user_management_service()
+    result = service.purge_soft_deleted_users(dry_run=request.dry_run)
+    
     return DeleteResponse(
         success=result["success"],
         message=result["message"],

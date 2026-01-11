@@ -144,7 +144,7 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
               {tabs.map(({ id, label, icon: Icon }, index) => (
                 <button
                   key={id}
-                  ref={el => tabsRef.current[index] = el}
+                  ref={el => { tabsRef.current[index] = el }}
                   onClick={() => onTabChange(id)}
                   className={cn(
                     "relative h-9 flex items-center justify-center gap-2 px-3 sm:px-4 text-sm font-medium rounded-md whitespace-nowrap transition-colors duration-200 z-10 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
