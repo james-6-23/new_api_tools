@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **数据库初始化重构**：本地数据库始终使用独立的 SQLite 文件
+  - 默认路径从 `/app/data/local.db` 改为 `./data/local.db`（与 Python 版本一致）
+  - `migrateLocalTables` 支持 MySQL 主键类型兼容（VARCHAR(255) 替代 TEXT）
+  - 自动创建本地数据库目录
+  - 涉及文件：`internal/database/database.go`
+- **环境变量加载优化**：集成 godotenv 自动加载 `.env` 文件
+  - 新增 `github.com/joho/godotenv` 依赖
+  - 配置加载时自动读取 `.env` 文件（忽略不存在的情况）
+  - 涉及文件：`internal/config/config.go`、`go.mod`、`go.sum`
+- **环境配置示例优化**：`.env.example` 中注释掉分离配置变量，推荐使用连接字符串方式
+  - 涉及文件：`.env.example`
+
+### Removed
+- 删除根目录冗余的 `.env.example` 文件（保留 `backend-go/.env.example`）
+- 删除 `.snow/notebook/new_api_tools.json` 开发笔记文件
+
 ### Fixed
 - **修复 /analytics 页面 TypeError 错误**：后端 `/api/analytics/summary` 返回数据结构与前端期望不一致
   - 新增 `GetFullSummary()` 方法返回完整的 `state`、`user_request_ranking`、`user_quota_ranking`、`model_statistics` 数据
