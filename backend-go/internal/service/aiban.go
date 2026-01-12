@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,9 +27,11 @@ func NewAIBanService() *AIBanService {
 // AIBanConfig AI 封禁配置
 type AIBanConfig struct {
 	Enabled           bool    `json:"enabled"`
+	DryRun            bool    `json:"dry_run"` // 试运行模式
 	RiskThreshold     float64 `json:"risk_threshold"`
 	AutoBanEnabled    bool    `json:"auto_ban_enabled"`
-	ScanInterval      int     `json:"scan_interval"`
+	ScanInterval      int     `json:"scan_interval"`         // 扫描间隔（秒）
+	ScanIntervalMins  int     `json:"scan_interval_minutes"` // 扫描间隔（分钟），兼容 Python 版本
 	MaxRequestsPerDay int64   `json:"max_requests_per_day"`
 	MaxIPsPerUser     int     `json:"max_ips_per_user"`
 	MaxTokensPerUser  int     `json:"max_tokens_per_user"`
@@ -35,6 +39,28 @@ type AIBanConfig struct {
 	WhitelistEnabled  bool    `json:"whitelist_enabled"`
 	NotifyOnBan       bool    `json:"notify_on_ban"`
 	LastUpdated       string  `json:"last_updated"`
+
+	// AI API 配置（兼容 Python 版本）
+	APIKey    string `json:"api_key,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	Model     string `json:"model,omitempty"`
+	HasAPIKey bool   `json:"has_api_key"`
+	MaskedKey string `json:"masked_api_key,omitempty"`
+
+	// 自定义提示词（空字符串表示使用默认提示词）
+	CustomPrompt  string `json:"custom_prompt,omitempty"`
+	DefaultPrompt string `json:"default_prompt,omitempty"`
+
+	// IP 白名单/黑名单（用于提示词变量，帮助 AI 做出更准确的判断）
+	WhitelistIPs []string `json:"whitelist_ips,omitempty"`
+	BlacklistIPs []string `json:"blacklist_ips,omitempty"`
+
+	// 排除模型/分组（这些请求不计入风险分析）
+	ExcludedModels []string `json:"excluded_models,omitempty"`
+	ExcludedGroups []string `json:"excluded_groups,omitempty"`
+
+	// API 健康状态
+	APIHealth *APIHealthStatus `json:"api_health,omitempty"`
 }
 
 // SuspiciousUser 可疑用户
@@ -86,18 +112,32 @@ type WhitelistEntry struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+// APIHealthStatus API 健康状态
+type APIHealthStatus struct {
+	Suspended           bool   `json:"suspended"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	LastError           string `json:"last_error,omitempty"`
+	CooldownRemaining   int    `json:"cooldown_remaining"`
+}
+
 // 默认配置
 var defaultAIBanConfig = &AIBanConfig{
 	Enabled:           false,
+	DryRun:            true, // 默认试运行模式
 	RiskThreshold:     60.0,
 	AutoBanEnabled:    false,
 	ScanInterval:      3600,
+	ScanIntervalMins:  0, // 0 表示关闭定时扫描
 	MaxRequestsPerDay: 50000,
 	MaxIPsPerUser:     100,
 	MaxTokensPerUser:  50,
 	QuotaUsageLimit:   95.0,
 	WhitelistEnabled:  true,
 	NotifyOnBan:       true,
+	ExcludedModels:    []string{},
+	ExcludedGroups:    []string{},
+	WhitelistIPs:      []string{},
+	BlacklistIPs:      []string{},
 }
 
 // GetConfig 获取 AI 封禁配置
@@ -122,6 +162,8 @@ func (s *AIBanService) GetConfig() (*AIBanConfig, error) {
 				switch item.Key {
 				case "enabled":
 					cfg.Enabled = item.Value == "true"
+				case "dry_run":
+					cfg.DryRun = item.Value == "true"
 				case "risk_threshold":
 					if v, err := parseFloat(item.Value); err == nil {
 						cfg.RiskThreshold = v
@@ -131,6 +173,10 @@ func (s *AIBanService) GetConfig() (*AIBanConfig, error) {
 				case "scan_interval":
 					if v, err := parseInt(item.Value); err == nil {
 						cfg.ScanInterval = v
+					}
+				case "scan_interval_minutes":
+					if v, err := parseInt(item.Value); err == nil {
+						cfg.ScanIntervalMins = v
 					}
 				case "max_requests_per_day":
 					if v, err := parseInt64(item.Value); err == nil {
@@ -154,8 +200,38 @@ func (s *AIBanService) GetConfig() (*AIBanConfig, error) {
 					cfg.NotifyOnBan = item.Value == "true"
 				case "last_updated":
 					cfg.LastUpdated = item.Value
+				// AI API 配置
+				case "api_key":
+					cfg.APIKey = item.Value
+				case "base_url":
+					cfg.BaseURL = item.Value
+				case "model":
+					cfg.Model = item.Value
+				// 自定义提示词
+				case "custom_prompt":
+					cfg.CustomPrompt = item.Value
+				// IP 白名单/黑名单
+				case "whitelist_ips":
+					cfg.WhitelistIPs = parseStringList(item.Value)
+				case "blacklist_ips":
+					cfg.BlacklistIPs = parseStringList(item.Value)
+				// 排除模型/分组
+				case "excluded_models":
+					cfg.ExcludedModels = parseStringList(item.Value)
+				case "excluded_groups":
+					cfg.ExcludedGroups = parseStringList(item.Value)
 				}
 			}
+		}
+
+		// 设置派生字段
+		cfg.HasAPIKey = cfg.APIKey != ""
+		cfg.MaskedKey = maskAPIKey(cfg.APIKey)
+		cfg.DefaultPrompt = defaultAssessmentPrompt
+		cfg.APIHealth = &APIHealthStatus{
+			Suspended:           false,
+			ConsecutiveFailures: 0,
+			CooldownRemaining:   0,
 		}
 
 		if cfg.LastUpdated == "" {
@@ -188,6 +264,90 @@ func parseInt64(s string) (int64, error) {
 	return v, err
 }
 
+// parseStringList 解析字符串列表（JSON 数组格式）
+func parseStringList(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	var result []string
+	if err := json.Unmarshal([]byte(s), &result); err != nil {
+		// 尝试逗号分隔格式
+		parts := strings.Split(s, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				result = append(result, p)
+			}
+		}
+	}
+	return result
+}
+
+// maskAPIKey 遮蔽 API Key
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) > 8 {
+		return key[:4] + strings.Repeat("*", len(key)-8) + key[len(key)-4:]
+	}
+	return strings.Repeat("*", len(key))
+}
+
+// 默认 AI 评估提示词模板
+const defaultAssessmentPrompt = `你是一个 API 风控系统的 AI 助手。请分析以下用户的行为数据，判断是否存在滥用行为。
+
+## 用户信息
+- 用户ID: {user_id}
+- 用户名: {username}
+- 用户组: {user_group}
+
+## 请求概况（最近1小时）
+- 请求总数: {total_requests}
+- 使用模型数: {unique_models}
+- 使用令牌数: {unique_tokens}
+
+## IP 行为分析
+- 使用 IP 数量: {unique_ips}
+- IP 总切换次数: {switch_count}
+- 真实切换次数（排除双栈）: {real_switch_count}
+- 双栈切换次数（同位置 v4/v6）: {dual_stack_switches}
+- 快速切换次数（60秒内，排除双栈）: {rapid_switch_count}
+- 平均 IP 停留时间: {avg_ip_duration} 秒
+- 最短切换间隔: {min_switch_interval} 秒
+- 已触发风险标签: {risk_flags}
+
+## Token 使用分析
+- 使用 Token 数量: {unique_tokens}
+- 平均每 Token 请求数: {avg_requests_per_token}
+- Token 轮换风险: {token_rotation_risk}
+
+## 判断标准
+1. **IP 切换异常**：几秒内频繁切换 IP 是明显异常（可能是多人共用账号）
+2. **长停留时间豁免**：如果平均 IP 停留时间 >= 300秒（5分钟），即使有快速切换也可能是网络波动，应降低风险
+3. **Token 轮换**：使用多个 Token 且每个 Token 请求很少，可能在规避限制
+4. **双栈用户**：同一位置的 IPv4/IPv6 切换是正常行为，不应视为风险
+5. 多项风险标签叠加时风险更高
+6. 该用户已通过请求量门槛（>= 50次），属于活跃用户
+
+注意：空回复率和失败率不作为判断依据，因为嵌入模型本身不返回文本内容。
+
+## 请返回 JSON 格式（严格遵循）:
+` + "```json" + `
+{
+  "should_ban": true或false,
+  "risk_score": 1到10的整数,
+  "confidence": 0.0到1.0的小数,
+  "reason": "封禁或放行理由（中文，100字以内）"
+}
+` + "```" + `
+
+注意：
+- risk_score >= 8 且 confidence >= 0.8 时才会自动封禁
+- 请谨慎判断，避免误封正常用户
+- 双栈切换是正常行为，应降低风险评分
+- 只返回 JSON，不要有其他内容`
+
 // UpdateConfig 更新 AI 封禁配置
 func (s *AIBanService) UpdateConfig(config *AIBanConfig) error {
 	s.mu.Lock()
@@ -199,17 +359,42 @@ func (s *AIBanService) UpdateConfig(config *AIBanConfig) error {
 
 	// 保存配置项到数据库
 	configMap := map[string]string{
-		"enabled":              fmt.Sprintf("%t", config.Enabled),
-		"risk_threshold":       fmt.Sprintf("%.2f", config.RiskThreshold),
-		"auto_ban_enabled":     fmt.Sprintf("%t", config.AutoBanEnabled),
-		"scan_interval":        fmt.Sprintf("%d", config.ScanInterval),
-		"max_requests_per_day": fmt.Sprintf("%d", config.MaxRequestsPerDay),
-		"max_ips_per_user":     fmt.Sprintf("%d", config.MaxIPsPerUser),
-		"max_tokens_per_user":  fmt.Sprintf("%d", config.MaxTokensPerUser),
-		"quota_usage_limit":    fmt.Sprintf("%.2f", config.QuotaUsageLimit),
-		"whitelist_enabled":    fmt.Sprintf("%t", config.WhitelistEnabled),
-		"notify_on_ban":        fmt.Sprintf("%t", config.NotifyOnBan),
-		"last_updated":         config.LastUpdated,
+		"enabled":               fmt.Sprintf("%t", config.Enabled),
+		"dry_run":               fmt.Sprintf("%t", config.DryRun),
+		"risk_threshold":        fmt.Sprintf("%.2f", config.RiskThreshold),
+		"auto_ban_enabled":      fmt.Sprintf("%t", config.AutoBanEnabled),
+		"scan_interval":         fmt.Sprintf("%d", config.ScanInterval),
+		"scan_interval_minutes": fmt.Sprintf("%d", config.ScanIntervalMins),
+		"max_requests_per_day":  fmt.Sprintf("%d", config.MaxRequestsPerDay),
+		"max_ips_per_user":      fmt.Sprintf("%d", config.MaxIPsPerUser),
+		"max_tokens_per_user":   fmt.Sprintf("%d", config.MaxTokensPerUser),
+		"quota_usage_limit":     fmt.Sprintf("%.2f", config.QuotaUsageLimit),
+		"whitelist_enabled":     fmt.Sprintf("%t", config.WhitelistEnabled),
+		"notify_on_ban":         fmt.Sprintf("%t", config.NotifyOnBan),
+		"last_updated":          config.LastUpdated,
+		// AI API 配置
+		"base_url":      config.BaseURL,
+		"model":         config.Model,
+		"custom_prompt": config.CustomPrompt,
+	}
+
+	// API Key 单独处理（只有非空时才更新，无法清空）
+	if config.APIKey != "" {
+		configMap["api_key"] = config.APIKey
+	}
+
+	// 列表类型字段序列化为 JSON（始终写入，支持清空）
+	if data, err := json.Marshal(config.ExcludedModels); err == nil {
+		configMap["excluded_models"] = string(data)
+	}
+	if data, err := json.Marshal(config.ExcludedGroups); err == nil {
+		configMap["excluded_groups"] = string(data)
+	}
+	if data, err := json.Marshal(config.WhitelistIPs); err == nil {
+		configMap["whitelist_ips"] = string(data)
+	}
+	if data, err := json.Marshal(config.BlacklistIPs); err == nil {
+		configMap["blacklist_ips"] = string(data)
 	}
 
 	for key, value := range configMap {
