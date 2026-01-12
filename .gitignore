@@ -98,3 +98,4 @@ docs/redis-sqlite-cache-architecture.md
 docs/cache-architecture.md
 .claude/
 CLAUDE.md
+frontend/bun.lock
