@@ -232,27 +232,20 @@ func (s *AnalyticsService) getStateFromDB(db *gorm.DB) *AnalyticsStateDB {
 // 兼容 Python 版本的 key-value 表结构
 func (s *AnalyticsService) updateStateInDB(db *gorm.DB, lastID int64, processed int64) error {
 	now := time.Now().Unix()
+	engine := database.GetLocalDBEngine()
 
-	// 使用 Python 版本的 key-value 结构
-	// INSERT OR REPLACE 兼容 SQLite
-	if err := db.Exec(`
-		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
-		VALUES ('last_log_id', ?, ?)
-	`, lastID, now).Error; err != nil {
+	// 使用兼容多数据库的 UPSERT 语法
+	sql := database.UpsertSQL("analytics_state", "key", []string{"key", "value", "updated_at"}, []string{"value", "updated_at"}, engine)
+
+	if err := db.Exec(sql, "last_log_id", lastID, now).Error; err != nil {
 		return err
 	}
 
-	if err := db.Exec(`
-		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
-		VALUES ('last_processed_at', ?, ?)
-	`, now, now).Error; err != nil {
+	if err := db.Exec(sql, "last_processed_at", now, now).Error; err != nil {
 		return err
 	}
 
-	if err := db.Exec(`
-		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
-		VALUES ('total_processed', ?, ?)
-	`, processed, now).Error; err != nil {
+	if err := db.Exec(sql, "total_processed", processed, now).Error; err != nil {
 		return err
 	}
 
@@ -1021,13 +1014,9 @@ func (s *AnalyticsService) getMetaInt(key string) (int64, error) {
 func (s *AnalyticsService) setMetaInt(key string, value int64) error {
 	db := database.GetLocalDB()
 	now := time.Now()
-	return db.Exec(`
-		INSERT INTO analytics_meta (key, value, updated_at)
-		VALUES (?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			value = excluded.value,
-			updated_at = excluded.updated_at
-	`, key, value, now).Error
+	engine := database.GetLocalDBEngine()
+	sql := database.UpsertSQL("analytics_meta", "key", []string{"key", "value", "updated_at"}, []string{"value", "updated_at"}, engine)
+	return db.Exec(sql, key, value, now).Error
 }
 
 func (s *AnalyticsService) deleteMetaKey(key string) error {

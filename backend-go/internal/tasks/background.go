@@ -285,31 +285,24 @@ func (s *AnalyticsService) ProcessNewLogs(limit int) (int, error) {
 	// 更新状态（兼容 Python 版本的 key-value 结构）
 	lastID := logs[len(logs)-1].ID
 	now := time.Now().Unix()
+	engine := database.GetLocalDBEngine()
+
+	// 使用兼容多数据库的 UPSERT 语法
+	sql := database.UpsertSQL("analytics_state", "key", []string{"key", "value", "updated_at"}, []string{"value", "updated_at"}, engine)
 
 	// 更新 last_log_id
-	if err = localDB.Exec(`
-		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
-		VALUES ('last_log_id', ?, ?)
-	`, lastID, now).Error; err != nil {
+	if err = localDB.Exec(sql, "last_log_id", lastID, now).Error; err != nil {
 		return 0, err
 	}
 
 	// 更新 last_processed_at
-	if err = localDB.Exec(`
-		INSERT OR REPLACE INTO analytics_state (key, value, updated_at)
-		VALUES ('last_processed_at', ?, ?)
-	`, now, now).Error; err != nil {
+	if err = localDB.Exec(sql, "last_processed_at", now, now).Error; err != nil {
 		return 0, err
 	}
 
 	// 更新 total_processed（累加）
-	if err = localDB.Exec(`
-		INSERT INTO analytics_state (key, value, updated_at)
-		VALUES ('total_processed', ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			value = analytics_state.value + ?,
-			updated_at = ?
-	`, len(logs), now, len(logs), now).Error; err != nil {
+	incrementSQL := database.UpsertWithIncrement("analytics_state", "key", []string{"key", "value", "updated_at"}, "value", engine)
+	if err = localDB.Exec(incrementSQL, "total_processed", len(logs), now).Error; err != nil {
 		return 0, err
 	}
 
