@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -85,6 +86,9 @@ var globalConfig *Config
 
 // Load 加载配置
 func Load() (*Config, error) {
+	// 加载 .env 文件（忽略不存在的情况）
+	_ = godotenv.Load()
+
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
@@ -187,7 +191,7 @@ func setDefaults() {
 	viper.SetDefault("database.max_open_conns", 100)
 	viper.SetDefault("database.max_idle_conns", 10)
 	viper.SetDefault("database.conn_max_lifetime", 3600*time.Second)
-	viper.SetDefault("database.local_db_path", "/app/data/local.db")
+	viper.SetDefault("database.local_db_path", "./data/local.db") // 与 Python 版本保持一致，默认使用独立 SQLite
 
 	// Redis 默认值
 	viper.SetDefault("redis.host", "localhost")
