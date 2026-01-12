@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -15,13 +17,18 @@ import (
 )
 
 var (
-	mainDB  *gorm.DB // NewAPI 主数据库
-	localDB *gorm.DB // SQLite 本地存储
+	mainDB      *gorm.DB // NewAPI 主数据库
+	localDB     *gorm.DB // SQLite 本地存储
+	dbEngine    string   // 当前数据库引擎类型: mysql, postgres, sqlite
+	localEngine string   // 本地数据库引擎类型
 )
 
 // Init 初始化数据库连接
 func Init(cfg *config.Config) error {
 	var err error
+
+	// 记录数据库引擎类型
+	dbEngine = cfg.Database.Engine
 
 	// 初始化主数据库
 	mainDB, err = initMainDB(cfg)
@@ -29,11 +36,17 @@ func Init(cfg *config.Config) error {
 		return fmt.Errorf("初始化主数据库失败: %w", err)
 	}
 
-	// 初始化本地 SQLite 数据库
-	localDB, err = initLocalDB(cfg)
+	// 本地数据库始终使用独立的 SQLite 文件
+	// 如果未配置 LocalDBPath，使用默认路径
+	localDBPath := cfg.Database.LocalDBPath
+	if localDBPath == "" {
+		localDBPath = "./data/local.db"
+	}
+	localDB, err = initLocalDBWithPath(localDBPath, cfg.Server.Mode)
 	if err != nil {
 		return fmt.Errorf("初始化本地数据库失败: %w", err)
 	}
+	localEngine = "sqlite"
 
 	logger.Info("数据库连接初始化成功")
 	return nil
@@ -94,183 +107,210 @@ func initMainDB(cfg *config.Config) (*gorm.DB, error) {
 
 // initLocalDB 初始化本地 SQLite 数据库
 func initLocalDB(cfg *config.Config) (*gorm.DB, error) {
-	gormConfig := &gorm.Config{
-		Logger: newGormLogger(cfg.Server.Mode),
+	return initLocalDBWithPath(cfg.Database.LocalDBPath, cfg.Server.Mode)
+}
+
+// initLocalDBWithPath 使用指定路径初始化本地 SQLite 数据库
+func initLocalDBWithPath(dbPath string, mode string) (*gorm.DB, error) {
+	// 确保目录存在
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("创建本地数据库目录失败: %w", err)
 	}
 
-	db, err := gorm.Open(sqlite.Open(cfg.Database.LocalDBPath), gormConfig)
+	gormConfig := &gorm.Config{
+		Logger: newGormLogger(mode),
+	}
+
+	db, err := gorm.Open(sqlite.Open(dbPath), gormConfig)
 	if err != nil {
 		return nil, fmt.Errorf("连接本地数据库失败: %w", err)
 	}
 
-	// 自动迁移本地表结构
-	if err := migrateLocalTables(db); err != nil {
+	// 自动迁移本地表结构（SQLite）
+	if err := migrateLocalTables(db, "sqlite"); err != nil {
 		return nil, fmt.Errorf("迁移本地表结构失败: %w", err)
 	}
 
-	logger.Info("本地数据库连接成功", zap.String("path", cfg.Database.LocalDBPath))
+	logger.Info("本地数据库连接成功", zap.String("path", dbPath))
 	return db, nil
 }
 
 // migrateLocalTables 迁移本地表结构
-func migrateLocalTables(db *gorm.DB) error {
+func migrateLocalTables(db *gorm.DB, engine string) error {
+	// 根据数据库类型选择语法
+	autoIncrement := "SERIAL PRIMARY KEY"
+	textType := "TEXT"
+	keyType := "TEXT" // 主键类型（MySQL 不支持 TEXT 作为主键）
+	intType := "INTEGER"
+	realType := "REAL"
+	timestampDefault := "CURRENT_TIMESTAMP"
+
+	switch engine {
+	case "mysql":
+		autoIncrement = "INT AUTO_INCREMENT PRIMARY KEY"
+		keyType = "VARCHAR(255)" // MySQL 主键必须使用 VARCHAR
+		realType = "DOUBLE"
+	case "sqlite":
+		autoIncrement = "INTEGER PRIMARY KEY AUTOINCREMENT"
+	}
+
 	// 配置表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS config (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			`+"`key`"+` %s PRIMARY KEY,
+			value %s NOT NULL,
+			updated_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, keyType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 缓存表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS cache (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL,
-			expire_at DATETIME NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			`+"`key`"+` %s PRIMARY KEY,
+			value %s NOT NULL,
+			expire_at TIMESTAMP NOT NULL,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, keyType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 统计快照表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS stats_snapshots (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			snapshot_type TEXT NOT NULL,
-			data TEXT NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			snapshot_type %s NOT NULL,
+			data %s NOT NULL,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 安全审计日志表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS security_audit (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			action TEXT NOT NULL,
-			user_id INTEGER,
-			details TEXT,
-			ip_address TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			action %s NOT NULL,
+			user_id %s,
+			details %s,
+			ip_address %s,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, textType, intType, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// AI 审计日志表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS ai_audit_logs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL,
-			risk_score REAL NOT NULL,
-			decision TEXT NOT NULL,
-			reason TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			user_id %s NOT NULL,
+			risk_score %s NOT NULL,
+			decision %s NOT NULL,
+			reason %s,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, intType, realType, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 日志分析状态表（兼容 Python 版本的 key-value 结构）
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS analytics_state (
-			key TEXT PRIMARY KEY,
-			value INTEGER NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL DEFAULT 0
+			`+"`key`"+` %s PRIMARY KEY,
+			value %s NOT NULL DEFAULT 0,
+			updated_at %s NOT NULL DEFAULT 0
 		)
-	`).Error; err != nil {
+	`, keyType, intType, intType)).Error; err != nil {
 		return err
 	}
 
 	// 日志分析元数据表（用于初始化截止点、轻量缓存等）
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS analytics_meta (
-			key TEXT PRIMARY KEY,
-			value INTEGER DEFAULT 0,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			`+"`key`"+` %s PRIMARY KEY,
+			value %s DEFAULT 0,
+			updated_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, keyType, intType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 用户排行缓存表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS user_rankings (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			ranking_type TEXT NOT NULL,
-			data TEXT NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			ranking_type %s NOT NULL,
+			data %s NOT NULL,
+			updated_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// 模型统计缓存表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS model_stats (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			model_name TEXT NOT NULL,
-			stats_data TEXT NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			model_name %s NOT NULL,
+			stats_data %s NOT NULL,
+			updated_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// AI Ban 白名单表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS aiban_whitelist (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL UNIQUE,
-			reason TEXT,
-			added_by TEXT,
-			expires_at DATETIME,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			user_id %s NOT NULL UNIQUE,
+			reason %s,
+			added_by %s,
+			expires_at TIMESTAMP,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, intType, textType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// AI Ban 审计日志表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS aiban_audit_logs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			scan_id TEXT,
-			action TEXT NOT NULL,
-			user_id INTEGER,
-			username TEXT,
-			details TEXT,
-			operator TEXT,
-			risk_score REAL DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			id %s,
+			scan_id %s,
+			action %s NOT NULL,
+			user_id %s,
+			username %s,
+			details %s,
+			operator %s,
+			risk_score %s DEFAULT 0,
+			created_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, autoIncrement, textType, textType, intType, textType, textType, textType, realType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
 	// AI Ban 配置表
-	if err := db.Exec(`
+	if err := db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS aiban_config (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			`+"`key`"+` %s PRIMARY KEY,
+			value %s NOT NULL,
+			updated_at TIMESTAMP DEFAULT %s
 		)
-	`).Error; err != nil {
+	`, keyType, textType, timestampDefault)).Error; err != nil {
 		return err
 	}
 
-	// 创建索引
+	// 创建索引（忽略已存在的错误）
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_cache_expire ON cache(expire_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_stats_type ON stats_snapshots(snapshot_type)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_audit_user ON security_audit(user_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_ai_audit_user ON ai_audit_logs(user_id)")
-	// AI Ban 相关索引
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_scan ON aiban_audit_logs(scan_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_user ON aiban_audit_logs(user_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_aiban_audit_created ON aiban_audit_logs(created_at)")
@@ -383,4 +423,119 @@ func SetTestDB(db *gorm.DB) {
 // ClearTestDB 清除测试数据库（仅用于单元测试）
 func ClearTestDB() {
 	mainDB = nil
+}
+
+// GetDBEngine 获取主数据库引擎类型
+func GetDBEngine() string {
+	return dbEngine
+}
+
+// GetLocalDBEngine 获取本地数据库引擎类型
+func GetLocalDBEngine() string {
+	return localEngine
+}
+
+// UpsertSQL 生成兼容多数据库的 UPSERT SQL 语句
+// table: 表名
+// conflictKey: 冲突键（主键或唯一键）
+// columns: 列名列表
+// updateColumns: 需要更新的列名列表（为空则更新所有列）
+// engine: 数据库引擎类型 (mysql, postgres, sqlite)
+func UpsertSQL(table, conflictKey string, columns []string, updateColumns []string, engine string) string {
+	if len(updateColumns) == 0 {
+		updateColumns = columns
+	}
+
+	// 构建列名和占位符
+	colStr := ""
+	placeholders := ""
+	for i, col := range columns {
+		if i > 0 {
+			colStr += ", "
+			placeholders += ", "
+		}
+		colStr += col
+		placeholders += "?"
+	}
+
+	// 构建更新语句
+	updateStr := ""
+	for i, col := range updateColumns {
+		if i > 0 {
+			updateStr += ", "
+		}
+		switch engine {
+		case "mysql":
+			updateStr += fmt.Sprintf("%s = VALUES(%s)", col, col)
+		default: // postgres, sqlite
+			updateStr += fmt.Sprintf("%s = EXCLUDED.%s", col, col)
+		}
+	}
+
+	// 根据数据库类型生成 SQL
+	switch engine {
+	case "mysql":
+		return fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+			table, colStr, placeholders, updateStr,
+		)
+	default: // postgres, sqlite
+		return fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(%s) DO UPDATE SET %s",
+			table, colStr, placeholders, conflictKey, updateStr,
+		)
+	}
+}
+
+// UpsertWithIncrement 生成带累加功能的 UPSERT SQL 语句
+// incrementColumn: 需要累加的列名
+func UpsertWithIncrement(table, conflictKey string, columns []string, incrementColumn string, engine string) string {
+	// 构建列名和占位符
+	colStr := ""
+	placeholders := ""
+	for i, col := range columns {
+		if i > 0 {
+			colStr += ", "
+			placeholders += ", "
+		}
+		colStr += col
+		placeholders += "?"
+	}
+
+	// 构建更新语句（累加指定列）
+	updateStr := ""
+	for i, col := range columns {
+		if i > 0 {
+			updateStr += ", "
+		}
+		if col == incrementColumn {
+			switch engine {
+			case "mysql":
+				updateStr += fmt.Sprintf("%s = %s.%s + VALUES(%s)", col, table, col, col)
+			default: // postgres, sqlite
+				updateStr += fmt.Sprintf("%s = %s.%s + EXCLUDED.%s", col, table, col, col)
+			}
+		} else {
+			switch engine {
+			case "mysql":
+				updateStr += fmt.Sprintf("%s = VALUES(%s)", col, col)
+			default: // postgres, sqlite
+				updateStr += fmt.Sprintf("%s = EXCLUDED.%s", col, col)
+			}
+		}
+	}
+
+	// 根据数据库类型生成 SQL
+	switch engine {
+	case "mysql":
+		return fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s",
+			table, colStr, placeholders, updateStr,
+		)
+	default: // postgres, sqlite
+		return fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(%s) DO UPDATE SET %s",
+			table, colStr, placeholders, conflictKey, updateStr,
+		)
+	}
 }
