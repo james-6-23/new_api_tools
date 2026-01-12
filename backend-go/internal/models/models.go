@@ -108,18 +108,19 @@ func (Channel) TableName() string {
 }
 
 // Redemption NewAPI 兑换码表
+// 注意：数据库中时间字段是 int64 Unix 时间戳
 type Redemption struct {
-	ID         int        `gorm:"column:id;primaryKey" json:"id"`
-	UserID     int        `gorm:"column:user_id" json:"user_id"`
-	Key        string     `gorm:"column:key" json:"key"`
-	Status     int        `gorm:"column:status" json:"status"`
-	Name       string     `gorm:"column:name" json:"name"`
-	Quota      int64      `gorm:"column:quota" json:"quota"`
-	CreatedAt  time.Time  `gorm:"column:created_at" json:"created_at"`
-	ExpiredAt  *time.Time `gorm:"column:expired_at" json:"expired_at,omitempty"`
-	RedeemedAt *time.Time `gorm:"column:redeemed_at" json:"redeemed_at,omitempty"`
-	RedeemedBy int        `gorm:"column:redeemed_by" json:"redeemed_by"`
-	DeletedAt  *time.Time `gorm:"column:deleted_at" json:"deleted_at,omitempty"`
+	ID           int    `gorm:"column:id;primaryKey" json:"id"`
+	UserID       int    `gorm:"column:user_id" json:"user_id"`
+	Key          string `gorm:"column:key" json:"key"`
+	Status       int    `gorm:"column:status" json:"status"`
+	Name         string `gorm:"column:name" json:"name"`
+	Quota        int64  `gorm:"column:quota" json:"quota"`
+	Count        int    `gorm:"column:count" json:"count"`
+	CreatedTime  int64  `gorm:"column:created_time" json:"created_time"`
+	ExpiredTime  int64  `gorm:"column:expired_time" json:"expired_time"`
+	RedeemedTime int64  `gorm:"column:redeemed_time" json:"redeemed_time"`
+	UsedUserID   int    `gorm:"column:used_user_id" json:"used_user_id"`
 }
 
 func (Redemption) TableName() string {
@@ -283,14 +284,9 @@ func (r *Redemption) IsUsed() bool {
 	return r.Status == RedemptionStatusUsed
 }
 
-// IsDeleted 检查兑换码是否已删除
-func (r *Redemption) IsDeleted() bool {
-	return r.DeletedAt != nil
-}
-
 // IsAvailable 检查兑换码是否可用
 func (r *Redemption) IsAvailable() bool {
-	return r.Status == RedemptionStatusEnabled && !r.IsDeleted() && !r.IsUsed()
+	return r.Status == RedemptionStatusEnabled && !r.IsUsed()
 }
 
 // IsSuccess 检查充值是否成功

@@ -120,10 +120,16 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 		tx = tx.Where("redemptions.status = ?", query.Status)
 	}
 	if query.StartDate != "" {
-		tx = tx.Where("redemptions.created_at >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, time.Local); err == nil {
+			tx = tx.Where("redemptions.created_time >= ?", t.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		tx = tx.Where("redemptions.created_at <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, time.Local); err == nil {
+			// 当天 23:59:59
+			endTime := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.Local)
+			tx = tx.Where("redemptions.created_time <= ?", endTime.Unix())
+		}
 	}
 
 	// 获取总数
@@ -139,7 +145,7 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 		RedeemerName string
 	}
 
-	if err := tx.Order("redemptions.created_at DESC").
+	if err := tx.Order("redemptions.created_time DESC").
 		Offset(offset).
 		Limit(query.PageSize).
 		Scan(&results).Error; err != nil {
@@ -152,16 +158,18 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 		records[i] = RedemptionRecord{
 			ID:           r.ID,
 			Name:         r.Name,
-			Key:          maskKey(r.Key), // 部分隐藏
+			Key:          maskKey(r.Key),
 			Quota:        r.Quota,
-			Count:        1, // 单次使用兑换码
+			Count:        r.Count,
 			Status:       r.Status,
-			RedeemedBy:   r.RedeemedBy,
+			RedeemedBy:   r.UsedUserID,
 			RedeemerName: r.RedeemerName,
 		}
-		records[i].CreatedAt = r.CreatedAt.Format("2006-01-02 15:04:05")
-		if r.RedeemedAt != nil {
-			records[i].RedeemedAt = r.RedeemedAt.Format("2006-01-02 15:04:05")
+		if r.CreatedTime > 0 {
+			records[i].CreatedAt = time.Unix(r.CreatedTime, 0).Format("2006-01-02 15:04:05")
+		}
+		if r.RedeemedTime > 0 {
+			records[i].RedeemedAt = time.Unix(r.RedeemedTime, 0).Format("2006-01-02 15:04:05")
 		}
 	}
 
@@ -229,14 +237,14 @@ func (s *RedemptionService) fetchRedemptionStatistics() (*RedemptionStatistics, 
 	}
 
 	// 今日统计
-	today := time.Now().Format("2006-01-02") + " 00:00:00"
+	todayStart := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local).Unix()
 
 	db.Model(&models.Redemption{}).
-		Where("status = ? AND redeemed_time >= ?", models.RedemptionStatusUsed, today).
+		Where("status = ? AND redeemed_time >= ?", models.RedemptionStatusUsed, todayStart).
 		Count(&data.TodayUsed)
 
 	db.Model(&models.Redemption{}).
-		Where("status = ? AND redeemed_time >= ?", models.RedemptionStatusUsed, today).
+		Where("status = ? AND redeemed_time >= ?", models.RedemptionStatusUsed, todayStart).
 		Select("COALESCE(SUM(quota), 0)").
 		Scan(&data.TodayQuota)
 
@@ -268,7 +276,10 @@ func (s *RedemptionService) GenerateRedemptions(config *GenerateConfig) ([]strin
 	now := time.Now()
 
 	// 计算过期时间（如果有）
-	expiredAt := calculateExpiration(config)
+	var expiredTime int64
+	if exp := calculateExpiration(config); exp != nil {
+		expiredTime = exp.Unix()
+	}
 
 	for i := 0; i < config.Count; i++ {
 		key := generateStructuredKey(config.Prefix)
@@ -283,12 +294,13 @@ func (s *RedemptionService) GenerateRedemptions(config *GenerateConfig) ([]strin
 		quota := calculateQuota(config)
 
 		redemptions[i] = models.Redemption{
-			Name:      name,
-			Key:       key,
-			Quota:     quota,
-			Status:    models.RedemptionStatusEnabled,
-			CreatedAt: now,
-			ExpiredAt: expiredAt,
+			Name:        name,
+			Key:         key,
+			Quota:       quota,
+			Count:       1,
+			Status:      models.RedemptionStatusEnabled,
+			CreatedTime: now.Unix(),
+			ExpiredTime: expiredTime,
 		}
 	}
 
