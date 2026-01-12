@@ -210,15 +210,17 @@ func DeleteRedemption(c *gin.Context)        { DeleteRedemptionHandler(c) }
 func BatchDeleteRedemptions(c *gin.Context)  { BatchDeleteRedemptionsHandler(c) }
 
 // ==================== Users ====================
-func GetUsers(c *gin.Context)         { GetUsersHandler(c) }
-func GetUserStats(c *gin.Context)     { GetUserStatsHandler(c) }
-func GetBannedUsers(c *gin.Context)   { GetBannedUsersHandler(c) }
-func DeleteUser(c *gin.Context)       { DeleteUserHandler(c) }
-func BatchDeleteUsers(c *gin.Context) { BatchDeleteUsersHandler(c) }
-func BanUser(c *gin.Context)          { BanUserHandler(c) }
-func UnbanUser(c *gin.Context)        { UnbanUserHandler(c) }
-func DisableToken(c *gin.Context)     { DisableTokenHandler(c) }
-func GetInvitedUsers(c *gin.Context)  { GetInvitedUsersHandler(c) }
+func GetUsers(c *gin.Context)                 { GetUsersHandler(c) }
+func GetUserStats(c *gin.Context)             { GetUserStatsHandler(c) }
+func GetBannedUsers(c *gin.Context)           { GetBannedUsersHandler(c) }
+func GetSoftDeletedUsersCount(c *gin.Context) { GetSoftDeletedUsersCountHandler(c) }
+func PurgeSoftDeletedUsers(c *gin.Context)    { PurgeSoftDeletedUsersHandler(c) }
+func DeleteUser(c *gin.Context)               { DeleteUserHandler(c) }
+func BatchDeleteUsers(c *gin.Context)         { BatchDeleteUsersHandler(c) }
+func BanUser(c *gin.Context)                  { BanUserHandler(c) }
+func UnbanUser(c *gin.Context)                { UnbanUserHandler(c) }
+func DisableToken(c *gin.Context)             { DisableTokenHandler(c) }
+func GetInvitedUsers(c *gin.Context)          { GetInvitedUsersHandler(c) }
 
 // ==================== Risk Monitoring ====================
 func GetLeaderboards(c *gin.Context)        { GetLeaderboardsHandler(c) }

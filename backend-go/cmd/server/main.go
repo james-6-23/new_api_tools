@@ -191,6 +191,8 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 				users.GET("", handler.GetUsers)
 				users.GET("/stats", handler.GetUserStats)
 				users.GET("/banned", handler.GetBannedUsers)
+				users.GET("/soft-deleted/count", handler.GetSoftDeletedUsersCount)
+				users.POST("/soft-deleted/purge", handler.PurgeSoftDeletedUsers)
 				users.DELETE("/:user_id", handler.DeleteUser)
 				users.POST("/batch-delete", handler.BatchDeleteUsers)
 				users.POST("/:user_id/ban", handler.BanUser)

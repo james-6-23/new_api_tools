@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -343,8 +345,9 @@ func DeleteUserHandler(c *gin.Context) {
 // BatchDeleteUsersHandler 批量删除用户（按活跃度级别）
 func BatchDeleteUsersHandler(c *gin.Context) {
 	var req struct {
-		ActivityLevel string `json:"activity_level"` // very_inactive 或 never
+		ActivityLevel string `json:"activity_level"` // very_inactive, inactive 或 never
 		DryRun        bool   `json:"dry_run"`        // 预演模式
+		HardDelete    bool   `json:"hard_delete"`    // 彻底删除模式（物理删除）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Error(c, 400, "参数错误")
@@ -352,14 +355,48 @@ func BatchDeleteUsersHandler(c *gin.Context) {
 	}
 
 	// 验证活跃度级别
-	if req.ActivityLevel != "very_inactive" && req.ActivityLevel != "never" {
-		Error(c, 400, "只能批量删除 very_inactive 或 never 级别的用户")
+	if req.ActivityLevel != "very_inactive" && req.ActivityLevel != "inactive" && req.ActivityLevel != "never" {
+		Error(c, 400, "只能批量删除 very_inactive、inactive 或 never 级别的用户")
 		return
 	}
 
-	result, err := userService.BatchDeleteUsersByActivity(req.ActivityLevel, req.DryRun)
+	result, err := userService.BatchDeleteUsersByActivity(req.ActivityLevel, req.DryRun, req.HardDelete)
 	if err != nil {
 		logger.Error("批量删除用户失败", zap.Error(err))
+		Error(c, 500, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
+// GetSoftDeletedUsersCountHandler 获取已软删除用户的数量
+func GetSoftDeletedUsersCountHandler(c *gin.Context) {
+	result, err := userService.GetSoftDeletedUsersCount()
+	if err != nil {
+		logger.Error("获取软删除用户数量失败", zap.Error(err))
+		Error(c, 500, err.Error())
+		return
+	}
+
+	Success(c, result)
+}
+
+// PurgeSoftDeletedUsersHandler 彻底清理已软删除的用户（物理删除）
+func PurgeSoftDeletedUsersHandler(c *gin.Context) {
+	var req struct {
+		DryRun bool `json:"dry_run"` // 预览模式
+	}
+	// 默认为预览模式
+	req.DryRun = true
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		Error(c, 400, "参数错误")
+		return
+	}
+
+	result, err := userService.PurgeSoftDeletedUsers(req.DryRun)
+	if err != nil {
+		logger.Error("清理软删除用户失败", zap.Error(err))
 		Error(c, 500, err.Error())
 		return
 	}

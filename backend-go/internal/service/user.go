@@ -6,7 +6,10 @@ import (
 
 	"github.com/ketches/new-api-tools/internal/cache"
 	"github.com/ketches/new-api-tools/internal/database"
+	"github.com/ketches/new-api-tools/internal/logger"
 	"github.com/ketches/new-api-tools/internal/models"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // UserService 用户服务
@@ -606,41 +609,65 @@ func (s *UserService) GetInvitedUsers(inviterID int, page, pageSize int) (map[st
 }
 
 // BatchDeleteUsersByActivity 按活跃度级别批量删除用户
-func (s *UserService) BatchDeleteUsersByActivity(activityLevel string, dryRun bool) (map[string]interface{}, error) {
+// hardDelete: true 时物理删除用户及关联数据，false 时软删除
+func (s *UserService) BatchDeleteUsersByActivity(activityLevel string, dryRun bool, hardDelete bool) (map[string]interface{}, error) {
 	db := database.GetMainDB()
 
 	// 活跃度阈值（秒）
+	const activeThreshold = 7 * 24 * 3600    // 7 天
 	const inactiveThreshold = 30 * 24 * 3600 // 30 天
 
 	now := time.Now().Unix()
+	activeCutoff := now - activeThreshold
 	inactiveCutoff := now - inactiveThreshold
 
 	var findSQL string
 	var params []interface{}
 
-	if activityLevel == "very_inactive" {
-		// 超过 30 天没有请求的用户
+	switch activityLevel {
+	case "very_inactive":
+		// 超过 30 天没有请求的用户（但有请求记录）
 		findSQL = `
 			SELECT u.id, u.username
 			FROM users u
-			LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
 			WHERE u.deleted_at IS NULL
-			GROUP BY u.id, u.username
-			HAVING MAX(l.created_at) < ?
+			  AND u.request_count > 0
+			  AND NOT EXISTS (
+				SELECT 1 FROM logs l
+				WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= ?
+				LIMIT 1
+			  )
 		`
 		params = []interface{}{inactiveCutoff}
-	} else if activityLevel == "never" {
+	case "inactive":
+		// 7-30 天内有请求
+		findSQL = `
+			SELECT u.id, u.username
+			FROM users u
+			WHERE u.deleted_at IS NULL
+			  AND u.request_count > 0
+			  AND NOT EXISTS (
+				SELECT 1 FROM logs l
+				WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= ?
+				LIMIT 1
+			  )
+			  AND EXISTS (
+				SELECT 1 FROM logs l
+				WHERE l.user_id = u.id AND l.type = 2 AND l.created_at >= ?
+				LIMIT 1
+			  )
+		`
+		params = []interface{}{activeCutoff, inactiveCutoff}
+	case "never":
 		// 从未请求的用户
 		findSQL = `
 			SELECT u.id, u.username
 			FROM users u
-			LEFT JOIN logs l ON u.id = l.user_id AND l.type = 2
 			WHERE u.deleted_at IS NULL
-			GROUP BY u.id, u.username
-			HAVING MAX(l.created_at) IS NULL
+			  AND u.request_count = 0
 		`
 		params = []interface{}{}
-	} else {
+	default:
 		return nil, fmt.Errorf("不支持的活跃度级别: %s", activityLevel)
 	}
 
@@ -662,13 +689,18 @@ func (s *UserService) BatchDeleteUsersByActivity(activityLevel string, dryRun bo
 		}
 	}
 
+	action := "删除"
+	if hardDelete {
+		action = "彻底删除"
+	}
+
 	if dryRun {
 		return map[string]interface{}{
 			"success": true,
 			"dry_run": true,
 			"count":   len(userIDs),
 			"users":   usernames,
-			"message": fmt.Sprintf("预览：将删除 %d 个用户", len(userIDs)),
+			"message": fmt.Sprintf("预览：将%s %d 个用户", action, len(userIDs)),
 		}, nil
 	}
 
@@ -680,25 +712,189 @@ func (s *UserService) BatchDeleteUsersByActivity(activityLevel string, dryRun bo
 		}, nil
 	}
 
-	// 执行批量删除
-	now2 := time.Now()
-	result := db.Model(&models.User{}).
-		Where("id IN ?", userIDs).
-		Update("deleted_at", now2)
+	var deletedCount int64
+	if hardDelete {
+		// 彻底删除：物理删除用户及关联数据
+		deletedCount = s.hardDeleteUsers(userIDs)
+	} else {
+		// 软删除
+		now2 := time.Now()
+		result := db.Model(&models.User{}).
+			Where("id IN ?", userIDs).
+			Update("deleted_at", now2)
 
-	if result.Error != nil {
-		return nil, result.Error
+		if result.Error != nil {
+			return nil, result.Error
+		}
+
+		// 同时软删除这些用户的所有令牌
+		db.Model(&models.Token{}).
+			Where("user_id IN ?", userIDs).
+			Update("deleted_at", now2)
+
+		deletedCount = result.RowsAffected
 	}
-
-	// 同时删除这些用户的所有令牌
-	db.Model(&models.Token{}).
-		Where("user_id IN ?", userIDs).
-		Update("deleted_at", now2)
 
 	return map[string]interface{}{
 		"success": true,
-		"count":   result.RowsAffected,
-		"message": fmt.Sprintf("已删除 %d 个不活跃用户", result.RowsAffected),
+		"count":   deletedCount,
+		"message": fmt.Sprintf("已%s %d 个不活跃用户", action, deletedCount),
+	}, nil
+}
+
+// hardDeleteUsers 彻底删除用户（物理删除）
+// 删除顺序考虑外键约束
+func (s *UserService) hardDeleteUsers(userIDs []int) int64 {
+	if len(userIDs) == 0 {
+		return 0
+	}
+
+	db := database.GetMainDB()
+	var deletedCount int64
+
+	// 批量处理，每批 100 个用户
+	batchSize := 100
+	for i := 0; i < len(userIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(userIDs) {
+			end = len(userIDs)
+		}
+		batchIDs := userIDs[i:end]
+
+		// 使用事务保护，确保数据一致性
+		err := db.Transaction(func(tx *gorm.DB) error {
+			// 1. 删除 tokens
+			if err := tx.Exec("DELETE FROM tokens WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 2. 删除 quota_data
+			if err := tx.Exec("DELETE FROM quota_data WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 3. 删除 midjourneys
+			if err := tx.Exec("DELETE FROM midjourneys WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 4. 删除 tasks
+			if err := tx.Exec("DELETE FROM tasks WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 5. 删除 top_ups
+			if err := tx.Exec("DELETE FROM top_ups WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 6. 删除用户创建的兑换码
+			if err := tx.Exec("DELETE FROM redemptions WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 7. 删除 2FA 相关
+			if err := tx.Exec("DELETE FROM two_fa_backup_codes WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("DELETE FROM two_fas WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 8. 删除 passkey_credentials
+			if err := tx.Exec("DELETE FROM passkey_credentials WHERE user_id IN ?", batchIDs).Error; err != nil {
+				return err
+			}
+
+			// 9. 最后删除用户
+			result := tx.Exec("DELETE FROM users WHERE id IN ?", batchIDs)
+			if result.Error != nil {
+				return result.Error
+			}
+			deletedCount += result.RowsAffected
+			return nil
+		})
+
+		if err != nil {
+			logger.Error("硬删除用户批次失败", zap.Error(err), zap.Ints("batch_ids", batchIDs))
+		}
+	}
+
+	return deletedCount
+}
+
+// GetSoftDeletedUsersCount 获取已软删除用户的数量
+func (s *UserService) GetSoftDeletedUsersCount() (map[string]interface{}, error) {
+	db := database.GetMainDB()
+
+	var count int64
+	if err := db.Model(&models.User{}).
+		Where("deleted_at IS NOT NULL").
+		Count(&count).Error; err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"count":   0,
+			"message": err.Error(),
+		}, err
+	}
+
+	return map[string]interface{}{
+		"success": true,
+		"count":   count,
+	}, nil
+}
+
+// PurgeSoftDeletedUsers 彻底清理已软删除的用户（物理删除）
+func (s *UserService) PurgeSoftDeletedUsers(dryRun bool) (map[string]interface{}, error) {
+	db := database.GetMainDB()
+
+	// 查找所有已软删除的用户
+	var results []struct {
+		ID       int    `gorm:"column:id"`
+		Username string `gorm:"column:username"`
+	}
+
+	if err := db.Table("users").
+		Select("id, username").
+		Where("deleted_at IS NOT NULL").
+		Scan(&results).Error; err != nil {
+		return nil, err
+	}
+
+	userIDs := make([]int, len(results))
+	usernames := make([]string, 0, min(len(results), 20))
+	for i, r := range results {
+		userIDs[i] = r.ID
+		if i < 20 {
+			usernames = append(usernames, r.Username)
+		}
+	}
+
+	if dryRun {
+		return map[string]interface{}{
+			"success": true,
+			"dry_run": true,
+			"count":   len(userIDs),
+			"users":   usernames,
+			"message": fmt.Sprintf("预览：将彻底清理 %d 个已注销用户", len(userIDs)),
+		}, nil
+	}
+
+	if len(userIDs) == 0 {
+		return map[string]interface{}{
+			"success": true,
+			"count":   0,
+			"message": "没有需要清理的用户",
+		}, nil
+	}
+
+	// 执行彻底删除
+	deletedCount := s.hardDeleteUsers(userIDs)
+
+	return map[string]interface{}{
+		"success": true,
+		"count":   deletedCount,
+		"message": fmt.Sprintf("已彻底清理 %d 个已注销用户", deletedCount),
 	}, nil
 }
 
