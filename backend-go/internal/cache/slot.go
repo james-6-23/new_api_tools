@@ -139,14 +139,11 @@ func (m *CacheManager) SetSlotCache(window, sortBy string, slotStart, slotEnd in
 		return err
 	}
 
-	return db.Exec(`
-		INSERT INTO slot_cache (slot_key, window, sort_by, slot_start, slot_end, data, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(slot_key) DO UPDATE SET
-			data = excluded.data,
-			created_at = excluded.created_at,
-			expires_at = excluded.expires_at
-	`, slotKey, window, sortBy, slotStart, slotEnd, string(jsonData), now, expiresAt).Error
+	engine := database.GetLocalDBEngine()
+	sql := database.UpsertSQL("slot_cache", "slot_key",
+		[]string{"slot_key", "window", "sort_by", "slot_start", "slot_end", "data", "created_at", "expires_at"},
+		[]string{"data", "created_at", "expires_at"}, engine)
+	return db.Exec(sql, slotKey, window, sortBy, slotStart, slotEnd, string(jsonData), now, expiresAt).Error
 }
 
 // GetSlotCache 获取槽缓存

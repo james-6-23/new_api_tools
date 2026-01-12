@@ -185,14 +185,11 @@ func (m *CacheManager) setToSQLite(key string, value interface{}, ttl time.Durat
 	now := time.Now().Unix()
 	expiresAt := now + int64(ttl.Seconds())
 
-	return db.Exec(`
-		INSERT INTO generic_cache (key, data, snapshot_time, expires_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			data = excluded.data,
-			snapshot_time = excluded.snapshot_time,
-			expires_at = excluded.expires_at
-	`, key, string(data), now, expiresAt).Error
+	engine := database.GetLocalDBEngine()
+	sql := database.UpsertSQL("generic_cache", "key",
+		[]string{"key", "data", "snapshot_time", "expires_at"},
+		[]string{"data", "snapshot_time", "expires_at"}, engine)
+	return db.Exec(sql, key, string(data), now, expiresAt).Error
 }
 
 // deleteFromSQLite 从 SQLite 删除缓存
@@ -228,14 +225,11 @@ func (m *CacheManager) SetLeaderboard(window, sortBy string, data interface{}, t
 	now := time.Now().Unix()
 	expiresAt := now + int64(ttl.Seconds())
 
-	return db.Exec(`
-		INSERT INTO leaderboard_cache (window, sort_by, data, snapshot_time, expires_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(window, sort_by) DO UPDATE SET
-			data = excluded.data,
-			snapshot_time = excluded.snapshot_time,
-			expires_at = excluded.expires_at
-	`, window, sortBy, string(jsonData), now, expiresAt).Error
+	engine := database.GetLocalDBEngine()
+	sql := database.UpsertSQL("leaderboard_cache", "window, sort_by",
+		[]string{"window", "sort_by", "data", "snapshot_time", "expires_at"},
+		[]string{"data", "snapshot_time", "expires_at"}, engine)
+	return db.Exec(sql, window, sortBy, string(jsonData), now, expiresAt).Error
 }
 
 // GetLeaderboard 获取排行榜缓存
@@ -294,14 +288,11 @@ func (m *CacheManager) SetIPMonitoring(monitorType, window string, data interfac
 	now := time.Now().Unix()
 	expiresAt := now + int64(ttl.Seconds())
 
-	return db.Exec(`
-		INSERT INTO ip_monitoring_cache (type, window, data, snapshot_time, expires_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(type, window) DO UPDATE SET
-			data = excluded.data,
-			snapshot_time = excluded.snapshot_time,
-			expires_at = excluded.expires_at
-	`, monitorType, window, string(jsonData), now, expiresAt).Error
+	engine := database.GetLocalDBEngine()
+	sql := database.UpsertSQL("ip_monitoring_cache", "type, window",
+		[]string{"type", "window", "data", "snapshot_time", "expires_at"},
+		[]string{"data", "snapshot_time", "expires_at"}, engine)
+	return db.Exec(sql, monitorType, window, string(jsonData), now, expiresAt).Error
 }
 
 // GetIPMonitoring 获取 IP 监控缓存
