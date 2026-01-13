@@ -334,15 +334,14 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 		}
 
 		// Uptime-Kuma 兼容接口（公开，无需认证）
-		uptimeKuma := api.Group("/uptime-kuma")
+		// 使用 /api/status-page 路径以匹配 uptime-kuma 格式
+		statusPage := api.Group("/status-page")
 		{
-			uptimeKuma.GET("/monitors", handler.GetUptimeKumaMonitorsHandler)
-			uptimeKuma.GET("/monitors/:model_name", handler.GetUptimeKumaMonitorHandler)
-			uptimeKuma.GET("/heartbeats/:model_name", handler.GetUptimeKumaHeartbeatsHandler)
-			uptimeKuma.GET("/status-page", handler.GetUptimeKumaStatusPageHandler)
-			uptimeKuma.POST("/status-page/batch", handler.PostUptimeKumaStatusPageBatchHandler)
-			uptimeKuma.GET("/overall", handler.GetUptimeKumaOverallHandler)
-			uptimeKuma.GET("/push/:push_token", handler.GetUptimeKumaPushHandler)
+			// 心跳数据必须在 :slug 之前注册，否则会被 :slug 捕获
+			statusPage.GET("/heartbeat/:slug", handler.GetStatusPageHeartbeatHandler)
+			statusPage.GET("/:slug", handler.GetStatusPageConfigHandler)
+			statusPage.GET("/:slug/badge", handler.GetStatusPageBadgeHandler)
+			statusPage.GET("/:slug/summary", handler.GetStatusPageSummaryHandler)
 		}
 	}
 
