@@ -99,3 +99,6 @@ docs/cache-architecture.md
 .claude/
 CLAUDE.md
 frontend/bun.lock
+
+# Reference repositories (for development only)
+refs/

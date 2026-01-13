@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Uptime-Kuma 兼容 API**：新增与 Uptime-Kuma 格式兼容的模型状态监控端点（Python 和 Go 双版本）
+  - Python: `backend/app/uptime_kuma_routes.py`
+  - Go: `backend-go/internal/service/uptimekuma.go`, `backend-go/internal/handler/uptimekuma.go`
+  - `/api/uptime-kuma/monitors` - 获取所有模型监控列表
+  - `/api/uptime-kuma/monitors/{model_name}` - 获取单个模型详情及心跳数据
+  - `/api/uptime-kuma/heartbeats/{model_name}` - 获取模型心跳历史
+  - `/api/uptime-kuma/status-page` - 状态页面数据（支持筛选模型）
+  - `/api/uptime-kuma/status-page/batch` - 批量获取指定模型的状态页数据
+  - `/api/uptime-kuma/overall` - 整体状态摘要
+  - `/api/uptime-kuma/push/{push_token}` - Push 监控兼容端点（仅兼容，状态从日志分析得出）
+  - 状态映射（基于 success_rate）：
+    - UP(1): success_rate ≥ 95% 或无请求
+    - PENDING(2): 80% ≤ success_rate < 95%
+    - DOWN(0): success_rate < 80%
+  - 所有端点无需认证，支持时间窗口参数（1h/6h/12h/24h）
+
 - **Golang 后端重写** (`backend-go/`)：使用 Gin + GORM 完全重写 Python/FastAPI 后端
   - 核心基础设施：配置管理、MySQL/SQLite 双数据库、Redis 缓存、Zap 日志
   - 认证中间件：JWT + API Key 双模式认证

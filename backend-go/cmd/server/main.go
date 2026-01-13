@@ -332,6 +332,18 @@ func setupRouter(cfg *config.Config) *gin.Engine {
 			modelStatusEmbed.GET("/status", handler.GetEmbedAllModelStatusHandler)
 			modelStatusEmbed.GET("/config/selected", handler.GetEmbedSelectedModelsHandler)
 		}
+
+		// Uptime-Kuma 兼容接口（公开，无需认证）
+		uptimeKuma := api.Group("/uptime-kuma")
+		{
+			uptimeKuma.GET("/monitors", handler.GetUptimeKumaMonitorsHandler)
+			uptimeKuma.GET("/monitors/:model_name", handler.GetUptimeKumaMonitorHandler)
+			uptimeKuma.GET("/heartbeats/:model_name", handler.GetUptimeKumaHeartbeatsHandler)
+			uptimeKuma.GET("/status-page", handler.GetUptimeKumaStatusPageHandler)
+			uptimeKuma.POST("/status-page/batch", handler.PostUptimeKumaStatusPageBatchHandler)
+			uptimeKuma.GET("/overall", handler.GetUptimeKumaOverallHandler)
+			uptimeKuma.GET("/push/:push_token", handler.GetUptimeKumaPushHandler)
+		}
 	}
 
 	// 前端静态文件服务（放在最后，作为 fallback）

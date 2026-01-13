@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
                 if deleted > 0:
                     logger.system(f"已清理 {deleted} 个冗余索引: {cleanup_result.get('deleted_indexes', [])}")
                 else:
-                    logger.system(f"冗余索引清理完成，无需删除")
+                    logger.system("冗余索引清理完成，无需删除")
         except Exception as e:
             logger.warning(f"索引分析/清理失败: {e}", category="数据库")
         
@@ -170,7 +170,7 @@ async def lifespan(app: FastAPI):
                 "刷新间隔": f"{settings.get('frontend_refresh_interval', 60)}s",
             })
         except Exception as e:
-            logger.fail(f"系统规模检测失败", error=str(e))
+            logger.fail("系统规模检测失败", error=str(e))
     except Exception as e:
         logger.warning(f"数据库初始化失败: {e}", category="数据库")
 
@@ -653,7 +653,7 @@ async def _warmup_ip_monitoring_data():
     try:
         start = time.time()
         ip_service.get_ip_recording_stats(use_cache=False)
-        logger.success(f"IP监控 ip_stats 预热完成", 耗时=f"{time.time()-start:.2f}s")
+        logger.success("IP监控 ip_stats 预热完成", 耗时=f"{time.time()-start:.2f}s")
         success_count += 1
     except Exception as e:
         failed_items.append("ip_stats")
@@ -712,8 +712,7 @@ async def background_cache_warmup():
        - 大型系统：1s 延迟
        - 超大型系统：2s 延迟
     """
-    from .system_scale_service import get_detected_settings, get_scale_service, SystemScale
-    from .database import get_db_manager
+    from .system_scale_service import get_scale_service, SystemScale
     from .cache_manager import get_cache_manager
 
     warmup_start_time = time.time()
@@ -764,7 +763,7 @@ async def background_cache_warmup():
     if cache.redis_available:
         restored = cache.restore_to_redis()
         if restored > 0:
-            logger.success(f"恢复完成", count=restored)
+            logger.success("恢复完成", count=restored)
         else:
             logger.bullet("无缓存数据需要恢复")
     else:
@@ -1016,7 +1015,7 @@ async def background_cache_warmup():
         logger.bullet(f"成功: {warmed}")
         logger.bullet(f"失败: {failed}")
     else:
-        logger.success(f"全部窗口预热完成", 窗口=warmed)
+        logger.success("全部窗口预热完成", 窗口=warmed)
 
     logger.kvs({
         "已缓存数据": f"{total_cached_records} 条 ({len(warmed)} 窗口 × 50 用户)",
@@ -1026,9 +1025,9 @@ async def background_cache_warmup():
     # 排行榜窗口预热完成
     steps[2]["status"] = "done" if not failed else "error"
     window_status_msg = (
-        f"排行榜预热完成（部分失败），正在预热 Dashboard..."
+        "排行榜预热完成（部分失败），正在预热 Dashboard..."
         if failed
-        else f"排行榜预热完成，正在预热 Dashboard..."
+        else "排行榜预热完成，正在预热 Dashboard..."
     )
     _set_warmup_status("initializing", 50, window_status_msg, steps)
 
@@ -1962,6 +1961,7 @@ def include_routes(app: FastAPI):
     from .ai_auto_ban_routes import router as ai_auto_ban_router
     from .system_routes import router as system_router
     from .model_status_routes import router as model_status_router
+    from .uptime_kuma_routes import router as uptime_kuma_router
     app.include_router(router)
     app.include_router(auth_router)
     app.include_router(top_up_router)
@@ -1974,6 +1974,7 @@ def include_routes(app: FastAPI):
     app.include_router(ai_auto_ban_router)
     app.include_router(system_router)
     app.include_router(model_status_router)
+    app.include_router(uptime_kuma_router)
 
 
 # Create FastAPI application
