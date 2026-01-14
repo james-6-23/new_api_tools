@@ -46,9 +46,16 @@ interface DailyTrend {
   unique_users?: number
 }
 
+interface TopUser {
+  user_id: number
+  username: string
+  requests: number
+  quota: number
+}
+
 interface AnalyticsSummary {
-  request_king: { user_id: number; username: string; request_count: number } | null
-  quota_king: { user_id: number; username: string; quota_used: number } | null
+  top_by_requests: TopUser[]
+  top_by_quota: TopUser[]
 }
 
 interface SystemInfo {
@@ -192,22 +199,14 @@ export function Dashboard() {
         { headers: getAuthHeaders(), signal },
       )
       const data = await response.json()
-      
+
       if (data.success && data.data.length > 0) {
-        const sortedByRequest = [...data.data].sort((a: any, b: any) => b.request_count - a.request_count)
-        const sortedByQuota = [...data.data].sort((a: any, b: any) => b.quota_used - a.quota_used)
-        
+        const sortedByRequest = [...data.data].sort((a: TopUser, b: TopUser) => b.requests - a.requests).slice(0, 5)
+        const sortedByQuota = [...data.data].sort((a: TopUser, b: TopUser) => b.quota - a.quota).slice(0, 5)
+
         setAnalyticsSummary({
-          request_king: sortedByRequest.length > 0 ? {
-            user_id: sortedByRequest[0].user_id,
-            username: sortedByRequest[0].username,
-            request_count: sortedByRequest[0].request_count,
-          } : null,
-          quota_king: sortedByQuota.length > 0 ? {
-            user_id: sortedByQuota[0].user_id,
-            username: sortedByQuota[0].username,
-            quota_used: sortedByQuota[0].quota_used,
-          } : null,
+          top_by_requests: sortedByRequest,
+          top_by_quota: sortedByQuota,
         })
       } else {
         setAnalyticsSummary(null)
@@ -773,27 +772,25 @@ export function Dashboard() {
         </Card>
       </div>
 
-      {/* Analytics Kings */}
+      {/* Analytics Top 5 Rankings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <KingCard
+        <RankingCard
           title="请求之王"
-          subtitle={`${getPeriodLabel()}内请求数最多`}
+          subtitle={`${getPeriodLabel()}内请求数 Top 5`}
           icon={Zap}
-          user={analyticsSummary?.request_king}
-          valueLabel="总请求数"
-          value={analyticsSummary?.request_king?.request_count?.toLocaleString()}
+          users={analyticsSummary?.top_by_requests || []}
+          valueKey="requests"
+          formatValue={(v) => v.toLocaleString()}
           gradient="from-blue-600 to-indigo-600"
-          accentColor="text-blue-100"
         />
-        <KingCard 
-          title="土豪榜首" 
-          subtitle={`${getPeriodLabel()}内消耗额度最多`} 
-          icon={Crown} 
-          user={analyticsSummary?.quota_king} 
-          valueLabel="总消耗额度" 
-          value={analyticsSummary?.quota_king?.quota_used != null ? `$${(analyticsSummary.quota_king.quota_used / 500000).toFixed(2)}` : undefined} 
-          gradient="from-emerald-600 to-teal-600" 
-          accentColor="text-emerald-100"
+        <RankingCard
+          title="土豪榜首"
+          subtitle={`${getPeriodLabel()}内消耗额度 Top 5`}
+          icon={Crown}
+          users={analyticsSummary?.top_by_quota || []}
+          valueKey="quota"
+          formatValue={(v) => `$${(v / 500000).toFixed(2)}`}
+          gradient="from-emerald-600 to-teal-600"
         />
       </div>
     </div>
@@ -876,18 +873,17 @@ function StatCard({ title, value, rawValue, subValue, icon: Icon, color, variant
   )
 }
 
-interface KingCardProps {
+interface RankingCardProps {
   title: string
   subtitle: string
   icon: React.ElementType
-  user: { user_id: number; username: string } | null | undefined
-  valueLabel: string
-  value: string | undefined
+  users: TopUser[]
+  valueKey: 'requests' | 'quota'
+  formatValue: (v: number) => string
   gradient: string
-  accentColor: string
 }
 
-function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradient, accentColor }: KingCardProps) {
+function RankingCard({ title, subtitle, icon: Icon, users, valueKey, formatValue, gradient }: RankingCardProps) {
   return (
     <div className={`bg-gradient-to-br ${gradient} rounded-xl shadow-lg p-6 text-white relative overflow-hidden group hover:shadow-xl transition-all duration-300`}>
       {/* Background Pattern */}
@@ -895,36 +891,29 @@ function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradie
         <Icon className="w-32 h-32 rotate-12" />
       </div>
 
-      <div className="flex items-center justify-between relative z-10">
-        <div>
-          <div className="flex items-center gap-2">
-            <Icon className="w-5 h-5 opacity-90" />
-            <p className="text-lg font-bold tracking-wide">{title}</p>
-          </div>
-          <p className={`text-sm mt-1 ${accentColor} opacity-90`}>{subtitle}</p>
-        </div>
+      <div className="flex items-center gap-2 relative z-10">
+        <Icon className="w-5 h-5 opacity-90" />
+        <p className="text-lg font-bold tracking-wide">{title}</p>
       </div>
+      <p className="text-sm mt-1 text-white/80">{subtitle}</p>
 
-      {user ? (
-        <div className="mt-6 relative z-10">
-          <div className="flex items-center bg-white/10 p-4 rounded-lg backdrop-blur-sm border border-white/10">
-            <div className="h-12 w-12 rounded-full bg-white text-blue-600 flex items-center justify-center text-xl font-bold shadow-sm">
-              {user.username.charAt(0).toUpperCase()}
+      {users.length > 0 ? (
+        <div className="mt-4 space-y-2 relative z-10">
+          {users.map((user, index) => (
+            <div key={user.user_id} className="flex items-center gap-3 bg-white/10 px-3 py-2 rounded-lg backdrop-blur-sm border border-white/10">
+              <span className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-sm font-bold">
+                {index + 1}
+              </span>
+              <div className="h-8 w-8 rounded-full bg-white text-blue-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                {user.username.charAt(0).toUpperCase()}
+              </div>
+              <span className="font-medium truncate flex-1">{user.username}</span>
+              <span className="text-white/90 font-semibold tabular-nums">{formatValue(user[valueKey])}</span>
             </div>
-            <div className="ml-4">
-              <p className="text-xl font-bold">{user.username}</p>
-              <p className={`text-xs ${accentColor}`}>User ID: {user.user_id}</p>
-            </div>
-          </div>
-          <div className="mt-4 flex justify-between items-end">
-             <div>
-               <p className={`text-xs ${accentColor} mb-1`}>{valueLabel}</p>
-               <p className="text-3xl font-bold tracking-tight">{value}</p>
-             </div>
-          </div>
+          ))}
         </div>
       ) : (
-        <div className="mt-6 h-[108px] flex flex-col items-center justify-center bg-white/5 rounded-lg border border-white/10 backdrop-blur-sm relative z-10">
+        <div className="mt-4 h-[200px] flex items-center justify-center bg-white/5 rounded-lg border border-white/10 backdrop-blur-sm relative z-10">
           <p className="text-white/60">暂无数据</p>
         </div>
       )}
