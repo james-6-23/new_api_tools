@@ -960,12 +960,12 @@ func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[stri
 		CompletionTokens int64
 		UseTime          float64
 		IP               string
-		ChannelName      string
+		ChannelID        int
 		TokenName        string
 	}
 	var logRows []logRow
 	db.Table("logs").
-		Select("id, created_at, type, model_name, quota, prompt_tokens, completion_tokens, use_time, ip, COALESCE(channel, '') as channel_name, COALESCE(token_name, '') as token_name").
+		Select("id, created_at, type, model_name, quota, prompt_tokens, completion_tokens, use_time, ip, channel_id, COALESCE(token_name, '') as token_name").
 		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND type IN ?", userID, startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure}).
 		Order("created_at DESC").
 		Limit(10).
@@ -983,7 +983,7 @@ func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[stri
 			"completion_tokens": l.CompletionTokens,
 			"use_time":          l.UseTime,
 			"ip":                l.IP,
-			"channel_name":      l.ChannelName,
+			"channel_name":      fmt.Sprintf("Channel #%d", l.ChannelID),
 			"token_name":        l.TokenName,
 		})
 	}
