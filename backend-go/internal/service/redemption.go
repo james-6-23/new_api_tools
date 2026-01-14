@@ -36,8 +36,9 @@ type RedemptionRecord struct {
 	Status       string `json:"status"` // unused, used, expired
 	RedeemedBy   int    `json:"redeemed_by"`
 	RedeemerName string `json:"redeemer_name"`
-	CreatedAt    string `json:"created_at"`
-	RedeemedAt   string `json:"redeemed_at"`
+	CreatedTime  int64  `json:"created_time"`
+	RedeemedTime int64  `json:"redeemed_time"`
+	ExpiredTime  int64  `json:"expired_time"`
 }
 
 // RedemptionStatistics 兑换码统计
@@ -164,12 +165,9 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 			Status:       mapRedemptionStatus(r.Status, r.ExpiredTime),
 			RedeemedBy:   r.UsedUserID,
 			RedeemerName: r.RedeemerName,
-		}
-		if r.CreatedTime > 0 {
-			records[i].CreatedAt = time.Unix(r.CreatedTime, 0).Format("2006-01-02 15:04:05")
-		}
-		if r.RedeemedTime > 0 {
-			records[i].RedeemedAt = time.Unix(r.RedeemedTime, 0).Format("2006-01-02 15:04:05")
+			CreatedTime:  r.CreatedTime,
+			RedeemedTime: r.RedeemedTime,
+			ExpiredTime:  r.ExpiredTime,
 		}
 	}
 
