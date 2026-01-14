@@ -33,7 +33,7 @@ type RedemptionRecord struct {
 	Quota        int64  `json:"quota"`
 	Count        int    `json:"count"`
 	UsedCount    int    `json:"used_count"`
-	Status       int    `json:"status"`
+	Status       string `json:"status"` // unused, used, expired
 	RedeemedBy   int    `json:"redeemed_by"`
 	RedeemerName string `json:"redeemer_name"`
 	CreatedAt    string `json:"created_at"`
@@ -161,7 +161,7 @@ func (s *RedemptionService) GetRedemptions(query *RedemptionQuery) (*RedemptionL
 			Key:          maskKey(r.Key),
 			Quota:        r.Quota,
 			Count:        r.Count,
-			Status:       r.Status,
+			Status:       mapRedemptionStatus(r.Status, r.ExpiredTime),
 			RedeemedBy:   r.UsedUserID,
 			RedeemerName: r.RedeemerName,
 		}
@@ -440,6 +440,20 @@ func calculateExpiration(config *GenerateConfig) *time.Time {
 	default:
 		return nil
 	}
+}
+
+// mapRedemptionStatus 将数字状态映射为字符串状态
+func mapRedemptionStatus(status int, expiredTime int64) string {
+	// 已使用状态优先
+	if status == models.RedemptionStatusUsed {
+		return "used"
+	}
+	// 检查是否已过期
+	if expiredTime > 0 && expiredTime < time.Now().Unix() {
+		return "expired"
+	}
+	// 默认未使用
+	return "unused"
 }
 
 // maskKey 隐藏部分 key
