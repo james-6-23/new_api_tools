@@ -997,6 +997,8 @@ func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[stri
 			"status":       user.Status,
 			"group":        user.Group,
 			"linux_do_id":  user.LinuxDoID,
+			"quota":        user.Quota,
+			"used_quota":   user.UsedQuota,
 		},
 		"summary": map[string]interface{}{
 			"total_requests":    summary.TotalRequests,
