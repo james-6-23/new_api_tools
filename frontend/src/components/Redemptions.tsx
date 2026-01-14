@@ -24,8 +24,8 @@ interface RedemptionCode {
   used_user_id: number
   expired_time: number
   status: 'unused' | 'used' | 'expired'
-  redeemed_by: number
-  redeemer_name: string
+  redeemed_by?: number
+  redeemer_name?: string
 }
 
 interface RedemptionStatistics {
@@ -97,6 +97,9 @@ const RISK_FLAG_LABELS: Record<string, string> = {
 }
 
 const formatAnalysisNumber = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toString()
+
+// 额度换算常量: 1 USD = 500000 quota units
+const QUOTA_PER_USD = 500000
 
 export function Redemptions() {
   const { showToast } = useToast()
@@ -183,6 +186,10 @@ export function Redemptions() {
     setAnalysisLoading(true)
     try {
       const response = await fetch(`${apiUrl}/api/risk/users/${selectedUser.id}/analysis?window=${analysisWindow}`, { headers: getAuthHeaders() })
+      if (!response.ok) {
+        showToast('error', `请求失败: ${response.status}`)
+        return
+      }
       const res = await response.json()
       if (res.success) {
         setAnalysis(res.data)
@@ -214,7 +221,7 @@ export function Redemptions() {
     return new Date(ts * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
 
-  const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
+  const formatQuota = (quota: number) => `$${(quota / QUOTA_PER_USD).toFixed(2)}`
 
   const handleSelectAll = (checked: boolean) => {
     setSelectedIds(checked ? new Set(codes.map(c => c.id)) : new Set())
@@ -557,7 +564,10 @@ export function Redemptions() {
       </Dialog>
 
       {/* User Analysis Dialog */}
-      <Dialog open={analysisDialogOpen} onOpenChange={setAnalysisDialogOpen}>
+      <Dialog open={analysisDialogOpen} onOpenChange={(open) => {
+        setAnalysisDialogOpen(open)
+        if (!open) { setSelectedUser(null); setAnalysis(null) }
+      }}>
         <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
           <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
             <div className="flex justify-between items-start pr-6">
@@ -612,7 +622,7 @@ export function Redemptions() {
                     RPM: {analysis.risk.requests_per_minute.toFixed(1)}
                   </Badge>
                   <Badge variant="secondary" className="px-3 py-1 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                    均额: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}
+                    均额: ${((analysis.risk.avg_quota_per_request || 0) / QUOTA_PER_USD).toFixed(4)}
                   </Badge>
                   {analysis.risk.risk_flags.length > 0 ? (
                     analysis.risk.risk_flags.map((f) => (
