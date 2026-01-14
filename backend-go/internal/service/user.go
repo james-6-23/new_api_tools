@@ -31,21 +31,22 @@ type ActivityStats struct {
 
 // UserRecord 用户记录
 type UserRecord struct {
-	ID           int    `json:"id"`
-	Username     string `json:"username"`
-	DisplayName  string `json:"display_name"`
-	Email        string `json:"email"`
-	Role         int    `json:"role"`
-	Status       int    `json:"status"`
-	Quota        int64  `json:"quota"`
-	UsedQuota    int64  `json:"used_quota"`
-	RequestCount int64  `json:"request_count"`
-	TokenCount   int    `json:"token_count"`
-	InviterID    int    `json:"inviter_id"`
-	InviterName  string `json:"inviter_name"`
-	LinuxDoID    string `json:"linux_do_id"`
-	CreatedAt    string `json:"created_at"`
-	LastLoginAt  string `json:"last_login_at"`
+	ID            int    `json:"id"`
+	Username      string `json:"username"`
+	DisplayName   string `json:"display_name"`
+	Email         string `json:"email"`
+	Role          int    `json:"role"`
+	Status        int    `json:"status"`
+	Quota         int64  `json:"quota"`
+	UsedQuota     int64  `json:"used_quota"`
+	RequestCount  int64  `json:"request_count"`
+	TokenCount    int    `json:"token_count"`
+	InviterID     int    `json:"inviter_id"`
+	InviterName   string `json:"inviter_name"`
+	LinuxDoID     string `json:"linux_do_id"`
+	CreatedAt     string `json:"created_at"`
+	LastLoginAt   string `json:"last_login_at"`
+	ActivityLevel string `json:"activity_level"` // active, inactive, very_inactive, never
 }
 
 // UserStatistics 用户统计
@@ -230,6 +231,9 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		if lastSeen, ok := lastSeenMap[r.ID]; ok && lastSeen > 0 {
 			records[i].LastLoginAt = time.Unix(lastSeen, 0).Format("2006-01-02 15:04:05")
 		}
+
+		// 计算活跃度
+		records[i].ActivityLevel = calculateActivityLevel(r.RequestCount, lastSeenMap[r.ID])
 	}
 
 	// 计算总页数
@@ -242,6 +246,27 @@ func (s *UserService) GetUsers(query *UserQuery) (*UserListResult, error) {
 		TotalPages: totalPages,
 		Items:      records,
 	}, nil
+}
+
+// calculateActivityLevel 计算用户活跃度
+// active: 7天内有请求
+// inactive: 7-30天内有请求
+// very_inactive: 超过30天无请求
+// never: 从未请求
+func calculateActivityLevel(requestCount int, lastSeenUnix int64) string {
+	if requestCount == 0 || lastSeenUnix == 0 {
+		return "never"
+	}
+
+	now := time.Now().Unix()
+	daysSinceLastRequest := (now - lastSeenUnix) / 86400
+
+	if daysSinceLastRequest <= 7 {
+		return "active"
+	} else if daysSinceLastRequest <= 30 {
+		return "inactive"
+	}
+	return "very_inactive"
 }
 
 // GetUserStatistics 获取用户统计
