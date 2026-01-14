@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **用户风险分析增强**：`GetUserAnalysis` 新增完整的风险指标和详情数据
+  - 新增 `risk` 对象：包含 `requests_per_minute`、`avg_quota_per_request`、`risk_flags`、`ip_switch_analysis`
+  - 新增 `recent_logs`：返回最近 10 条请求日志详情
+  - 风险标记自动检测：`high_rpm`（>10 RPM）、`many_ips`（>20 IP）、`high_failure_rate`（>50%）
+- **时间窗口内 IP 切换分析**：新增 `analyzeIPSwitchesInWindow` 方法
+  - 支持指定时间范围内的 IP 切换行为分析
+  - 计算平均 IP 停留时间 (`avg_ip_duration`)
+  - 复用现有双栈识别逻辑
+- **IPSwitchAnalysis 结构扩展**：
+  - 新增 `avg_ip_duration` 字段：平均 IP 停留时间（秒）
+  - 新增 `switch_details` 字段：切换详情（保留 `switches` 兼容旧客户端）
+  - 涉及文件：`internal/service/risk.go`
+
 ### Changed
 - **数据库初始化重构**：本地数据库始终使用独立的 SQLite 文件
   - 默认路径从 `/app/data/local.db` 改为 `./data/local.db`（与 Python 版本一致）

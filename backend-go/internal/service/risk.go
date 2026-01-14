@@ -99,7 +99,9 @@ type IPSwitchAnalysis struct {
 	DualStackSwitches int              `json:"dual_stack_switches"` // 双栈切换次数
 	UniqueLocations   int              `json:"unique_locations"`    // 唯一位置数
 	HasDualStack      bool             `json:"has_dual_stack"`      // 是否有双栈行为
-	Switches          []IPSwitchDetail `json:"switches"`            // 切换详情（最近20条）
+	AvgIPDuration     int              `json:"avg_ip_duration"`     // 平均 IP 停留时间（秒）
+	Switches          []IPSwitchDetail `json:"switches"`            // 切换详情（最近20条）- 兼容旧字段
+	SwitchDetails     []IPSwitchDetail `json:"switch_details"`      // 切换详情（最近20条）
 }
 
 // GetLeaderboards 获取排行榜
@@ -917,6 +919,75 @@ func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[stri
 		})
 	}
 
+	// 计算风险指标
+	windowMinutes := float64(windowSeconds) / 60
+	requestsPerMinute := float64(0)
+	if windowMinutes > 0 {
+		requestsPerMinute = float64(summary.TotalRequests) / windowMinutes
+	}
+	avgQuotaPerRequest := float64(0)
+	if summary.TotalRequests > 0 {
+		avgQuotaPerRequest = float64(summary.QuotaUsed) / float64(summary.TotalRequests)
+	}
+
+	// 风险标记
+	riskFlags := []string{}
+	if requestsPerMinute > 10 {
+		riskFlags = append(riskFlags, "high_rpm")
+	}
+	if summary.UniqueIPs > 20 {
+		riskFlags = append(riskFlags, "many_ips")
+	}
+	failureRate := float64(0)
+	if summary.TotalRequests > 0 {
+		failureRate = float64(summary.FailureRequests) / float64(summary.TotalRequests)
+	}
+	if failureRate > 0.5 {
+		riskFlags = append(riskFlags, "high_failure_rate")
+	}
+
+	// IP 切换分析
+	ipSwitchAnalysis := s.analyzeIPSwitchesInWindow(userID, startTime, now)
+
+	// recent logs
+	type logRow struct {
+		ID               int
+		CreatedAt        int64
+		Type             int
+		ModelName        string
+		Quota            int64
+		PromptTokens     int64
+		CompletionTokens int64
+		UseTime          float64
+		IP               string
+		ChannelName      string
+		TokenName        string
+	}
+	var logRows []logRow
+	db.Table("logs").
+		Select("id, created_at, type, model_name, quota, prompt_tokens, completion_tokens, use_time, ip, COALESCE(channel, '') as channel_name, COALESCE(token_name, '') as token_name").
+		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND type IN ?", userID, startTime, now, []int{models.LogTypeConsume, models.LogTypeFailure}).
+		Order("created_at DESC").
+		Limit(10).
+		Scan(&logRows)
+
+	recentLogs := make([]map[string]interface{}, 0, len(logRows))
+	for _, l := range logRows {
+		recentLogs = append(recentLogs, map[string]interface{}{
+			"id":                l.ID,
+			"created_at":        l.CreatedAt,
+			"type":              l.Type,
+			"model_name":        l.ModelName,
+			"quota":             l.Quota,
+			"prompt_tokens":     l.PromptTokens,
+			"completion_tokens": l.CompletionTokens,
+			"use_time":          l.UseTime,
+			"ip":                l.IP,
+			"channel_name":      l.ChannelName,
+			"token_name":        l.TokenName,
+		})
+	}
+
 	return map[string]interface{}{
 		"user": map[string]interface{}{
 			"id":           user.ID,
@@ -946,16 +1017,108 @@ func (s *RiskService) GetUserAnalysis(userID int, windowSeconds int64) (map[stri
 				}
 				return float64(summary.EmptyCount) / float64(summary.SuccessRequests)
 			}(),
-			"failure_rate": func() float64 {
-				if summary.TotalRequests == 0 {
-					return 0
-				}
-				return float64(summary.FailureRequests) / float64(summary.TotalRequests)
-			}(),
+			"failure_rate": failureRate,
 		},
-		"top_models": topModels,
-		"top_ips":    topIPs,
+		"risk": map[string]interface{}{
+			"requests_per_minute":   requestsPerMinute,
+			"avg_quota_per_request": avgQuotaPerRequest,
+			"risk_flags":            riskFlags,
+			"ip_switch_analysis":    ipSwitchAnalysis,
+		},
+		"top_models":  topModels,
+		"top_ips":     topIPs,
+		"recent_logs": recentLogs,
 	}, nil
+}
+
+// analyzeIPSwitchesInWindow 分析指定时间窗口内的 IP 切换行为
+func (s *RiskService) analyzeIPSwitchesInWindow(userID int, startTime, endTime int64) *IPSwitchAnalysis {
+	db := database.GetMainDB()
+
+	var logs []struct {
+		IP        string
+		CreatedAt int64
+	}
+
+	db.Table("logs").
+		Select("ip, created_at").
+		Where("user_id = ? AND created_at >= ? AND created_at <= ? AND ip != ''", userID, startTime, endTime).
+		Order("created_at ASC").
+		Limit(500).
+		Scan(&logs)
+
+	if len(logs) < 2 {
+		return &IPSwitchAnalysis{
+			Switches:      []IPSwitchDetail{},
+			SwitchDetails: []IPSwitchDetail{},
+		}
+	}
+
+	analysis := &IPSwitchAnalysis{
+		SwitchDetails: []IPSwitchDetail{},
+	}
+
+	var switches []IPSwitchDetail
+	prevIP := logs[0].IP
+	ipStartTime := logs[0].CreatedAt // IP 段开始时间
+	totalDuration := int64(0)
+	ipCount := 0
+
+	for i := 1; i < len(logs); i++ {
+		currentIP := logs[i].IP
+		currentTime := logs[i].CreatedAt
+
+		if currentIP != prevIP {
+			analysis.SwitchCount++
+			duration := currentTime - ipStartTime // 该 IP 段的停留时间
+			totalDuration += duration
+			ipCount++
+
+			fromVersion := string(geoip.GetIPVersion(prevIP))
+			toVersion := string(geoip.GetIPVersion(currentIP))
+			isDualStack := geoip.IsDualStackPair(prevIP, currentIP)
+
+			if isDualStack {
+				analysis.DualStackSwitches++
+				analysis.HasDualStack = true
+			} else {
+				analysis.RealSwitchCount++
+			}
+
+			if duration < 300 {
+				analysis.RapidSwitchCount++
+			}
+
+			switches = append(switches, IPSwitchDetail{
+				Timestamp:       time.Unix(currentTime, 0).Format("2006-01-02 15:04:05"),
+				FromIP:          prevIP,
+				ToIP:            currentIP,
+				IsDualStack:     isDualStack,
+				IntervalSeconds: duration,
+				FromVersion:     fromVersion,
+				ToVersion:       toVersion,
+			})
+
+			ipStartTime = currentTime // 新 IP 段开始
+		}
+
+		prevIP = currentIP
+	}
+
+	if ipCount > 0 {
+		analysis.AvgIPDuration = int(totalDuration / int64(ipCount))
+	}
+
+	if len(switches) > 20 {
+		sort.Slice(switches, func(i, j int) bool {
+			return switches[i].Timestamp > switches[j].Timestamp
+		})
+		switches = switches[:20]
+	}
+	analysis.SwitchDetails = switches
+	analysis.Switches = switches // 兼容旧字段
+
+	return analysis
 }
 
 // analyzeIPSwitches 分析用户 IP 切换行为
