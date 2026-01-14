@@ -484,14 +484,13 @@ export function Redemptions() {
                                 <Badge
                                   variant="secondary"
                                   className="cursor-pointer hover:bg-secondary/80"
-                                  onClick={() => openUserAnalysis(code.redeemed_by, code.redeemer_name || `用户${code.redeemed_by}`)}
+                                  onClick={() => openUserAnalysis(code.redeemed_by!, code.redeemer_name || `用户${code.redeemed_by}`)}
                                 >
                                   已使用
                                 </Badge>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>兑换用户: {code.redeemer_name || `ID: ${code.redeemed_by}`}</p>
-                                <p className="text-xs text-muted-foreground">点击查看用户详情</p>
+                                <p>{code.redeemer_name || `ID: ${code.redeemed_by}`}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
