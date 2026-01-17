@@ -368,7 +368,7 @@ export function UserManagement() {
       title: '删除用户',
       message: `请选择删除方式：`,
       type: 'danger',
-      onConfirm: () => executeDeleteUser(),
+      onConfirm: () => {}, // 占位，实际执行在按钮的 onClick 中处理
     })
   }
 
@@ -1098,7 +1098,13 @@ export function UserManagement() {
             </Button>
             <Button
               variant={confirmDialog.type === 'danger' || deleteMode === 'hard' ? 'destructive' : 'default'}
-              onClick={confirmDialog.onConfirm}
+              onClick={() => {
+                if (deleteUserTarget) {
+                  executeDeleteUser()
+                } else {
+                  confirmDialog.onConfirm()
+                }
+              }}
               disabled={((confirmDialog.requireConfirmText ?? false) || (deleteUserTarget !== null && deleteMode === 'hard')) && hardDeleteConfirmText !== '彻底删除'}
             >
               {deleteUserTarget ? (deleteMode === 'hard' ? '确认彻底删除' : '确认注销') : (confirmDialog.hardDelete ? '确认彻底删除' : '确定删除')}
