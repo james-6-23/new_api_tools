@@ -197,18 +197,26 @@ async def get_users(
     )
 
 
+class DeleteUserRequest(BaseModel):
+    """删除用户请求"""
+    hard_delete: bool = False  # 是否彻底删除
+
+
 @router.delete("/{user_id}", response_model=DeleteResponse)
 async def delete_user(
     user_id: int,
+    hard_delete: bool = False,
     _: str = Depends(verify_auth),
 ):
     """
-    删除单个用户（软删除）
-
-    同时会软删除用户的所有 Token
+    删除单个用户
+    
+    - **hard_delete**: 是否彻底删除（物理删除）
+      - false（默认）：注销用户，数据保留可恢复
+      - true：彻底删除，永久移除用户及所有关联数据
     """
     service = get_user_management_service()
-    result = service.delete_user(user_id)
+    result = service.delete_user(user_id, hard_delete=hard_delete)
 
     return DeleteResponse(
         success=result["success"],

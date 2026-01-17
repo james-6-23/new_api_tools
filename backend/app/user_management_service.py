@@ -755,8 +755,14 @@ class UserManagementService:
         else:
             return ActivityLevel.VERY_INACTIVE
 
-    def delete_user(self, user_id: int) -> Dict[str, Any]:
-        """软删除单个用户"""
+    def delete_user(self, user_id: int, hard_delete: bool = False) -> Dict[str, Any]:
+        """
+        删除单个用户
+        
+        Args:
+            user_id: 用户 ID
+            hard_delete: 是否彻底删除（物理删除）
+        """
         try:
             self._db.connect()
 
@@ -769,20 +775,27 @@ class UserManagementService:
 
             username = check_result[0].get("username", "")
 
-            # 软删除用户 (CURRENT_TIMESTAMP 兼容 MySQL 和 PostgreSQL)
-            delete_sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = :user_id"
-            self._db.execute(delete_sql, {"user_id": user_id})
+            if hard_delete:
+                # 彻底删除
+                self._hard_delete_users([user_id])
+                logger.business("彻底删除用户", user_id=user_id, username=username)
+                return {"success": True, "message": f"用户 {username} 已彻底删除"}
+            else:
+                # 软删除用户 (CURRENT_TIMESTAMP 兼容 MySQL 和 PostgreSQL)
+                delete_sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = :user_id"
+                self._db.execute(delete_sql, {"user_id": user_id})
 
-            # 同时软删除用户的 tokens
-            token_sql = "UPDATE tokens SET deleted_at = CURRENT_TIMESTAMP WHERE user_id = :user_id AND deleted_at IS NULL"
-            self._db.execute(token_sql, {"user_id": user_id})
+                # 同时软删除用户的 tokens
+                token_sql = "UPDATE tokens SET deleted_at = CURRENT_TIMESTAMP WHERE user_id = :user_id AND deleted_at IS NULL"
+                self._db.execute(token_sql, {"user_id": user_id})
+
+                logger.business("注销用户", user_id=user_id, username=username)
 
             # 清除统计缓存和活跃度列表缓存
             self._storage.cache_delete(STATS_CACHE_KEY)
             self.invalidate_activity_list_cache()
 
-            logger.business("删除用户", user_id=user_id, username=username)
-            return {"success": True, "message": f"用户 {username} 已删除"}
+            return {"success": True, "message": f"用户 {username} 已注销"}
 
         except Exception as e:
             logger.db_error(f"删除用户失败: {e}")

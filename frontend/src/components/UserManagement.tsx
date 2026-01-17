@@ -354,50 +354,68 @@ export function UserManagement() {
     }
   }, [apiUrl, getAuthHeaders, showToast])
 
+  // 单个用户删除状态
+  const [deleteUserTarget, setDeleteUserTarget] = useState<{ userId: number; username: string; activityLevel: string } | null>(null)
+  const [deleteMode, setDeleteMode] = useState<'soft' | 'hard'>('soft')
+
   const deleteUser = async (userId: number, username: string) => {
     const userToDelete = users.find(u => u.id === userId)
+    setDeleteUserTarget({ userId, username, activityLevel: userToDelete?.activity_level || '' })
+    setDeleteMode('soft')
+    setHardDeleteConfirmText('')
     setConfirmDialog({
       isOpen: true,
       title: '删除用户',
-      message: `确定要删除用户 "${username}" 吗？此操作会同时删除该用户的所有 Token。`,
+      message: `请选择删除方式：`,
       type: 'danger',
-      onConfirm: async () => {
-        setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-        setDeleting(true)
-        try {
-          const response = await fetch(`${apiUrl}/api/users/${userId}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders(),
-          })
-          const data = await response.json()
-          if (data.success) {
-            showToast('success', data.message)
-            // 直接从本地状态移除用户，避免重新加载
-            setUsers(prev => prev.filter(u => u.id !== userId))
-            setTotal(prev => prev - 1)
-            // 更新统计数据（本地计算）
-            if (stats && userToDelete) {
-              const level = userToDelete.activity_level
-              setStats(prev => prev ? {
-                ...prev,
-                total_users: prev.total_users - 1,
-                active_users: level === 'active' ? prev.active_users - 1 : prev.active_users,
-                inactive_users: level === 'inactive' ? prev.inactive_users - 1 : prev.inactive_users,
-                very_inactive_users: level === 'very_inactive' ? prev.very_inactive_users - 1 : prev.very_inactive_users,
-                never_requested: level === 'never' ? prev.never_requested - 1 : prev.never_requested,
-              } : null)
-            }
-          } else {
-            showToast('error', data.message || '删除失败')
-          }
-        } catch (error) {
-          console.error('Failed to delete user:', error)
-          showToast('error', '删除用户失败')
-        } finally {
-          setDeleting(false)
-        }
-      },
+      onConfirm: () => executeDeleteUser(),
     })
+  }
+
+  const executeDeleteUser = async () => {
+    if (!deleteUserTarget) return
+    
+    const { userId, username, activityLevel } = deleteUserTarget
+    const hardDelete = deleteMode === 'hard'
+    
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }))
+    setDeleting(true)
+    try {
+      const response = await fetch(`${apiUrl}/api/users/${userId}?hard_delete=${hardDelete}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      })
+      const data = await response.json()
+      if (data.success) {
+        showToast('success', data.message)
+        // 直接从本地状态移除用户，避免重新加载
+        setUsers(prev => prev.filter(u => u.id !== userId))
+        setTotal(prev => prev - 1)
+        // 更新统计数据（本地计算）
+        if (stats) {
+          setStats(prev => prev ? {
+            ...prev,
+            total_users: prev.total_users - 1,
+            active_users: activityLevel === 'active' ? prev.active_users - 1 : prev.active_users,
+            inactive_users: activityLevel === 'inactive' ? prev.inactive_users - 1 : prev.inactive_users,
+            very_inactive_users: activityLevel === 'very_inactive' ? prev.very_inactive_users - 1 : prev.very_inactive_users,
+            never_requested: activityLevel === 'never' ? prev.never_requested - 1 : prev.never_requested,
+          } : null)
+        }
+        // 如果是软删除，更新软删除计数
+        if (!hardDelete) {
+          fetchSoftDeletedCount()
+        }
+      } else {
+        showToast('error', data.message || '删除失败')
+      }
+    } catch (error) {
+      console.error('Failed to delete user:', error)
+      showToast('error', '删除用户失败')
+    } finally {
+      setDeleting(false)
+      setDeleteUserTarget(null)
+    }
   }
 
   const previewBatchDelete = async (level: string, hardDelete: boolean = false) => {
@@ -982,10 +1000,10 @@ export function UserManagement() {
       </Card>
 
       {/* Confirm Dialog */}
-      <Dialog open={confirmDialog.isOpen} onOpenChange={(open: boolean) => { setConfirmDialog(prev => ({ ...prev, isOpen: open })); if (!open) setHardDeleteConfirmText('') }}>
+      <Dialog open={confirmDialog.isOpen} onOpenChange={(open: boolean) => { setConfirmDialog(prev => ({ ...prev, isOpen: open })); if (!open) { setHardDeleteConfirmText(''); setDeleteUserTarget(null) } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className={confirmDialog.hardDelete ? "text-red-600 dark:text-red-400" : ""}>{confirmDialog.title}</DialogTitle>
+            <DialogTitle className={confirmDialog.hardDelete || deleteMode === 'hard' ? "text-red-600 dark:text-red-400" : ""}>{confirmDialog.title}</DialogTitle>
             <DialogDescription className="whitespace-pre-line">{confirmDialog.message}</DialogDescription>
           </DialogHeader>
           {confirmDialog.loading ? (
@@ -993,7 +1011,57 @@ export function UserManagement() {
               <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
               <p className="text-sm text-muted-foreground">正在查询用户数据，您也可以直接删除...</p>
             </div>
+          ) : deleteUserTarget ? (
+            /* 单个用户删除 - 显示模式选择 */
+            <div className="py-4 space-y-4">
+              <div className="text-sm text-muted-foreground">
+                用户: <span className="font-medium text-foreground">{deleteUserTarget.username}</span>
+              </div>
+              <div className="space-y-3">
+                <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deleteMode === 'soft' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
+                  <input
+                    type="radio"
+                    name="deleteMode"
+                    checked={deleteMode === 'soft'}
+                    onChange={() => setDeleteMode('soft')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-medium">注销用户</div>
+                    <div className="text-sm text-muted-foreground">数据保留，可通过数据库恢复。用户名仍被占用。</div>
+                  </div>
+                </label>
+                <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${deleteMode === 'hard' ? 'border-red-500 bg-red-50 dark:bg-red-950/20' : 'border-border hover:border-red-300'}`}>
+                  <input
+                    type="radio"
+                    name="deleteMode"
+                    checked={deleteMode === 'hard'}
+                    onChange={() => setDeleteMode('hard')}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-medium text-red-600 dark:text-red-400">彻底删除</div>
+                    <div className="text-sm text-muted-foreground">永久删除用户及所有关联数据（令牌、配额等），不可恢复！</div>
+                  </div>
+                </label>
+              </div>
+              {/* 彻底删除需要输入确认 */}
+              {deleteMode === 'hard' && (
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">
+                    请输入 <span className="font-mono bg-red-100 dark:bg-red-900 px-2 py-0.5 rounded">彻底删除</span> 以确认操作：
+                  </p>
+                  <Input
+                    value={hardDeleteConfirmText}
+                    onChange={(e) => setHardDeleteConfirmText(e.target.value)}
+                    placeholder="请输入 彻底删除"
+                    className="border-red-300 focus:border-red-500 focus:ring-red-500"
+                  />
+                </div>
+              )}
+            </div>
           ) : confirmDialog.details && (
+            /* 批量删除 - 显示用户列表 */
             <div className="py-4 space-y-4">
               <div>
                 <p className="text-sm text-muted-foreground mb-2">将{confirmDialog.hardDelete ? '彻底' : ''}删除以下用户（显示前20个）：</p>
@@ -1025,15 +1093,15 @@ export function UserManagement() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setConfirmDialog(prev => ({ ...prev, isOpen: false })); setHardDeleteConfirmText('') }}>
+            <Button variant="outline" onClick={() => { setConfirmDialog(prev => ({ ...prev, isOpen: false })); setHardDeleteConfirmText(''); setDeleteUserTarget(null) }}>
               取消
             </Button>
             <Button
-              variant={confirmDialog.type === 'danger' ? 'destructive' : 'default'}
+              variant={confirmDialog.type === 'danger' || deleteMode === 'hard' ? 'destructive' : 'default'}
               onClick={confirmDialog.onConfirm}
-              disabled={confirmDialog.requireConfirmText && hardDeleteConfirmText !== '彻底删除'}
+              disabled={(confirmDialog.requireConfirmText || (deleteUserTarget && deleteMode === 'hard')) && hardDeleteConfirmText !== '彻底删除'}
             >
-              {confirmDialog.hardDelete ? '确认彻底删除' : '确定删除'}
+              {deleteUserTarget ? (deleteMode === 'hard' ? '确认彻底删除' : '确认注销') : (confirmDialog.hardDelete ? '确认彻底删除' : '确定删除')}
             </Button>
           </DialogFooter>
         </DialogContent>
