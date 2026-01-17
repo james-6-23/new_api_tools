@@ -375,7 +375,7 @@ export function UserManagement() {
   const executeDeleteUser = async () => {
     if (!deleteUserTarget) return
     
-    const { userId, username, activityLevel } = deleteUserTarget
+    const { userId, activityLevel } = deleteUserTarget
     const hardDelete = deleteMode === 'hard'
     
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
@@ -1099,7 +1099,7 @@ export function UserManagement() {
             <Button
               variant={confirmDialog.type === 'danger' || deleteMode === 'hard' ? 'destructive' : 'default'}
               onClick={confirmDialog.onConfirm}
-              disabled={(confirmDialog.requireConfirmText || (deleteUserTarget && deleteMode === 'hard')) && hardDeleteConfirmText !== '彻底删除'}
+              disabled={((confirmDialog.requireConfirmText ?? false) || (deleteUserTarget !== null && deleteMode === 'hard')) && hardDeleteConfirmText !== '彻底删除'}
             >
               {deleteUserTarget ? (deleteMode === 'hard' ? '确认彻底删除' : '确认注销') : (confirmDialog.hardDelete ? '确认彻底删除' : '确定删除')}
             </Button>
