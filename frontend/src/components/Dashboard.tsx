@@ -6,6 +6,7 @@ import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activi
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
 import { cn } from '../lib/utils'
+import { UserAnalysisDialog } from './shared/UserAnalysisDialog'
 
 type RefreshInterval = 0 | 30 | 60 | 120 | 300 // 秒，0表示关闭
 
@@ -115,6 +116,10 @@ export function Dashboard() {
   // 大型系统刷新提示相关状态
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [refreshEstimate, setRefreshEstimate] = useState<RefreshEstimate | null>(null)
+
+  // 用户分析对话框状态
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
   const [showRefreshConfirm, setShowRefreshConfirm] = useState(false)
   const [refreshProgress, setRefreshProgress] = useState<string | null>(null)
 
@@ -782,6 +787,10 @@ export function Dashboard() {
           valueKey="requests"
           formatValue={(v) => v.toLocaleString()}
           gradient="from-blue-600 to-indigo-600"
+          onUserClick={(userId, username) => {
+            setSelectedUser({ id: userId, username })
+            setAnalysisDialogOpen(true)
+          }}
         />
         <RankingCard
           title="土豪榜首"
@@ -791,8 +800,20 @@ export function Dashboard() {
           valueKey="quota"
           formatValue={(v) => `$${(v / 500000).toFixed(2)}`}
           gradient="from-emerald-600 to-teal-600"
+          onUserClick={(userId, username) => {
+            setSelectedUser({ id: userId, username })
+            setAnalysisDialogOpen(true)
+          }}
         />
       </div>
+
+      {/* User Analysis Dialog */}
+      <UserAnalysisDialog
+        open={analysisDialogOpen}
+        onOpenChange={setAnalysisDialogOpen}
+        userId={selectedUser?.id}
+        username={selectedUser?.username}
+      />
     </div>
   )
 }
@@ -881,9 +902,10 @@ interface RankingCardProps {
   valueKey: 'requests' | 'quota'
   formatValue: (v: number) => string
   gradient: string
+  onUserClick?: (userId: number, username: string) => void
 }
 
-function RankingCard({ title, subtitle, icon: Icon, users, valueKey, formatValue, gradient }: RankingCardProps) {
+function RankingCard({ title, subtitle, icon: Icon, users, valueKey, formatValue, gradient, onUserClick }: RankingCardProps) {
   return (
     <div className={`bg-gradient-to-br ${gradient} rounded-xl shadow-lg p-6 text-white relative overflow-hidden group hover:shadow-xl transition-all duration-300`}>
       {/* Background Pattern */}
@@ -900,14 +922,19 @@ function RankingCard({ title, subtitle, icon: Icon, users, valueKey, formatValue
       {users.length > 0 ? (
         <div className="mt-4 space-y-2 relative z-10">
           {users.map((user, index) => (
-            <div key={user.user_id} className="flex items-center gap-3 bg-white/10 px-3 py-2 rounded-lg backdrop-blur-sm border border-white/10">
+            <div
+              key={user.user_id}
+              className="flex items-center gap-3 bg-white/10 px-3 py-2 rounded-lg backdrop-blur-sm border border-white/10 cursor-pointer hover:bg-white/20 transition-all duration-200"
+              onClick={() => onUserClick?.(user.user_id, user.username)}
+              title="点击查看用户行为分析"
+            >
               <span className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-sm font-bold">
                 {index + 1}
               </span>
               <div className="h-8 w-8 rounded-full bg-white text-blue-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
                 {user.username.charAt(0).toUpperCase()}
               </div>
-              <span className="font-medium truncate flex-1">{user.username}</span>
+              <span className="font-medium truncate flex-1 hover:underline">{user.username}</span>
               <span className="text-white/90 font-semibold tabular-nums">{formatValue(user[valueKey])}</span>
             </div>
           ))}

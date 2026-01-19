@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **统一用户名点击行为**：前端所有显示用户名的地方现在可点击查看用户行为分析
+  - 新增共享组件 `UserAnalysisDialog.tsx`：统一的用户行为分析对话框
+  - 新增类型定义 `types/user.ts`：共享的 UserAnalysis 接口和常量
+  - 充值记录页面 (TopUps)：用户名可点击打开分析对话框
+  - 仪表板页面 (Dashboard)：请求之王和土豪榜首排行榜用户名可点击
+  - 兑换码管理页面 (Redemptions)：重构使用共享组件，减少约 250 行重复代码
+  - 支持时间窗口切换 (1h/3h/6h/12h/24h/3d/7d)
+  - 显示账户额度、风险标志、请求统计、模型偏好、IP 来源、最近轨迹
+
 - **Uptime-Kuma 兼容 API**：新增与 Uptime-Kuma 格式兼容的模型状态监控端点（Python 和 Go 双版本）
   - Python: `backend/app/uptime_kuma_routes.py`
   - Go: `backend-go/internal/service/uptimekuma.go`, `backend-go/internal/handler/uptimekuma.go`

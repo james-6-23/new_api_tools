@@ -10,6 +10,7 @@ import { Select } from './ui/select'
 import { Input } from './ui/input'
 import { StatCard } from './StatCard'
 import { cn } from '../lib/utils'
+import { UserAnalysisDialog } from './shared/UserAnalysisDialog'
 
 interface TopUpRecord {
   id: number
@@ -74,6 +75,8 @@ export function TopUps() {
   const [refundingId, setRefundingId] = useState<number | null>(null)
   const [showRefundModal, setShowRefundModal] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<TopUpRecord | null>(null)
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -357,8 +360,17 @@ export function TopUps() {
                     <TableRow key={record.id} className="hover:bg-muted/50">
                       <TableCell className="font-mono text-xs text-muted-foreground">{record.id}</TableCell>
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{record.username || '未知用户'}</span>
+                        <div
+                          className="flex flex-col cursor-pointer hover:bg-muted/50 rounded px-2 py-1 -mx-2 -my-1 transition-colors"
+                          onClick={() => {
+                            setSelectedUser({ id: record.user_id, username: record.username || '未知用户' })
+                            setAnalysisDialogOpen(true)
+                          }}
+                          title="点击查看用户行为分析"
+                        >
+                          <span className="font-medium text-primary hover:underline">
+                            {record.username || '未知用户'}
+                          </span>
                           <span className="text-xs text-muted-foreground">ID: {record.user_id}</span>
                         </div>
                       </TableCell>
@@ -496,6 +508,14 @@ export function TopUps() {
           </Card>
         </div>
       )}
+
+      {/* User Analysis Dialog */}
+      <UserAnalysisDialog
+        open={analysisDialogOpen}
+        onOpenChange={setAnalysisDialogOpen}
+        userId={selectedUser?.id}
+        username={selectedUser?.username}
+      />
     </div>
   )
 }
