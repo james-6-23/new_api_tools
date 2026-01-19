@@ -147,7 +147,11 @@ export function Redemptions() {
 
   const handleSelectOne = (id: number, checked: boolean) => {
     const newSelected = new Set(selectedIds)
-    checked ? newSelected.add(id) : newSelected.delete(id)
+    if (checked) {
+      newSelected.add(id)
+    } else {
+      newSelected.delete(id)
+    }
     setSelectedIds(newSelected)
   }
 

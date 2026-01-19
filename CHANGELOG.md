@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **前端依赖激进升级**：将所有核心依赖升级到最新版本（方案 B）
+  - **Vite**: 5.0.8 → 7.3.1（跨 2 个大版本）
+  - **@vitejs/plugin-react**: 4.2.1 → 5.1.2
+  - **Tailwind CSS**: 3.4.0 → 4.1.18（完全重写，配置从 JS 迁移到 CSS）
+  - **ESLint**: 8.55.0 → 9.39.2（强制使用 Flat Config）
+  - **TypeScript ESLint**: 6.14.0 → 8.53.0
+  - **lucide-react**: 0.468.0 → 0.562.0
+  - **tailwind-merge**: 2.6.0 → 3.4.0
+  - **eslint-plugin-react-hooks**: 4.6.0 → 7.0.1
+  - 删除 `tailwind.config.js` 和 `postcss.config.js`（Tailwind v4 不再需要）
+  - 新增 `eslint.config.js`（ESLint 9 Flat Config 格式）
+  - 新增 `@tailwindcss/vite` 插件集成
+  - 修复 `src/index.css` 中的 `@apply` 指令兼容性（改用原生 CSS）
+  - 修复代码中的 ESLint 错误和 TypeScript 类型问题
+  - 性能提升：Tailwind 增量构建速度提升 100 倍，Vite 冷启动和热更新优化
+
 ### Added
 - **统一用户名点击行为**：前端所有显示用户名的地方现在可点击查看用户行为分析
   - 新增共享组件 `UserAnalysisDialog.tsx`：统一的用户行为分析对话框
