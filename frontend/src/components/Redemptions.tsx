@@ -10,7 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select } from './ui/select'
 import { Input } from './ui/input'
 import { StatCard } from './StatCard'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 import { cn } from '../lib/utils'
+import { UserAnalysisDialog } from './shared/UserAnalysisDialog'
 
 interface RedemptionCode {
   id: number
@@ -22,6 +24,8 @@ interface RedemptionCode {
   used_user_id: number
   expired_time: number
   status: 'unused' | 'used' | 'expired'
+  redeemed_by?: number
+  redeemer_name?: string
 }
 
 interface RedemptionStatistics {
@@ -45,6 +49,9 @@ interface PaginatedResponse {
 
 type StatusFilter = '' | 'unused' | 'used' | 'expired'
 
+// 额度换算常量: 1 USD = 500000 quota units
+const QUOTA_PER_USD = 500000
+
 export function Redemptions() {
   const { showToast } = useToast()
   const { token } = useAuth()
@@ -65,6 +72,10 @@ export function Redemptions() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: 'single' | 'batch'; id?: number }>({ open: false, type: 'single' })
   const [deleting, setDeleting] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+
+  // 用户分析弹窗状态
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -117,12 +128,18 @@ export function Redemptions() {
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
   useEffect(() => { setPage(1) }, [nameFilter, statusFilter, startDate, endDate])
 
+  // 打开用户分析弹窗
+  const openUserAnalysis = (userId: number, username: string) => {
+    setSelectedUser({ id: userId, username })
+    setAnalysisDialogOpen(true)
+  }
+
   const formatTimestamp = (ts: number) => {
     if (!ts || ts <= 0) return '-'
     return new Date(ts * 1000).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
 
-  const formatQuota = (quota: number) => `$${(quota / 500000).toFixed(2)}`
+  const formatQuota = (quota: number) => `$${(quota / QUOTA_PER_USD).toFixed(2)}`
 
   const handleSelectAll = (checked: boolean) => {
     setSelectedIds(checked ? new Set(codes.map(c => c.id)) : new Set())
@@ -130,7 +147,11 @@ export function Redemptions() {
 
   const handleSelectOne = (id: number, checked: boolean) => {
     const newSelected = new Set(selectedIds)
-    checked ? newSelected.add(id) : newSelected.delete(id)
+    if (checked) {
+      newSelected.add(id)
+    } else {
+      newSelected.delete(id)
+    }
     setSelectedIds(newSelected)
   }
 
@@ -378,9 +399,28 @@ export function Redemptions() {
                       <TableCell className="font-medium text-sm">{code.name}</TableCell>
                       <TableCell className="font-medium text-green-600">{formatQuota(code.quota)}</TableCell>
                       <TableCell>
-                        <Badge variant={code.status === 'unused' ? 'success' : code.status === 'used' ? 'secondary' : 'destructive'}>
-                          {code.status === 'unused' ? '未使用' : code.status === 'used' ? '已使用' : '已过期'}
-                        </Badge>
+                        {code.status === 'used' && code.redeemed_by ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge
+                                  variant="secondary"
+                                  className="cursor-pointer hover:bg-secondary/80"
+                                  onClick={() => openUserAnalysis(code.redeemed_by!, code.redeemer_name || `用户${code.redeemed_by}`)}
+                                >
+                                  已使用
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{code.redeemer_name || `ID: ${code.redeemed_by}`}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <Badge variant={code.status === 'unused' ? 'success' : 'destructive'}>
+                            {code.status === 'unused' ? '未使用' : '已过期'}
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{formatTimestamp(code.created_time)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -443,6 +483,15 @@ export function Redemptions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* User Analysis Dialog */}
+      <UserAnalysisDialog
+        open={analysisDialogOpen}
+        onOpenChange={setAnalysisDialogOpen}
+        userId={selectedUser?.id}
+        username={selectedUser?.username}
+        defaultWindow="24h"
+      />
     </div>
   )
 }

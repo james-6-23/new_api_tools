@@ -1560,7 +1560,7 @@ export function RealtimeRanking() {
         setSharedIps(res.data?.items || [])
         showToast('success', '已刷新')
       }
-    } catch (e) {
+    } catch (_e) {
       showToast('error', '刷新失败')
     } finally {
       setIpRefreshing(prev => ({ ...prev, shared: false }))
@@ -1577,7 +1577,7 @@ export function RealtimeRanking() {
         setMultiIpTokens(res.data?.items || [])
         showToast('success', '已刷新')
       }
-    } catch (e) {
+    } catch (_e) {
       showToast('error', '刷新失败')
     } finally {
       setIpRefreshing(prev => ({ ...prev, tokens: false }))
@@ -1594,7 +1594,7 @@ export function RealtimeRanking() {
         setMultiIpUsers(res.data?.items || [])
         showToast('success', '已刷新')
       }
-    } catch (e) {
+    } catch (_e) {
       showToast('error', '刷新失败')
     } finally {
       setIpRefreshing(prev => ({ ...prev, users: false }))

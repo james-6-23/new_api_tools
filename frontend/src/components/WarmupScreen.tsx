@@ -71,7 +71,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
         } else {
           setError(data.message || '获取预热状态失败')
         }
-      } catch (e) {
+      } catch (_e) {
         if (mounted) {
           setError('无法连接到服务器，请检查网络连接')
         }
