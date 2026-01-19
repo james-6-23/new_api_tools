@@ -149,13 +149,13 @@ export function UserAnalysisDialog({
                 <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-muted/30 border">
                   <Users className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">账户额度:</span>
-                  <span className="font-semibold text-primary">{formatQuota(analysis.user.quota || 0)}</span>
+                  <span className="font-semibold text-primary">{formatQuota((analysis.user.quota || 0) + (analysis.user.used_quota || 0))}</span>
                   <span className="text-muted-foreground">|</span>
                   <span className="text-sm text-muted-foreground">已使用:</span>
                   <span className="font-semibold">{formatQuota(analysis.user.used_quota || 0)}</span>
                   <span className="text-muted-foreground">|</span>
                   <span className="text-sm text-muted-foreground">剩余:</span>
-                  <span className="font-semibold text-green-600">{formatQuota((analysis.user.quota || 0) - (analysis.user.used_quota || 0))}</span>
+                  <span className="font-semibold text-green-600">{formatQuota(analysis.user.quota || 0)}</span>
                 </div>
               )}
 

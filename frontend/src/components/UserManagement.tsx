@@ -849,7 +849,7 @@ export function UserManagement() {
                     <TableHead className="hidden sm:table-cell">角色</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead className="hidden lg:table-cell">Linux.do</TableHead>
-                    <TableHead className="text-right">额度 (USD)</TableHead>
+                    <TableHead className="text-right">剩余额度</TableHead>
                     <TableHead className="text-right hidden sm:table-cell">已用</TableHead>
                     <TableHead className="text-right hidden md:table-cell">请求数</TableHead>
                     <TableHead className="hidden md:table-cell">最后请求</TableHead>
