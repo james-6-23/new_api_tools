@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -238,6 +241,11 @@ const SELECTED_MODELS_KEY = 'model_status_selected_models'
 const REFRESH_INTERVAL_KEY = 'model_status_refresh_interval'
 const TIME_WINDOW_KEY = 'model_status_time_window'
 const THEME_KEY = 'model_status_theme'
+const SORT_MODE_KEY = 'model_status_sort_mode'
+const CUSTOM_ORDER_KEY = 'model_status_custom_order'
+
+// Sort mode type
+type SortMode = 'default' | 'availability' | 'custom'
 
 export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps) {
   const { token } = useAuth()
@@ -265,6 +273,15 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   })
   const [countdown, setCountdown] = useState(refreshInterval)
   const refreshIntervalRef = useRef(refreshInterval)
+
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    const saved = localStorage.getItem(SORT_MODE_KEY)
+    return (saved as SortMode) || 'default'
+  })
+  const [customOrder, setCustomOrder] = useState<string[]>(() => {
+    const saved = localStorage.getItem(CUSTOM_ORDER_KEY)
+    return saved ? JSON.parse(saved) : []
+  })
 
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
@@ -369,6 +386,23 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     }
   }, [apiUrl, getAuthHeaders])
 
+  // Save sort config to backend cache
+  const saveSortConfigToBackend = useCallback(async (mode: SortMode, order?: string[]) => {
+    try {
+      await fetch(`${apiUrl}/api/model-status/config/sort`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ sort_mode: mode, custom_order: order }),
+      })
+      localStorage.setItem(SORT_MODE_KEY, mode)
+      if (order) {
+        localStorage.setItem(CUSTOM_ORDER_KEY, JSON.stringify(order))
+      }
+    } catch (error) {
+      console.error('Failed to save sort config:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
   // Load config from backend on mount
   const loadConfigFromBackend = useCallback(async () => {
     try {
@@ -393,6 +427,14 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           setRefreshInterval(data.refresh_interval)
           setCountdown(data.refresh_interval)
           localStorage.setItem(REFRESH_INTERVAL_KEY, data.refresh_interval.toString())
+        }
+        if (data.sort_mode) {
+          setSortMode(data.sort_mode as SortMode)
+          localStorage.setItem(SORT_MODE_KEY, data.sort_mode)
+        }
+        if (data.custom_order && data.custom_order.length > 0) {
+          setCustomOrder(data.custom_order)
+          localStorage.setItem(CUSTOM_ORDER_KEY, JSON.stringify(data.custom_order))
         }
         return data.data || []
       }
@@ -548,6 +590,73 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const handleRefresh = () => {
     setCountdown(refreshIntervalRef.current)
     fetchModelStatuses(true)
+  }
+
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Sorted model statuses based on sort mode
+  const sortedModelStatuses = useMemo(() => {
+    if (modelStatuses.length === 0) return []
+
+    switch (sortMode) {
+      case 'availability':
+        // Sort by success rate descending
+        return [...modelStatuses].sort((a, b) => b.success_rate - a.success_rate)
+      case 'custom':
+        if (customOrder.length === 0) return modelStatuses
+        // Sort by custom order
+        return [...modelStatuses].sort((a, b) => {
+          const indexA = customOrder.indexOf(a.model_name)
+          const indexB = customOrder.indexOf(b.model_name)
+          // Models not in customOrder go to the end
+          if (indexA === -1 && indexB === -1) return 0
+          if (indexA === -1) return 1
+          if (indexB === -1) return -1
+          return indexA - indexB
+        })
+      default:
+        return modelStatuses
+    }
+  }, [modelStatuses, sortMode, customOrder])
+
+  // Handle drag end for reordering
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      const oldIndex = sortedModelStatuses.findIndex(m => m.model_name === active.id)
+      const newIndex = sortedModelStatuses.findIndex(m => m.model_name === over.id)
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        // Create new order
+        const newOrder = sortedModelStatuses.map(m => m.model_name)
+        const [movedItem] = newOrder.splice(oldIndex, 1)
+        newOrder.splice(newIndex, 0, movedItem)
+
+        // Update state and save
+        setCustomOrder(newOrder)
+        setSortMode('custom')
+        saveSortConfigToBackend('custom', newOrder)
+        showToast('success', '已切换为自定义排序')
+      }
+    }
+  }
+
+  // Handle availability sort button click
+  const handleAvailabilitySort = () => {
+    setSortMode('availability')
+    saveSortConfigToBackend('availability')
+    showToast('success', '已按成功率排序')
   }
 
   const toggleModelSelection = (model: string) => {
@@ -814,6 +923,18 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 )}
               </div>
 
+              {/* Availability Sort Button */}
+              <Button
+                variant={sortMode === 'availability' ? 'default' : 'outline'}
+                size="sm"
+                onClick={handleAvailabilitySort}
+                className="h-9"
+                title="按成功率从高到低排序"
+              >
+                <ArrowUpDown className="h-4 w-4 mr-2" />
+                高可用排序
+              </Button>
+
               {/* Manual Refresh */}
               <Button onClick={handleRefresh} disabled={refreshing}>
                 {refreshing ? (
@@ -845,12 +966,23 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       )}
 
       {/* Model Status Cards */}
-      {modelStatuses.length > 0 ? (
-        <div className="grid gap-4">
-          {modelStatuses.map(model => (
-            <ModelStatusCard key={model.model_name} model={model} />
-          ))}
-        </div>
+      {sortedModelStatuses.length > 0 ? (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={sortedModelStatuses.map(m => m.model_name)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div className="grid gap-4">
+              {sortedModelStatuses.map(model => (
+                <SortableModelCard key={model.model_name} model={model} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       ) : (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -892,6 +1024,35 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
 
 interface ModelStatusCardProps {
   model: ModelStatus
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>
+}
+
+// Sortable wrapper for ModelStatusCard
+function SortableModelCard({ model }: { model: ModelStatus }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: model.model_name })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 'auto',
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <ModelStatusCard
+        model={model}
+        dragHandleProps={listeners}
+      />
+    </div>
+  )
 }
 
 // Embed Help Modal Component
@@ -1098,7 +1259,7 @@ function EmbedHelpModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function ModelStatusCard({ model }: ModelStatusCardProps) {
+function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
   const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
@@ -1127,6 +1288,16 @@ function ModelStatusCard({ model }: ModelStatusCardProps) {
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
+            {/* Drag Handle */}
+            {dragHandleProps && (
+              <div
+                {...dragHandleProps}
+                className="flex items-center justify-center w-6 h-6 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors"
+                title="拖拽排序"
+              >
+                <GripVertical className="h-4 w-4" />
+              </div>
+            )}
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-muted/50 flex-shrink-0">
               <ModelLogo modelName={model.model_name} size={20} />
             </div>
