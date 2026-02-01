@@ -364,6 +364,8 @@ class UserManagementService:
         page: int = 1,
         page_size: int = 20,
         activity_filter: Optional[ActivityLevel] = None,
+        group_filter: Optional[str] = None,
+        source_filter: Optional[str] = None,
         search: Optional[str] = None,
         order_by: str = "request_count",
         order_dir: str = "DESC",
@@ -380,6 +382,8 @@ class UserManagementService:
             page: 页码
             page_size: 每页数量
             activity_filter: 活跃度筛选
+            group_filter: 分组筛选
+            source_filter: 注册来源筛选
             search: 搜索关键词
             order_by: 排序字段
             order_dir: 排序方向
@@ -393,15 +397,17 @@ class UserManagementService:
         needs_logs_join = activity_filter in [ActivityLevel.ACTIVE, ActivityLevel.INACTIVE, ActivityLevel.VERY_INACTIVE]
 
         if needs_logs_join:
-            return self._get_users_with_activity(page, page_size, activity_filter, search, order_by, order_dir)
+            return self._get_users_with_activity(page, page_size, activity_filter, group_filter, source_filter, search, order_by, order_dir)
         else:
-            return self._get_users_fast(page, page_size, activity_filter, search, order_by, order_dir)
+            return self._get_users_fast(page, page_size, activity_filter, group_filter, source_filter, search, order_by, order_dir)
 
     def _get_users_fast(
         self,
         page: int,
         page_size: int,
         activity_filter: Optional[ActivityLevel],
+        group_filter: Optional[str],
+        source_filter: Optional[str],
         search: Optional[str],
         order_by: str,
         order_dir: str,
@@ -442,6 +448,25 @@ class UserManagementService:
         # 从未请求筛选
         if activity_filter == ActivityLevel.NEVER:
             where_clauses.append("request_count = 0")
+
+        # 分组筛选
+        if group_filter:
+            where_clauses.append(f"{group_col} = :group_filter")
+            params["group_filter"] = group_filter
+
+        # 注册来源筛选
+        if source_filter:
+            source_conditions = {
+                "github": "github_id IS NOT NULL AND github_id != ''",
+                "wechat": "wechat_id IS NOT NULL AND wechat_id != ''",
+                "telegram": "telegram_id IS NOT NULL AND telegram_id != ''",
+                "discord": "discord_id IS NOT NULL AND discord_id != ''",
+                "oidc": "oidc_id IS NOT NULL AND oidc_id != ''",
+                "linux_do": "linux_do_id IS NOT NULL AND linux_do_id != ''",
+                "password": "(github_id IS NULL OR github_id = '') AND (wechat_id IS NULL OR wechat_id = '') AND (telegram_id IS NULL OR telegram_id = '') AND (discord_id IS NULL OR discord_id = '') AND (oidc_id IS NULL OR oidc_id = '') AND (linux_do_id IS NULL OR linux_do_id = '')",
+            }
+            if source_filter in source_conditions:
+                where_clauses.append(f"({source_conditions[source_filter]})")
 
         where_sql = ""
         if where_clauses:
@@ -512,6 +537,8 @@ class UserManagementService:
         page: int,
         page_size: int,
         activity_filter: Optional[ActivityLevel],
+        group_filter: Optional[str],
+        source_filter: Optional[str],
         search: Optional[str],
         order_by: str,
         order_dir: str,
@@ -585,6 +612,27 @@ class UserManagementService:
             search_clause = " AND (u.username LIKE :search OR COALESCE(u.display_name, '') LIKE :search OR COALESCE(u.email, '') LIKE :search OR COALESCE(u.linux_do_id, '') LIKE :search OR COALESCE(u.aff_code, '') LIKE :search)"
             params["search"] = f"%{search}%"
 
+        # 分组筛选
+        group_clause = ""
+        if group_filter:
+            group_clause = f" AND {group_col} = :group_filter"
+            params["group_filter"] = group_filter
+
+        # 注册来源筛选
+        source_clause = ""
+        if source_filter:
+            source_conditions = {
+                "github": "u.github_id IS NOT NULL AND u.github_id != ''",
+                "wechat": "u.wechat_id IS NOT NULL AND u.wechat_id != ''",
+                "telegram": "u.telegram_id IS NOT NULL AND u.telegram_id != ''",
+                "discord": "u.discord_id IS NOT NULL AND u.discord_id != ''",
+                "oidc": "u.oidc_id IS NOT NULL AND u.oidc_id != ''",
+                "linux_do": "u.linux_do_id IS NOT NULL AND u.linux_do_id != ''",
+                "password": "(u.github_id IS NULL OR u.github_id = '') AND (u.wechat_id IS NULL OR u.wechat_id = '') AND (u.telegram_id IS NULL OR u.telegram_id = '') AND (u.discord_id IS NULL OR u.discord_id = '') AND (u.oidc_id IS NULL OR u.oidc_id = '') AND (u.linux_do_id IS NULL OR u.linux_do_id = '')",
+            }
+            if source_filter in source_conditions:
+                source_clause = f" AND ({source_conditions[source_filter]})"
+
         # 使用 EXISTS 子查询构建活跃度筛选条件（比 JOIN + GROUP BY 快 100 倍以上）
         activity_clause = ""
         if activity_filter == ActivityLevel.ACTIVE:
@@ -646,6 +694,8 @@ class UserManagementService:
                 FROM users u
                 WHERE u.deleted_at IS NULL
                 {search_clause}
+                {group_clause}
+                {source_clause}
                 {activity_clause}
                 ORDER BY {order_column} {order_dir_str}
                 LIMIT :limit OFFSET :offset
@@ -658,6 +708,8 @@ class UserManagementService:
                 FROM users u
                 WHERE u.deleted_at IS NULL
                 {search_clause}
+                {group_clause}
+                {source_clause}
                 {activity_clause}
             """
             count_result = self._db.execute(count_sql, params)
