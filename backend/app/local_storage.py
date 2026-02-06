@@ -162,6 +162,29 @@ class LocalStorage:
                 ON ai_audit_logs(status)
             """)
 
+            # Auto group logs table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS auto_group_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    username TEXT DEFAULT '',
+                    old_group TEXT DEFAULT 'default',
+                    new_group TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    source TEXT DEFAULT '',
+                    operator TEXT DEFAULT 'system',
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_auto_group_logs_time
+                ON auto_group_logs(created_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_auto_group_logs_user
+                ON auto_group_logs(user_id)
+            """)
+
             conn.commit()
             logger.info(f"LocalStorage initialized at {self.db_path}")
 
@@ -643,6 +666,146 @@ class LocalStorage:
             cursor.execute("DELETE FROM ai_audit_logs")
             conn.commit()
             return cursor.rowcount
+
+    # ==================== Auto Group Log Methods ====================
+
+    def add_auto_group_log(
+        self,
+        user_id: int,
+        username: str,
+        old_group: str,
+        new_group: str,
+        action: str,
+        source: str = "",
+        operator: str = "system",
+    ) -> int:
+        """添加自动分组日志记录"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO auto_group_logs
+                (user_id, username, old_group, new_group, action, source, operator, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(user_id),
+                    username or "",
+                    old_group or "default",
+                    new_group,
+                    action,
+                    source or "",
+                    operator or "system",
+                    int(time.time()),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_auto_group_logs(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        action: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """获取自动分组日志列表"""
+        page = max(1, int(page))
+        page_size = max(1, min(200, int(page_size)))
+        offset = (page - 1) * page_size
+
+        where = []
+        params: List[Any] = []
+        if action:
+            where.append("action = ?")
+            params.append(action)
+        if user_id is not None:
+            where.append("user_id = ?")
+            params.append(int(user_id))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM auto_group_logs {where_sql}", params)
+            total = int(cursor.fetchone()["cnt"])
+
+            cursor.execute(
+                f"""
+                SELECT id, user_id, username, old_group, new_group, action, source, operator, created_at
+                FROM auto_group_logs
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, page_size, offset],
+            )
+            rows = cursor.fetchall()
+
+        items: List[Dict[str, Any]] = []
+        for r in rows:
+            items.append({
+                "id": int(r["id"]),
+                "user_id": int(r["user_id"]),
+                "username": r["username"] or "",
+                "old_group": r["old_group"] or "default",
+                "new_group": r["new_group"] or "",
+                "action": r["action"],
+                "source": r["source"] or "",
+                "operator": r["operator"] or "system",
+                "created_at": int(r["created_at"]),
+            })
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+
+    def get_auto_group_log_by_id(self, log_id: int) -> Optional[Dict[str, Any]]:
+        """获取单条自动分组日志"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, user_id, username, old_group, new_group, action, source, operator, created_at
+                FROM auto_group_logs
+                WHERE id = ?
+                """,
+                [log_id],
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "id": int(row["id"]),
+                "user_id": int(row["user_id"]),
+                "username": row["username"] or "",
+                "old_group": row["old_group"] or "default",
+                "new_group": row["new_group"] or "",
+                "action": row["action"],
+                "source": row["source"] or "",
+                "operator": row["operator"] or "system",
+                "created_at": int(row["created_at"]),
+            }
+
+    def cleanup_old_auto_group_logs(self, max_age_days: int = 90) -> int:
+        """清理旧的自动分组日志"""
+        cutoff_time = int(time.time()) - (max_age_days * 86400)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM auto_group_logs WHERE created_at < ?",
+                (cutoff_time,)
+            )
+            conn.commit()
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old auto group logs")
+            return deleted
 
     # ==================== Utility Methods ====================
 
