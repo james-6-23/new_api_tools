@@ -87,6 +87,7 @@ class BatchProcessResponse(BaseModel):
     remaining_logs: int
     last_log_id: int
     completed: bool
+    timed_out: bool = False
 
 
 class SyncStatusResponse(BaseModel):

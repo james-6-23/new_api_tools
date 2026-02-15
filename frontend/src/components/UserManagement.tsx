@@ -67,7 +67,7 @@ interface IPSwitchAnalysis {
 // 用户分析相关类型
 interface UserAnalysis {
   range: { start_time: number; end_time: number; window_seconds: number }
-  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null }
+  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null; linux_do_id?: string | null }
   summary: {
     total_requests: number
     success_requests: number
@@ -154,7 +154,7 @@ export function UserManagement() {
   const [deletingVeryInactive, setDeletingVeryInactive] = useState(false)
   const [deletingNever, setDeletingNever] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  
+
   // 软删除用户清理
   const [softDeletedCount, setSoftDeletedCount] = useState(0)
   const [purgingSoftDeleted, setPurgingSoftDeleted] = useState(false)
@@ -368,16 +368,16 @@ export function UserManagement() {
       title: '删除用户',
       message: `请选择删除方式：`,
       type: 'danger',
-      onConfirm: () => {}, // 占位，实际执行在按钮的 onClick 中处理
+      onConfirm: () => { }, // 占位，实际执行在按钮的 onClick 中处理
     })
   }
 
   const executeDeleteUser = async () => {
     if (!deleteUserTarget) return
-    
+
     const { userId, activityLevel } = deleteUserTarget
     const hardDelete = deleteMode === 'hard'
-    
+
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
     setDeleting(true)
     try {
@@ -421,10 +421,10 @@ export function UserManagement() {
   const previewBatchDelete = async (level: string, hardDelete: boolean = false) => {
     // 重置确认输入
     setHardDeleteConfirmText('')
-    
+
     const levelLabel = level === 'never' ? '从未请求' : level === 'inactive' ? '不活跃' : '非常不活跃'
     const actionLabel = hardDelete ? '彻底删除' : '删除'
-    
+
     // 先立即显示弹窗，带加载状态
     setConfirmDialog({
       isOpen: true,
@@ -454,7 +454,7 @@ export function UserManagement() {
           return
         }
         // 更新弹窗内容
-        const warningText = hardDelete 
+        const warningText = hardDelete
           ? `⚠️ 彻底删除将永久移除用户及所有关联数据（令牌、配额、任务等），此操作不可恢复！`
           : `此操作为软删除，数据可通过数据库恢复。`
         setConfirmDialog(prev => ({
@@ -1123,9 +1123,21 @@ export function UserManagement() {
                   <Eye className="h-5 w-5 text-primary" />
                   用户行为分析
                 </DialogTitle>
-                <DialogDescription className="mt-1.5 flex items-center gap-2">
+                <DialogDescription className="mt-1.5 flex items-center gap-2 flex-wrap">
                   <span>用户: <span className="font-mono text-foreground font-medium">{selectedUser?.username}</span></span>
                   <span className="text-muted-foreground">ID: {selectedUser?.id}</span>
+                  {analysis?.user?.linux_do_id && (
+                    <a
+                      href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${analysis.user.linux_do_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
+                      title="查看 Linux.do 证书"
+                    >
+                      <span>Linux.do:</span>
+                      <span>{analysis.user.linux_do_id}</span>
+                    </a>
+                  )}
                 </DialogDescription>
               </div>
               <Select
@@ -1251,17 +1263,17 @@ export function UserManagement() {
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
                       IP 切换分析
-                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || 
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 ||
                         (analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3)) && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
-                      )}
+                          <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                        )}
                       {(analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && (
                         <Badge variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
                           双栈用户
                         </Badge>
                       )}
                     </h4>
-                    
+
                     {/* 统计卡片 */}
                     <div className="grid grid-cols-4 gap-2">
                       <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
@@ -1284,8 +1296,8 @@ export function UserManagement() {
                       </div>
                       <div className={cn(
                         "rounded-lg border p-2.5 text-center",
-                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 
-                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
                           : "bg-muted/30"
                       )}>
                         <div className={cn(
@@ -1299,7 +1311,7 @@ export function UserManagement() {
                       <div className={cn(
                         "rounded-lg border p-2.5 text-center",
                         analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3
-                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800" 
+                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
                           : "bg-muted/30"
                       )}>
                         <div className={cn(
@@ -1335,10 +1347,10 @@ export function UserManagement() {
                                 key={idx}
                                 className={cn(
                                   "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
-                                  detail.is_dual_stack 
-                                    ? "bg-blue-50/40 dark:bg-blue-900/10" 
-                                    : detail.interval <= 60 
-                                      ? "bg-red-50/40 dark:bg-red-900/10" 
+                                  detail.is_dual_stack
+                                    ? "bg-blue-50/40 dark:bg-blue-900/10"
+                                    : detail.interval <= 60
+                                      ? "bg-red-50/40 dark:bg-red-900/10"
                                       : "bg-background"
                                 )}
                               >
@@ -1455,7 +1467,7 @@ export function UserManagement() {
                       </Badge>
                     )}
                   </h4>
-                  
+
                   {invitedLoading ? (
                     <div className="flex items-center justify-center py-6">
                       <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

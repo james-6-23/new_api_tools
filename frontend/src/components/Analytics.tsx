@@ -96,7 +96,7 @@ export function Analytics() {
     return saved ? parseInt(saved, 10) : DEFAULT_REFRESH_INTERVAL
   })
   const refreshIntervalRef = useRef(refreshInterval)
-  
+
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -121,7 +121,10 @@ export function Analytics() {
   const [processing, setProcessing] = useState(false)
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [isPageRefresh, setIsPageRefresh] = useState(false)
-  
+  const batchAbortRef = useRef(false)
+  const batchStartTimeRef = useRef(0)
+  const batchTotalProcessedRef = useRef(0)
+
   // 从 localStorage 恢复倒计时，或使用默认值
   const [countdown, setCountdown] = useState(() => {
     const saved = sessionStorage.getItem(COUNTDOWN_STORAGE_KEY)
@@ -144,7 +147,7 @@ export function Analytics() {
         const res = await response.json()
         if (res.success && res.data?.settings) {
           const interval = res.data.settings.frontend_refresh_interval || DEFAULT_REFRESH_INTERVAL
-          
+
           // 只有在用户没有手动设置过时，才使用系统推荐值
           const saved = localStorage.getItem(REFRESH_INTERVAL_KEY)
           if (!saved) {
@@ -165,7 +168,7 @@ export function Analytics() {
   useEffect(() => {
     refreshIntervalRef.current = refreshInterval
   }, [refreshInterval])
-  
+
   // 保存刷新间隔到 localStorage
   const handleRefreshIntervalChange = useCallback((val: number) => {
     setRefreshInterval(val)
@@ -180,35 +183,35 @@ export function Analytics() {
       showToast('info', '日志分析自动刷新已关闭')
     }
   }, [showToast])
-  
+
   // 检测是否是浏览器刷新（而不是页面切换）
   useEffect(() => {
     const lastVisit = sessionStorage.getItem(LAST_VISIT_KEY)
     const now = Date.now()
-    
+
     // 如果没有 lastVisit 记录，或者距离上次访问超过 2 秒，认为是浏览器刷新
     if (!lastVisit || (now - parseInt(lastVisit, 10)) > 2000) {
       setIsPageRefresh(true)
       setCountdown(refreshIntervalRef.current)
       sessionStorage.removeItem(COUNTDOWN_STORAGE_KEY)
     }
-    
+
     // 更新最后访问时间
     sessionStorage.setItem(LAST_VISIT_KEY, now.toString())
-    
+
     // 组件卸载时保存倒计时
     return () => {
       sessionStorage.setItem(LAST_VISIT_KEY, Date.now().toString())
     }
   }, [])
-  
+
   // 保存倒计时到 sessionStorage
   useEffect(() => {
     if (countdown > 0) {
       sessionStorage.setItem(COUNTDOWN_STORAGE_KEY, countdown.toString())
     }
   }, [countdown])
-  
+
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
     title: string
@@ -220,7 +223,7 @@ export function Analytics() {
     title: '',
     message: '',
     type: 'warning',
-    onConfirm: () => {},
+    onConfirm: () => { },
   })
 
   // 平滑进度动画：持续缓慢增长，不停顿
@@ -231,7 +234,7 @@ export function Analytics() {
     }
 
     const targetProgress = syncStatus?.progress_percent || 0
-    
+
     // 持续动画，每 100ms 更新一次
     const interval = setInterval(() => {
       setDisplayProgress(prev => {
@@ -243,7 +246,7 @@ export function Analytics() {
           }
           return Math.min(prev, 99.9) // 不超过 99.9%
         }
-        
+
         // 快速追赶到目标进度
         const diff = targetProgress - prev
         const increment = Math.max(0.05, diff * 0.15)
@@ -304,7 +307,7 @@ export function Analytics() {
       setIsPageRefresh(false)
       return
     }
-    
+
     // 浏览器刷新且已初始化，自动处理新日志
     const autoProcess = async () => {
       try {
@@ -321,7 +324,7 @@ export function Analytics() {
         console.error('Auto process on refresh failed:', error)
       }
     }
-    
+
     if (syncStatus.is_synced) {
       autoProcess()
     }
@@ -332,10 +335,10 @@ export function Analytics() {
   useEffect(() => {
     // Don't auto-refresh while batch processing or loading
     if (batchProcessing || loading) return
-    
+
     // syncStatus 未加载时不启动
     if (!syncStatus) return
-    
+
     // 未初始化时不启动自动同步
     if (syncStatus.needs_initial_sync || syncStatus.is_initializing) {
       setCountdown(0) // 不显示倒计时
@@ -380,8 +383,8 @@ export function Analytics() {
         clearInterval(countdownRef.current)
       }
     }
-  // 只依赖关键状态变化，不依赖 syncStatus 的具体值
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 只依赖关键状态变化，不依赖 syncStatus 的具体值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchProcessing, loading, syncStatus?.needs_initial_sync, syncStatus?.is_initializing, apiUrl, refreshInterval])
 
   const processLogs = async () => {
@@ -431,30 +434,76 @@ export function Analytics() {
 
   const startBatchProcess = async () => {
     setBatchProcessing(true)
-    try {
-      const response = await fetch(`${apiUrl}/api/analytics/batch?max_iterations=100`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      })
-      const data = await response.json()
-      if (data.success) {
-        await fetchSyncStatus()
-        if (data.completed) {
-          showToast('success', `同步完成！共处理 ${data.total_processed.toLocaleString()} 条日志`)
-          await fetchAnalytics()
-          setBatchProcessing(false)
-        } else {
-          setTimeout(() => startBatchProcess(), 50)
+    batchAbortRef.current = false
+    batchStartTimeRef.current = Date.now()
+    batchTotalProcessedRef.current = 0
+    let consecutiveFailures = 0
+    const MAX_CONSECUTIVE_FAILURES = 3
+    const MAX_TOTAL_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes total timeout
+
+    const processLoop = async () => {
+      while (!batchAbortRef.current) {
+        // Total timeout protection
+        const elapsed = Date.now() - batchStartTimeRef.current
+        if (elapsed >= MAX_TOTAL_TIMEOUT_MS) {
+          showToast('info', `批处理已运行 ${Math.floor(elapsed / 60000)} 分钟，自动停止。可再次点击继续处理。`)
+          break
         }
-      } else {
-        showToast('error', '批量处理失败')
-        setBatchProcessing(false)
+
+        try {
+          const response = await fetch(`${apiUrl}/api/analytics/batch?max_iterations=100`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          })
+          const data = await response.json()
+
+          if (data.success) {
+            consecutiveFailures = 0 // Reset on success
+            batchTotalProcessedRef.current += (data.total_processed || 0)
+            await fetchSyncStatus()
+
+            if (data.completed) {
+              showToast('success', `同步完成！共处理 ${batchTotalProcessedRef.current.toLocaleString()} 条日志`)
+              await fetchAnalytics()
+              break
+            }
+            // Small delay to avoid overwhelming the server
+            await new Promise(resolve => setTimeout(resolve, 100))
+          } else {
+            consecutiveFailures++
+            console.error('Batch process failed:', data.message)
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+              showToast('error', `连续 ${MAX_CONSECUTIVE_FAILURES} 次批处理失败，已停止。请检查后端日志。`)
+              break
+            }
+            // Wait longer before retry on failure
+            await new Promise(resolve => setTimeout(resolve, 2000))
+          }
+        } catch (error) {
+          consecutiveFailures++
+          console.error('Batch process error:', error)
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            showToast('error', `连续 ${MAX_CONSECUTIVE_FAILURES} 次网络错误，已停止。请检查网络连接。`)
+            break
+          }
+          // Wait before retry on network error
+          await new Promise(resolve => setTimeout(resolve, 3000))
+        }
       }
-    } catch (error) {
-      console.error('Failed to batch process logs:', error)
-      showToast('error', '批量处理失败')
+
+      if (batchAbortRef.current) {
+        showToast('info', '批处理已手动停止')
+        await fetchSyncStatus()
+        await fetchAnalytics()
+      }
       setBatchProcessing(false)
     }
+
+    processLoop()
+  }
+
+  const stopBatchProcess = () => {
+    batchAbortRef.current = true
   }
 
   const resetAnalytics = async () => {
@@ -562,8 +611,8 @@ export function Analytics() {
                   } ({displayProgress.toFixed(2)}%)
                 </p>
                 <div className="mt-3">
-                  <Progress 
-                    value={displayProgress} 
+                  <Progress
+                    value={displayProgress}
                     className="h-2"
                     indicatorClassName={syncStatus.is_initializing ? 'bg-primary' : 'bg-yellow-500'}
                   />
@@ -581,6 +630,15 @@ export function Analytics() {
                 {batchProcessing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
                 {batchProcessing ? '同步中...' : syncStatus.is_initializing ? '继续同步' : '开始同步'}
               </Button>
+              {batchProcessing && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={stopBatchProcess}
+                >
+                  停止
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -604,9 +662,9 @@ export function Analytics() {
               {/* 刷新间隔选择和倒计时 - 只有初始化完成后才显示 */}
               {syncStatus && !syncStatus.needs_initial_sync && !syncStatus.is_initializing && (
                 <div className="relative" ref={dropdownRef}>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
                     className="h-9 min-w-[100px]"
                   >
@@ -620,7 +678,7 @@ export function Analytics() {
                     )}
                     <ChevronDown className="h-3 w-3 ml-1" />
                   </Button>
-                  
+
                   {showIntervalDropdown && (
                     <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
                       <div className="p-2 border-b">
@@ -834,7 +892,7 @@ function RankBadge({ rank }: { rank: number }) {
     3: 'bg-orange-300 text-orange-800',
   }
   if (rank <= 3) {
-    return <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${colors[rank as 1|2|3]}`}>{rank}</span>
+    return <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${colors[rank as 1 | 2 | 3]}`}>{rank}</span>
   }
   return <span className="inline-flex items-center justify-center w-6 h-6 text-muted-foreground text-sm">{rank}</span>
 }

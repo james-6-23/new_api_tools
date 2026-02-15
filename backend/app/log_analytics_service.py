@@ -474,17 +474,18 @@ class LogAnalyticsService:
     def get_total_logs_count(self, use_cache: bool = True) -> int:
         """
         Get total count of logs (success + failure) in the main database.
+        Only counts type=2 (success) and type=5 (failure) logs.
         Uses cached value to avoid expensive COUNT(*) on large tables.
 
         Args:
-            use_cache: If True, return cached value if available and fresh (within 5 minutes).
+            use_cache: If True, return cached value if available and fresh (within 10 minutes).
 
         Returns:
             Total number of logs with type=2 or type=5.
         """
         cache_key = "cached_total_logs_count"
         cache_time_key = "cached_total_logs_count_time"
-        cache_ttl = 300  # 5 minutes
+        cache_ttl = 600  # 10 minutes (increased for stability)
 
         if use_cache:
             cached_count = self._get_state(cache_key, 0)
@@ -493,41 +494,15 @@ class LogAnalyticsService:
             if cached_count > 0 and (now - cached_time) < cache_ttl:
                 return cached_count
 
-        # Use approximate count for MySQL/PostgreSQL to avoid full table scan
-        # This is much faster than COUNT(*) on large tables
+        # IMPORTANT: Always use exact count with type filter.
+        # Previously used information_schema/pg_stat approximate counts which
+        # include ALL log types, causing progress to never reach 100% because
+        # we only process type=2 and type=5 logs.
         try:
             self._db.connect()
-            
-            # Try to get approximate count first (fast)
-            if self._db.config.engine.value == "mysql":
-                # MySQL: use information_schema for approximate count
-                approx_sql = """
-                    SELECT TABLE_ROWS as cnt 
-                    FROM information_schema.TABLES 
-                    WHERE TABLE_SCHEMA = :db_name AND TABLE_NAME = 'logs'
-                """
-                result = self._db.execute(approx_sql, {"db_name": self._db.config.database})
-                if result and result[0].get("cnt"):
-                    count = int(result[0]["cnt"])
-                    # Cache the result
-                    self._set_state(cache_key, count)
-                    self._set_state(cache_time_key, int(time.time()))
-                    return count
-            elif self._db.config.engine.value == "postgresql":
-                # PostgreSQL: use pg_stat_user_tables for approximate count
-                approx_sql = """
-                    SELECT n_live_tup as cnt 
-                    FROM pg_stat_user_tables 
-                    WHERE relname = 'logs'
-                """
-                result = self._db.execute(approx_sql, {})
-                if result and result[0].get("cnt"):
-                    count = int(result[0]["cnt"])
-                    self._set_state(cache_key, count)
-                    self._set_state(cache_time_key, int(time.time()))
-                    return count
 
-            # Fallback: exact count (slow on large tables, but cached)
+            # Use exact count with type filter - this is the only accurate way
+            # The result is cached for 10 minutes to avoid repeated expensive queries
             sql = "SELECT COUNT(*) as cnt FROM logs WHERE type IN (:type_success, :type_failure)"
             result = self._db.execute(sql, {
                 "type_success": LOG_TYPE_CONSUMPTION,
@@ -536,6 +511,7 @@ class LogAnalyticsService:
             count = int(result[0]["cnt"]) if result else 0
             self._set_state(cache_key, count)
             self._set_state(cache_time_key, int(time.time()))
+            logger.analytics(f"日志精确统计: type=2/5 共 {count} 条")
             return count
         except Exception as e:
             logger.db_error(f"获取日志总数失败: {e}")
@@ -604,6 +580,7 @@ class LogAnalyticsService:
         start_time = time.time()
         total_processed = 0
         iterations = 0
+        timeout_seconds = 30  # Single call timeout protection
 
         # Get or set the initialization cutoff point
         init_max_log_id = self._get_state("init_max_log_id", 0)
@@ -628,10 +605,25 @@ class LogAnalyticsService:
             max_iterations=actual_max_iter
         )
 
+        timed_out = False
         while iterations < actual_max_iter:
+            # Timeout protection: prevent single API call from running too long
+            elapsed = time.time() - start_time
+            if elapsed >= timeout_seconds:
+                timed_out = True
+                logger.analytics(
+                    f"批量处理超时保护触发",
+                    elapsed=f"{elapsed:.1f}s",
+                    timeout=f"{timeout_seconds}s",
+                    iterations=iterations,
+                    processed=total_processed
+                )
+                break
+
             result = self._process_logs_with_cutoff(init_max_log_id, actual_batch_size)
 
             if not result.get("success"):
+                logger.db_error(f"批量处理迭代失败: {result.get('error', 'unknown')}")
                 break
 
             processed = result.get("processed", 0)
@@ -680,6 +672,7 @@ class LogAnalyticsService:
             "last_log_id": current_log_id,
             "init_cutoff_id": current_init_cutoff if current_init_cutoff > 0 else None,
             "completed": completed,
+            "timed_out": timed_out,
         }
 
     def _process_logs_with_cutoff(self, max_log_id: int, batch_size: int = DEFAULT_BATCH_SIZE) -> Dict[str, Any]:
@@ -855,21 +848,36 @@ class LogAnalyticsService:
         # If in initialization mode, use init_max_log_id for progress
         is_initializing = init_max_log_id > 0
 
-        # Calculate progress based on actual processed count vs total logs
+        # Calculate progress
         progress = 0.0
         remaining = 0
-        if total_logs > 0 and not data_inconsistent:
-            if total_processed >= total_logs:
-                progress = 100.0
-            else:
-                progress = (total_processed / total_logs) * 100
-            remaining = max(0, total_logs - total_processed)
+        if not data_inconsistent:
+            if is_initializing:
+                # During initialization: use log ID-based progress (more accurate)
+                # because total_logs count may still be approximate
+                if init_max_log_id > 0:
+                    if last_log_id >= init_max_log_id:
+                        progress = 100.0
+                    else:
+                        progress = (last_log_id / init_max_log_id) * 100
+                    remaining = max(0, init_max_log_id - last_log_id)
+            elif total_logs > 0:
+                # Normal mode: use precise processed count vs actual type=2/5 count
+                if total_processed >= total_logs:
+                    progress = 100.0
+                else:
+                    progress = (total_processed / total_logs) * 100
+                remaining = max(0, total_logs - total_processed)
 
         # is_synced: data has been fully synchronized
         # - progress >= 95% (allow some new logs to come in)
+        # - OR last_log_id is close to max_log_id (within 100)
         # - not in init mode
         # - no data inconsistency
-        is_synced = progress >= 95.0 and not is_initializing and not data_inconsistent
+        id_based_synced = (max_log_id > 0 and last_log_id > 0 and 
+                          last_log_id >= max_log_id - 100)
+        is_synced = ((progress >= 95.0 or id_based_synced) and 
+                    not is_initializing and not data_inconsistent)
 
         # Determine if initial sync is needed:
         # - 从未处理过任何日志，或者
