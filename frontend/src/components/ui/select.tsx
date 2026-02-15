@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { ChevronDown, Check } from "lucide-react"
 import { cn } from "../../lib/utils"
 
@@ -10,7 +11,10 @@ export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectE
 const Select = React.forwardRef<HTMLDivElement, SelectProps>(
   ({ className, children, value, onChange, placeholder = "Select...", disabled, ...props }, ref) => {
     const [isOpen, setIsOpen] = React.useState(false)
+    const [dropdownStyle, setDropdownStyle] = React.useState<React.CSSProperties>({})
     const containerRef = React.useRef<HTMLDivElement>(null)
+    const triggerRef = React.useRef<HTMLDivElement>(null)
+    const dropdownRef = React.useRef<HTMLDivElement>(null)
 
     // Merge external ref with internal ref
     React.useImperativeHandle(ref, () => containerRef.current!)
@@ -33,16 +37,72 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
 
     const selectedOption = options.find(opt => opt.value === value?.toString())
 
-    // Handle clicking outside to close
+    // Calculate dropdown position
+    const updateDropdownPosition = React.useCallback(() => {
+      if (!triggerRef.current) return
+
+      const rect = triggerRef.current.getBoundingClientRect()
+      const viewportHeight = window.innerHeight
+      const spaceBelow = viewportHeight - rect.bottom
+      const spaceAbove = rect.top
+      const dropdownMaxHeight = 240 // max-h-60 = 15rem = 240px
+      const openUpward = spaceBelow < dropdownMaxHeight && spaceAbove > spaceBelow
+
+      setDropdownStyle({
+        position: 'fixed',
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+        ...(openUpward
+          ? { bottom: viewportHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+        maxHeight: Math.min(dropdownMaxHeight, openUpward ? spaceAbove - 8 : spaceBelow - 8),
+      })
+    }, [])
+
+    // Handle clicking/touching outside to close
     React.useEffect(() => {
-      const handleClickOutside = (event: MouseEvent) => {
-        if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (!isOpen) return
+
+      const handleOutside = (event: MouseEvent | TouchEvent) => {
+        const target = event.target as Node
+        if (
+          containerRef.current && !containerRef.current.contains(target) &&
+          dropdownRef.current && !dropdownRef.current.contains(target)
+        ) {
           setIsOpen(false)
         }
       }
-      document.addEventListener("mousedown", handleClickOutside)
-      return () => document.removeEventListener("mousedown", handleClickOutside)
-    }, [])
+      document.addEventListener("mousedown", handleOutside)
+      document.addEventListener("touchstart", handleOutside)
+      return () => {
+        document.removeEventListener("mousedown", handleOutside)
+        document.removeEventListener("touchstart", handleOutside)
+      }
+    }, [isOpen])
+
+    // Update position on scroll/resize when open
+    React.useEffect(() => {
+      if (!isOpen) return
+
+      updateDropdownPosition()
+
+      const handleUpdate = () => updateDropdownPosition()
+      window.addEventListener("scroll", handleUpdate, true)
+      window.addEventListener("resize", handleUpdate)
+      return () => {
+        window.removeEventListener("scroll", handleUpdate, true)
+        window.removeEventListener("resize", handleUpdate)
+      }
+    }, [isOpen, updateDropdownPosition])
+
+    const handleToggle = () => {
+      if (disabled) return
+      if (!isOpen) {
+        updateDropdownPosition()
+      }
+      setIsOpen(!isOpen)
+    }
 
     const handleSelect = (optionValue: string) => {
       if (onChange) {
@@ -59,16 +119,53 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       setIsOpen(false)
     }
 
+    const dropdown = isOpen ? createPortal(
+      <div
+        ref={dropdownRef}
+        className="overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+        style={{
+          ...dropdownStyle,
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
+        <div className="p-1">
+          {options.map((option) => (
+            <div
+              key={option.value}
+              className={cn(
+                "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-accent hover:text-accent-foreground cursor-pointer",
+                option.value === value?.toString() && "bg-accent text-accent-foreground",
+                option.disabled && "opacity-50 cursor-not-allowed pointer-events-none"
+              )}
+              onClick={() => !option.disabled && handleSelect(option.value)}
+            >
+              <span className="truncate">{option.label}</span>
+              {option.value === value?.toString() && (
+                <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+                  <Check className="h-4 w-4" />
+                </span>
+              )}
+            </div>
+          ))}
+          {options.length === 0 && (
+            <div className="py-2 px-2 text-sm text-muted-foreground text-center">No options</div>
+          )}
+        </div>
+      </div>,
+      document.body
+    ) : null
+
     return (
-      <div 
-        className={cn("relative inline-block w-full", className)} 
+      <div
+        className={cn("relative inline-block w-full", className)}
         ref={containerRef}
       >
         {/* Hidden native select for form submission compatibility if needed */}
-        <select 
-          className="sr-only" 
-          value={value} 
-          onChange={onChange as any} 
+        <select
+          className="sr-only"
+          value={value}
+          onChange={onChange as any}
           disabled={disabled}
           {...props}
         >
@@ -77,7 +174,8 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
 
         {/* Custom Trigger */}
         <div
-          onClick={() => !disabled && setIsOpen(!isOpen)}
+          ref={triggerRef}
+          onClick={handleToggle}
           className={cn(
             "flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
             isOpen ? "ring-2 ring-ring ring-offset-2 border-primary" : "",
@@ -94,34 +192,7 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           <ChevronDown className="h-4 w-4 opacity-50 flex-shrink-0" />
         </div>
 
-        {/* Custom Dropdown */}
-        {isOpen && (
-          <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95">
-            <div className="p-1">
-              {options.map((option) => (
-                <div
-                  key={option.value}
-                  className={cn(
-                    "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-accent hover:text-accent-foreground cursor-pointer",
-                    option.value === value?.toString() && "bg-accent text-accent-foreground",
-                    option.disabled && "opacity-50 cursor-not-allowed pointer-events-none"
-                  )}
-                  onClick={() => !option.disabled && handleSelect(option.value)}
-                >
-                  <span className="truncate">{option.label}</span>
-                  {option.value === value?.toString() && (
-                    <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
-                      <Check className="h-4 w-4" />
-                    </span>
-                  )}
-                </div>
-              ))}
-              {options.length === 0 && (
-                <div className="py-2 px-2 text-sm text-muted-foreground text-center">No options</div>
-              )}
-            </div>
-          </div>
-        )}
+        {dropdown}
       </div>
     )
   }

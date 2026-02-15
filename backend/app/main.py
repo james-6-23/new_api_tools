@@ -7,7 +7,14 @@ import logging
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in project root
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(env_path)
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -198,10 +205,6 @@ async def lifespan(app: FastAPI):
     ip_recording_task.cancel()
     if index_task:
         index_task.cancel()
-    try:
-        await ai_ban_task
-    except asyncio.CancelledError:
-        pass
     try:
         await cache_warmup_task
     except asyncio.CancelledError:
@@ -843,6 +846,7 @@ async def background_cache_warmup():
         # 预热完成后启动后台任务
         asyncio.create_task(background_log_sync())
         asyncio.create_task(background_ai_auto_ban_scan())
+        asyncio.create_task(background_auto_group_scan())
         
         # 进入定时刷新循环
         await _background_refresh_loop(cache)
@@ -1947,6 +1951,63 @@ async def background_geoip_update():
             await asyncio.sleep(3600)
 
 
+async def background_auto_group_scan():
+    """后台定时执行自动分组扫描"""
+    from .auto_group_service import get_auto_group_service
+
+    # 预热完成后等待 2 分钟再启动
+    await asyncio.sleep(120)
+    logger.success("自动分组后台任务已启动", category="任务")
+
+    while True:
+        try:
+            service = get_auto_group_service()
+
+            # 检查是否启用定时扫描
+            scan_interval = service.get_scan_interval()
+            if scan_interval <= 0:
+                # 定时扫描已关闭，等待 1 分钟后再检查配置
+                await asyncio.sleep(60)
+                continue
+
+            # 检查服务是否启用
+            if not service.is_enabled():
+                await asyncio.sleep(60)
+                continue
+
+            # 先等待配置的扫描间隔，再执行扫描
+            logger.system(f"自动分组: 等待 {scan_interval} 分钟后执行定时扫描")
+            await asyncio.sleep(scan_interval * 60)
+
+            # 再次检查配置（可能在等待期间被修改）
+            service = get_auto_group_service()
+            if not service.is_enabled() or service.get_scan_interval() <= 0:
+                continue
+
+            # 执行扫描（非试运行模式）
+            logger.system(f"自动分组: 开始定时扫描 (间隔: {scan_interval}分钟)")
+            result = service.run_scan(dry_run=False, operator="system")
+
+            if result.get("success"):
+                stats = result.get("stats", {})
+                if stats.get("total", 0) > 0:
+                    logger.business(
+                        "自动分组定时扫描完成",
+                        total=stats.get("total", 0),
+                        assigned=stats.get("assigned", 0),
+                        skipped=stats.get("skipped", 0),
+                        errors=stats.get("errors", 0),
+                    )
+
+        except asyncio.CancelledError:
+            logger.system("自动分组后台任务已取消")
+            break
+        except Exception as e:
+            logger.error(f"自动分组后台任务异常: {e}", category="任务")
+            # 出错后等待 5 分钟再重试
+            await asyncio.sleep(300)
+
+
 # Import routes after app is created to avoid circular imports
 def include_routes(app: FastAPI):
     """Include API routes."""
@@ -1962,6 +2023,7 @@ def include_routes(app: FastAPI):
     from .ai_auto_ban_routes import router as ai_auto_ban_router
     from .system_routes import router as system_router
     from .model_status_routes import router as model_status_router
+    from .auto_group_routes import router as auto_group_router
     app.include_router(router)
     app.include_router(auth_router)
     app.include_router(top_up_router)
@@ -1974,6 +2036,7 @@ def include_routes(app: FastAPI):
     app.include_router(ai_auto_ban_router)
     app.include_router(system_router)
     app.include_router(model_status_router)
+    app.include_router(auto_group_router)
 
 
 # Create FastAPI application
