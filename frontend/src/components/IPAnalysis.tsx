@@ -7,6 +7,7 @@ import {
   Globe, MapPin, RefreshCw, Loader2, TrendingUp,
   AlertTriangle, Activity, ChevronRight, ChevronDown, Timer, Map as MapIcon
 } from 'lucide-react'
+import { IPLookup } from './IPLookup'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
 import { cn } from '../lib/utils'
@@ -868,6 +869,9 @@ export function IPAnalysis() {
           color="orange"
         />
       </div>
+
+      {/* IP Lookup */}
+      <IPLookup />
 
       {/* World Map */}
       <Card className="shadow-sm">

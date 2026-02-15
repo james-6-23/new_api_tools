@@ -134,6 +134,51 @@ async def enable_all_ip_recording(
         raise InvalidParamsError(message=f"操作失败: {str(e)}")
 
 
+class IPLookupResponse(BaseModel):
+    success: bool
+    data: dict
+
+
+@router.get("/lookup/{ip:path}", response_model=IPLookupResponse)
+async def lookup_ip_users(
+    ip: str,
+    window: str = Query(default="24h", description="时间窗口 (1h/3h/6h/12h/24h/3d/7d)"),
+    limit: int = Query(default=100, ge=1, le=500, description="返回数量"),
+    no_cache: bool = Query(default=False, description="强制刷新，跳过缓存"),
+    include_geo: bool = Query(default=True, description="是否包含 IP 地理位置信息"),
+    _: str = Depends(verify_auth),
+):
+    """通过 IP 反查所有使用该 IP 的用户和令牌。"""
+    seconds = WINDOW_SECONDS.get(window)
+    if not seconds:
+        raise InvalidParamsError(message=f"Invalid window: {window}")
+
+    # 基本的 IP 格式验证
+    ip = ip.strip()
+    if not ip or len(ip) > 45:
+        raise InvalidParamsError(message=f"Invalid IP address: {ip}")
+
+    service = get_ip_monitoring_service()
+    data = service.get_ip_users(
+        ip=ip,
+        window_seconds=seconds,
+        limit=limit,
+        use_cache=not no_cache,
+    )
+
+    # 可选：附加 GeoIP 信息
+    if include_geo:
+        from .ip_geo_service import get_ip_geo_service
+        geo_service = get_ip_geo_service()
+        try:
+            geo_info = await geo_service.query_single(ip)
+            data["geo"] = geo_info.to_dict()
+        except Exception:
+            data["geo"] = None
+
+    return IPLookupResponse(success=True, data=data)
+
+
 @router.get("/users/{user_id}/ips", response_model=SharedIPsResponse)
 async def get_user_ips(
     user_id: int,

@@ -759,6 +759,127 @@ class IPMonitoringService:
             logger.db_error(f"批量开启 IP 记录失败: {e}")
             raise
 
+    def get_ip_users(
+        self,
+        ip: str,
+        window_seconds: int,
+        limit: int = 100,
+        now: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        通过 IP 反查所有使用该 IP 的用户和令牌。
+        返回每个 user_id + token_id 组合的请求次数、首次/末次使用时间、使用的模型。
+        """
+        if now is None:
+            now = int(time.time())
+        start_time = now - window_seconds
+
+        window_name = self._get_window_name(window_seconds)
+        cache_key = f"ip_lookup:{ip}:{window_name}"
+
+        if use_cache:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        self.db.connect()
+
+        # 查询使用该 IP 的所有用户和令牌
+        sql = """
+            SELECT
+                user_id,
+                COALESCE(MAX(username), '') as username,
+                token_id,
+                COALESCE(MAX(token_name), '') as token_name,
+                COUNT(*) as request_count,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND ip = :ip
+                AND user_id IS NOT NULL
+            GROUP BY user_id, token_id
+            ORDER BY request_count DESC
+            LIMIT :limit
+        """
+
+        try:
+            rows = self.db.execute(sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "ip": ip,
+                "limit": limit,
+            })
+
+            items = []
+            total_requests = 0
+            user_ids_seen = set()
+
+            for row in rows:
+                req_count = int(row.get("request_count") or 0)
+                total_requests += req_count
+                uid = int(row.get("user_id") or 0)
+                user_ids_seen.add(uid)
+                items.append({
+                    "user_id": uid,
+                    "username": row.get("username") or "",
+                    "token_id": int(row.get("token_id") or 0),
+                    "token_name": row.get("token_name") or "",
+                    "request_count": req_count,
+                    "first_seen": int(row.get("first_seen") or 0),
+                    "last_seen": int(row.get("last_seen") or 0),
+                })
+
+            # 查询使用的模型分布（Top 10）
+            model_sql = """
+                SELECT
+                    model,
+                    COUNT(*) as count
+                FROM logs
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND ip = :ip
+                    AND model IS NOT NULL AND model <> ''
+                GROUP BY model
+                ORDER BY count DESC
+                LIMIT 10
+            """
+            model_rows = self.db.execute(model_sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "ip": ip,
+            })
+            models = [
+                {"model": r.get("model") or "", "count": int(r.get("count") or 0)}
+                for r in (model_rows or [])
+            ]
+
+            result = {
+                "ip": ip,
+                "window": window_name,
+                "total_requests": total_requests,
+                "unique_users": len(user_ids_seen),
+                "unique_tokens": len(items),
+                "items": items,
+                "models": models,
+            }
+
+            # 缓存 5 分钟
+            self.cache.set(cache_key, result, ttl=300)
+
+            return result
+        except Exception as e:
+            logger.db_error(f"IP 反查用户失败: {e}")
+            return {
+                "ip": ip,
+                "window": window_name,
+                "total_requests": 0,
+                "unique_users": 0,
+                "unique_tokens": 0,
+                "items": [],
+                "models": [],
+            }
+
     def get_user_ips(
         self,
         user_id: int,
