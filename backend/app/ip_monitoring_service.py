@@ -784,6 +784,29 @@ class IPMonitoringService:
                 return cached
 
         self.db.connect()
+        ip = ip.strip()
+
+        # 先做一个简单查询验证该 IP 是否存在记录
+        check_sql = """
+            SELECT COUNT(*) as cnt
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND ip = :ip
+        """
+        try:
+            check_rows = self.db.execute(check_sql, {
+                "start_time": start_time,
+                "end_time": now,
+                "ip": ip,
+            })
+            total_in_db = int((check_rows[0] if check_rows else {}).get("cnt") or 0)
+            logger.info(
+                f"[IP反查] 预检: ip={ip}, window={window_name}, "
+                f"time_range=[{start_time}, {now}], 匹配记录={total_in_db}"
+            )
+        except Exception as e:
+            logger.db_error(f"[IP反查] 预检查询失败: {e}")
+            total_in_db = -1
 
         # 查询使用该 IP 的所有用户和令牌
         sql = """
@@ -804,6 +827,10 @@ class IPMonitoringService:
             LIMIT :limit
         """
 
+        items = []
+        total_requests = 0
+        user_ids_seen = set()
+
         try:
             rows = self.db.execute(sql, {
                 "start_time": start_time,
@@ -811,10 +838,6 @@ class IPMonitoringService:
                 "ip": ip,
                 "limit": limit,
             })
-
-            items = []
-            total_requests = 0
-            user_ids_seen = set()
 
             for row in rows:
                 req_count = int(row.get("request_count") or 0)
@@ -831,17 +854,23 @@ class IPMonitoringService:
                     "last_seen": int(row.get("last_seen") or 0),
                 })
 
-            # 查询使用的模型分布（Top 10）
+            logger.info(f"[IP反查] 主查询完成: ip={ip}, 结果数={len(items)}, 总请求={total_requests}")
+        except Exception as e:
+            logger.db_error(f"[IP反查] 主查询失败: {e}")
+
+        # 查询使用的模型分布（Top 10）—— 独立 try 块，不影响主结果
+        models = []
+        try:
             model_sql = """
                 SELECT
                     model,
-                    COUNT(*) as count
+                    COUNT(*) as usage_count
                 FROM logs
                 WHERE created_at >= :start_time AND created_at <= :end_time
                     AND ip = :ip
                     AND model IS NOT NULL AND model <> ''
                 GROUP BY model
-                ORDER BY count DESC
+                ORDER BY usage_count DESC
                 LIMIT 10
             """
             model_rows = self.db.execute(model_sql, {
@@ -850,35 +879,27 @@ class IPMonitoringService:
                 "ip": ip,
             })
             models = [
-                {"model": r.get("model") or "", "count": int(r.get("count") or 0)}
+                {"model": r.get("model") or "", "count": int(r.get("usage_count") or 0)}
                 for r in (model_rows or [])
             ]
+        except Exception as e:
+            logger.db_error(f"[IP反查] 模型查询失败: {e}")
 
-            result = {
-                "ip": ip,
-                "window": window_name,
-                "total_requests": total_requests,
-                "unique_users": len(user_ids_seen),
-                "unique_tokens": len(items),
-                "items": items,
-                "models": models,
-            }
+        result = {
+            "ip": ip,
+            "window": window_name,
+            "total_requests": total_requests,
+            "unique_users": len(user_ids_seen),
+            "unique_tokens": len(items),
+            "items": items,
+            "models": models,
+        }
 
-            # 缓存 5 分钟
+        # 有数据时才缓存
+        if items:
             self.cache.set(cache_key, result, ttl=300)
 
-            return result
-        except Exception as e:
-            logger.db_error(f"IP 反查用户失败: {e}")
-            return {
-                "ip": ip,
-                "window": window_name,
-                "total_requests": 0,
-                "unique_users": 0,
-                "unique_tokens": 0,
-                "items": [],
-                "models": [],
-            }
+        return result
 
     def get_user_ips(
         self,
