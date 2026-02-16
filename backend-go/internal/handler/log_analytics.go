@@ -16,6 +16,7 @@ func RegisterLogAnalyticsRoutes(r *gin.RouterGroup) {
 		g.GET("/state", GetAnalyticsState)
 		g.POST("/process", ProcessLogs)
 		g.POST("/batch-process", BatchProcessLogs)
+		g.POST("/batch", BatchProcessLogs)
 		g.GET("/ranking/requests", GetUserRequestRanking)
 		g.GET("/ranking/quota", GetUserQuotaRanking)
 		g.GET("/models", GetModelStatistics)

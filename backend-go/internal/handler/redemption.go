@@ -9,14 +9,16 @@ import (
 	"github.com/new-api-tools/backend/internal/service"
 )
 
-// RegisterRedemptionRoutes registers /api/redemption endpoints
+// RegisterRedemptionRoutes registers /api/redemptions endpoints
 func RegisterRedemptionRoutes(r *gin.RouterGroup) {
-	g := r.Group("/redemption")
+	g := r.Group("/redemptions")
 	{
 		g.POST("/generate", GenerateRedemptionCodes)
 		g.GET("", ListRedemptionCodes)
 		g.GET("/statistics", GetRedemptionStatistics)
 		g.POST("/batch-delete", BatchDeleteRedemptionCodes)
+		g.DELETE("/batch", BatchDeleteRedemptionCodes)
+		g.POST("/batch", BatchDeleteRedemptionCodes)
 		g.DELETE("/:id", DeleteRedemptionCode)
 	}
 }

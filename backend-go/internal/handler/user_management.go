@@ -9,11 +9,11 @@ import (
 	"github.com/new-api-tools/backend/internal/service"
 )
 
-// RegisterUserManagementRoutes registers /api/users endpoints
 func RegisterUserManagementRoutes(r *gin.RouterGroup) {
 	g := r.Group("/users")
 	{
 		g.GET("/activity-stats", GetActivityStats)
+		g.GET("/stats", GetActivityStats)
 		g.GET("/banned", GetBannedUsers)
 		g.GET("", GetUsers)
 		g.DELETE("/:user_id", DeleteUser)
@@ -22,6 +22,7 @@ func RegisterUserManagementRoutes(r *gin.RouterGroup) {
 		g.POST("/soft-deleted/purge", PurgeSoftDeletedUsers)
 		g.POST("/:user_id/ban", BanUser)
 		g.POST("/:user_id/unban", UnbanUser)
+		g.GET("/:user_id/invited", GetInvitedUsers)
 		g.POST("/tokens/:token_id/disable", DisableToken)
 	}
 }
@@ -242,4 +243,24 @@ func DisableToken(c *gin.Context) {
 		"success": true,
 		"message": "Token 已禁用",
 	})
+}
+
+// GET /api/users/:user_id/invited
+func GetInvitedUsers(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid user ID", ""))
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	svc := service.NewUserManagementService()
+	data, err := svc.GetInvitedUsers(userID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }

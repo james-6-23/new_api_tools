@@ -15,9 +15,11 @@ func RegisterIPMonitoringRoutes(r *gin.RouterGroup) {
 	{
 		g.GET("/stats", GetIPStats)
 		g.GET("/shared", GetSharedIPs)
+		g.GET("/shared-ips", GetSharedIPs)
 		g.GET("/multi-ip-tokens", GetMultiIPTokens)
 		g.GET("/multi-ip-users", GetMultiIPUsers)
 		g.POST("/enable-all-recording", EnableAllIPRecording)
+		g.POST("/enable-all", EnableAllIPRecording)
 		g.GET("/lookup/:ip", LookupIPUsers)
 		g.GET("/users/:user_id/ips", GetUserIPs)
 		g.GET("/indexes", GetIPIndexStatus)

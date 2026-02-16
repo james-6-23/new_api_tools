@@ -271,3 +271,46 @@ func (s *DashboardService) GetChannelStatus() ([]map[string]interface{}, error) 
 
 	return s.db.Query(query)
 }
+
+// GetIPDistribution returns IP access distribution statistics
+func (s *DashboardService) GetIPDistribution(window string) (map[string]interface{}, error) {
+	startTime, endTime := parsePeriodToTimestamps(window)
+
+	// Query distinct IPs with request counts
+	query := fmt.Sprintf(`
+		SELECT COALESCE(ip, 'unknown') as ip,
+			COUNT(*) as request_count,
+			COUNT(DISTINCT user_id) as unique_users
+		FROM logs
+		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5) AND ip IS NOT NULL AND ip != ''
+		GROUP BY ip
+		ORDER BY request_count DESC
+		LIMIT 100`,
+		startTime, endTime)
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get total distinct IPs
+	totalQuery := fmt.Sprintf(`
+		SELECT COUNT(DISTINCT ip) as total_ips,
+			COUNT(*) as total_requests
+		FROM logs
+		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5) AND ip IS NOT NULL AND ip != ''`,
+		startTime, endTime)
+
+	summary, _ := s.db.QueryOne(totalQuery)
+
+	result := map[string]interface{}{
+		"window":    window,
+		"ip_list":   rows,
+		"summary":   summary,
+		"countries": []map[string]interface{}{},
+		"provinces": []map[string]interface{}{},
+		"cities":    []map[string]interface{}{},
+	}
+
+	return result, nil
+}

@@ -429,7 +429,11 @@ func toInt64(v interface{}) int64 {
 		return val
 	case int:
 		return int64(val)
+	case int32:
+		return int64(val)
 	case float64:
+		return int64(val)
+	case float32:
 		return int64(val)
 	case string:
 		var n int64
@@ -439,6 +443,94 @@ func toInt64(v interface{}) int64 {
 		var n int64
 		fmt.Sscanf(string(val), "%d", &n)
 		return n
+	default:
+		return 0
 	}
-	return 0
+}
+
+// GetInvitedUsers returns users invited by the specified user
+func (s *UserManagementService) GetInvitedUsers(userID int64, page, pageSize int) (map[string]interface{}, error) {
+	offset := (page - 1) * pageSize
+
+	// Get inviter info
+	inviterRow, err := s.db.QueryOne(s.db.RebindQuery(
+		fmt.Sprintf("SELECT id, username, display_name, aff_code, aff_count, aff_quota, aff_history FROM users WHERE id = %d AND deleted_at IS NULL", userID)))
+	if err != nil || inviterRow == nil {
+		return map[string]interface{}{
+			"inviter":   nil,
+			"items":     []interface{}{},
+			"total":     0,
+			"page":      page,
+			"page_size": pageSize,
+			"stats":     map[string]interface{}{},
+		}, nil
+	}
+
+	inviter := map[string]interface{}{
+		"user_id":      inviterRow["id"],
+		"username":     inviterRow["username"],
+		"display_name": inviterRow["display_name"],
+		"aff_code":     inviterRow["aff_code"],
+		"aff_count":    inviterRow["aff_count"],
+		"aff_quota":    inviterRow["aff_quota"],
+		"aff_history":  inviterRow["aff_history"],
+	}
+
+	// Count total invited
+	countRow, _ := s.db.QueryOne(s.db.RebindQuery(
+		fmt.Sprintf("SELECT COUNT(*) as total FROM users WHERE inviter_id = %d AND deleted_at IS NULL", userID)))
+	total := int64(0)
+	if countRow != nil {
+		total = toInt64(countRow["total"])
+	}
+
+	// Get invited users list
+	groupCol := "`group`"
+	if s.db.IsPG {
+		groupCol = `"group"`
+	}
+	query := fmt.Sprintf(`
+		SELECT id, username, display_name, email, status,
+			quota, used_quota, request_count, %s, role
+		FROM users
+		WHERE inviter_id = %d AND deleted_at IS NULL
+		ORDER BY id DESC
+		LIMIT %d OFFSET %d`,
+		groupCol, userID, pageSize, offset)
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute stats
+	activeCount := 0
+	bannedCount := 0
+	totalUsedQuota := int64(0)
+	totalRequests := int64(0)
+	for _, row := range rows {
+		if toInt64(row["request_count"]) > 0 {
+			activeCount++
+		}
+		if toInt64(row["status"]) == 2 {
+			bannedCount++
+		}
+		totalUsedQuota += toInt64(row["used_quota"])
+		totalRequests += toInt64(row["request_count"])
+	}
+
+	return map[string]interface{}{
+		"inviter":   inviter,
+		"items":     rows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"stats": map[string]interface{}{
+			"total_invited":    total,
+			"active_count":     activeCount,
+			"banned_count":     bannedCount,
+			"total_used_quota": totalUsedQuota,
+			"total_requests":   totalRequests,
+		},
+	}, nil
 }

@@ -22,6 +22,7 @@ func RegisterDashboardRoutes(r *gin.RouterGroup) {
 		g.POST("/cache/invalidate", InvalidateDashboardCache)
 		g.GET("/refresh-estimate", GetRefreshEstimate)
 		g.GET("/system-info", GetDashboardSystemInfo)
+		g.GET("/ip-distribution", GetIPDistribution)
 	}
 }
 
@@ -147,4 +148,17 @@ func GetDashboardSystemInfo(c *gin.Context) {
 			"tips":      []string{},
 		},
 	})
+}
+
+// GET /api/dashboard/ip-distribution
+func GetIPDistribution(c *gin.Context) {
+	window := c.DefaultQuery("window", "24h")
+
+	svc := service.NewDashboardService()
+	data, err := svc.GetIPDistribution(window)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }

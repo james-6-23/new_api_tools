@@ -16,18 +16,37 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.GET("/models", GetAvailableModels)
 		g.GET("/status/:model_name", GetSingleModelStatus)
 		g.POST("/status/multiple", GetMultipleModelsStatusHandler)
+		g.POST("/status/batch", GetMultipleModelsStatusHandler)
 		g.GET("/status/all", GetAllModelsStatusHandler)
 		g.GET("/selected", GetSelectedModels)
 		g.PUT("/selected", SetSelectedModels)
+		g.GET("/config/selected", GetSelectedModels)
+		g.POST("/config/selected", SetSelectedModels)
 		g.GET("/config/time-window", GetTimeWindowConfig)
 		g.PUT("/config/time-window", SetTimeWindowConfig)
+		g.PUT("/config/window", SetTimeWindowConfig)
 		g.GET("/config/theme", GetThemeConfig)
 		g.PUT("/config/theme", SetThemeConfig)
 		g.GET("/config/refresh-interval", GetRefreshIntervalConfig)
 		g.PUT("/config/refresh-interval", SetRefreshIntervalConfig)
+		g.PUT("/config/refresh", SetRefreshIntervalConfig)
 		g.GET("/config/sort-mode", GetSortModeConfig)
 		g.PUT("/config/sort-mode", SetSortModeConfig)
+		g.PUT("/config/sort", SetSortModeConfig)
 		g.PUT("/config/custom-order", SetCustomOrderConfig)
+	}
+
+	// Embed routes (also under /api/model-status/embed for frontend compatibility)
+	e := r.Group("/model-status/embed")
+	{
+		e.GET("/time-windows", GetTimeWindows)
+		e.GET("/models", GetAvailableModels)
+		e.GET("/status/:model_name", GetSingleModelStatus)
+		e.POST("/status/multiple", GetMultipleModelsStatusHandler)
+		e.POST("/status/batch", GetMultipleModelsStatusHandler)
+		e.GET("/status/all", GetAllModelsStatusHandler)
+		e.GET("/config", GetEmbedConfig)
+		e.GET("/config/selected", GetSelectedModels)
 	}
 }
 
@@ -39,8 +58,10 @@ func RegisterModelStatusEmbedRoutes(r *gin.Engine) {
 		g.GET("/models", GetAvailableModels)
 		g.GET("/status/:model_name", GetSingleModelStatus)
 		g.POST("/status/multiple", GetMultipleModelsStatusHandler)
+		g.POST("/status/batch", GetMultipleModelsStatusHandler)
 		g.GET("/status/all", GetAllModelsStatusHandler)
 		g.GET("/config", GetEmbedConfig)
+		g.GET("/config/selected", GetSelectedModels)
 	}
 }
 
