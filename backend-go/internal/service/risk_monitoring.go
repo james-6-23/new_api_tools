@@ -85,6 +85,8 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 }
 
 // GetUserAnalysis returns detailed risk analysis for a user
+// Returns format matching frontend UserAnalysis interface:
+// { range, user, summary, risk, top_models, top_channels, top_ips, recent_logs }
 func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int64, endTime *int64) (map[string]interface{}, error) {
 	now := time.Now().Unix()
 	if endTime != nil {
@@ -93,50 +95,236 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	startTime := now - windowSeconds
 
 	// User info
+	groupCol := "`group`"
+	if s.db.IsPG {
+		groupCol = `"group"`
+	}
 	userRow, _ := s.db.QueryOne(s.db.RebindQuery(
-		"SELECT id, username, status, quota, used_quota, request_count FROM users WHERE id = ?"), userID)
+		fmt.Sprintf("SELECT id, username, display_name, email, status, %s, request_count FROM users WHERE id = ?", groupCol)), userID)
+
+	// Build user object
+	userInfo := map[string]interface{}{
+		"id":           userID,
+		"username":     "",
+		"display_name": nil,
+		"email":        nil,
+		"status":       1,
+		"group":        nil,
+	}
+	if userRow != nil {
+		userInfo["id"] = userRow["id"]
+		userInfo["username"] = userRow["username"]
+		userInfo["display_name"] = userRow["display_name"]
+		userInfo["email"] = userRow["email"]
+		userInfo["status"] = userRow["status"]
+		userInfo["group"] = userRow[groupCol]
+	}
 
 	// Usage stats in window
 	statsQuery := fmt.Sprintf(`
 		SELECT COUNT(*) as total_requests,
-			COALESCE(SUM(quota), 0) as total_quota,
-			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_count,
+			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
+			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			COALESCE(SUM(quota), 0) as quota_used,
+			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
 			COUNT(DISTINCT ip) as unique_ips,
 			COUNT(DISTINCT token_id) as unique_tokens,
-			COUNT(DISTINCT model_name) as unique_models
+			COUNT(DISTINCT model_name) as unique_models,
+			COUNT(DISTINCT channel) as unique_channels
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)`,
 		userID, startTime, now)
 
 	statsRow, _ := s.db.QueryOne(statsQuery)
 
+	totalRequests := int64(0)
+	successRequests := int64(0)
+	failureRequests := int64(0)
+	quotaUsed := int64(0)
+	promptTokens := int64(0)
+	completionTokens := int64(0)
+	uniqueIPs := int64(0)
+	uniqueTokens := int64(0)
+	uniqueModels := int64(0)
+	uniqueChannels := int64(0)
+
+	if statsRow != nil {
+		totalRequests = toInt64(statsRow["total_requests"])
+		successRequests = toInt64(statsRow["success_requests"])
+		failureRequests = toInt64(statsRow["failure_requests"])
+		quotaUsed = toInt64(statsRow["quota_used"])
+		promptTokens = toInt64(statsRow["prompt_tokens"])
+		completionTokens = toInt64(statsRow["completion_tokens"])
+		uniqueIPs = toInt64(statsRow["unique_ips"])
+		uniqueTokens = toInt64(statsRow["unique_tokens"])
+		uniqueModels = toInt64(statsRow["unique_models"])
+		uniqueChannels = toInt64(statsRow["unique_channels"])
+	}
+
+	// Calculate rates
+	failureRate := 0.0
+	emptyRate := 0.0
+	if totalRequests > 0 {
+		failureRate = float64(failureRequests) / float64(totalRequests) * 100
+	}
+
+	// Average use time
+	avgUseTimeQuery := fmt.Sprintf(`
+		SELECT COALESCE(AVG(use_time), 0) as avg_use_time
+		FROM logs
+		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type = 2`,
+		userID, startTime, now)
+	avgRow, _ := s.db.QueryOne(avgUseTimeQuery)
+	avgUseTime := 0.0
+	if avgRow != nil {
+		if v, ok := avgRow["avg_use_time"].(float64); ok {
+			avgUseTime = v
+		} else {
+			avgUseTime = float64(toInt64(avgRow["avg_use_time"]))
+		}
+	}
+
+	// Summary
+	summary := map[string]interface{}{
+		"total_requests":    totalRequests,
+		"success_requests":  successRequests,
+		"failure_requests":  failureRequests,
+		"quota_used":        quotaUsed,
+		"prompt_tokens":     promptTokens,
+		"completion_tokens": completionTokens,
+		"avg_use_time":      avgUseTime,
+		"unique_ips":        uniqueIPs,
+		"unique_tokens":     uniqueTokens,
+		"unique_models":     uniqueModels,
+		"unique_channels":   uniqueChannels,
+		"empty_count":       0,
+		"failure_rate":      failureRate,
+		"empty_rate":        emptyRate,
+	}
+
+	// Risk analysis
+	windowMinutes := float64(windowSeconds) / 60.0
+	requestsPerMinute := 0.0
+	if windowMinutes > 0 {
+		requestsPerMinute = float64(totalRequests) / windowMinutes
+	}
+
+	avgQuotaPerRequest := 0.0
+	if totalRequests > 0 {
+		avgQuotaPerRequest = float64(quotaUsed) / float64(totalRequests)
+	}
+
+	// Risk flags
+	riskFlags := []string{}
+	if requestsPerMinute > 5.0 {
+		riskFlags = append(riskFlags, "HIGH_RPM")
+	}
+	if uniqueIPs > 10 {
+		riskFlags = append(riskFlags, "MANY_IPS")
+	}
+	if failureRate > 50.0 && totalRequests > 10 {
+		riskFlags = append(riskFlags, "HIGH_FAILURE_RATE")
+	}
+
+	risk := map[string]interface{}{
+		"requests_per_minute":   requestsPerMinute,
+		"avg_quota_per_request": avgQuotaPerRequest,
+		"risk_flags":            riskFlags,
+	}
+
 	// Top models
 	modelsQuery := fmt.Sprintf(`
-		SELECT model_name, COUNT(*) as request_count, COALESCE(SUM(quota), 0) as quota_used
+		SELECT model_name, COUNT(*) as requests,
+			COALESCE(SUM(quota), 0) as quota_used,
+			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
+			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
 		GROUP BY model_name
-		ORDER BY request_count DESC
+		ORDER BY requests DESC
 		LIMIT 10`, userID, startTime, now)
 
-	models, _ := s.db.Query(modelsQuery)
+	topModels, _ := s.db.Query(modelsQuery)
+	if topModels == nil {
+		topModels = []map[string]interface{}{}
+	}
+	// Add empty_count = 0 for each model
+	for _, m := range topModels {
+		m["empty_count"] = 0
+	}
 
-	// Recent IPs
+	// Top channels
+	channelsQuery := fmt.Sprintf(`
+		SELECT channel as channel_id, COUNT(*) as requests,
+			COALESCE(SUM(quota), 0) as quota_used
+		FROM logs
+		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
+		GROUP BY channel
+		ORDER BY requests DESC
+		LIMIT 10`, userID, startTime, now)
+
+	topChannels, _ := s.db.Query(channelsQuery)
+	if topChannels == nil {
+		topChannels = []map[string]interface{}{}
+	}
+	// Add channel_name placeholder
+	for _, ch := range topChannels {
+		ch["channel_name"] = fmt.Sprintf("渠道 %v", ch["channel_id"])
+	}
+
+	// Top IPs
 	ipsQuery := fmt.Sprintf(`
-		SELECT ip, COUNT(*) as request_count
+		SELECT ip, COUNT(*) as requests
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND ip IS NOT NULL AND ip != ''
 		GROUP BY ip
-		ORDER BY request_count DESC
+		ORDER BY requests DESC
 		LIMIT 20`, userID, startTime, now)
 
-	ips, _ := s.db.Query(ipsQuery)
+	topIPs, _ := s.db.Query(ipsQuery)
+	if topIPs == nil {
+		topIPs = []map[string]interface{}{}
+	}
+
+	// Recent logs
+	recentLogsQuery := fmt.Sprintf(`
+		SELECT l.id, l.created_at, l.type, COALESCE(l.model_name,'') as model_name,
+			COALESCE(l.quota, 0) as quota,
+			COALESCE(l.prompt_tokens, 0) as prompt_tokens,
+			COALESCE(l.completion_tokens, 0) as completion_tokens,
+			COALESCE(l.use_time, 0) as use_time,
+			COALESCE(l.ip, '') as ip,
+			COALESCE(l.channel, 0) as channel,
+			COALESCE(t.name, '') as token_name
+		FROM logs l
+		LEFT JOIN tokens t ON l.token_id = t.id
+		WHERE l.user_id = %d AND l.created_at >= %d AND l.created_at <= %d AND l.type IN (2, 5)
+		ORDER BY l.created_at DESC
+		LIMIT 50`, userID, startTime, now)
+
+	recentLogs, _ := s.db.Query(recentLogsQuery)
+	if recentLogs == nil {
+		recentLogs = []map[string]interface{}{}
+	}
+	// Map channel -> channel_name
+	for _, log := range recentLogs {
+		log["channel_name"] = fmt.Sprintf("渠道 %v", log["channel"])
+	}
 
 	result := map[string]interface{}{
-		"user":       userRow,
-		"stats":      statsRow,
-		"top_models": models,
-		"recent_ips": ips,
+		"range": map[string]interface{}{
+			"start_time":     startTime,
+			"end_time":       now,
+			"window_seconds": windowSeconds,
+		},
+		"user":         userInfo,
+		"summary":      summary,
+		"risk":         risk,
+		"top_models":   topModels,
+		"top_channels": topChannels,
+		"top_ips":      topIPs,
+		"recent_logs":  recentLogs,
 	}
 
 	return result, nil

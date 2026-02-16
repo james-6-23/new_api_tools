@@ -178,6 +178,22 @@ func (m *Manager) TableExists(tableName string) (bool, error) {
 	return row != nil, nil
 }
 
+// ColumnExists checks if a column exists in a table
+func (m *Manager) ColumnExists(tableName, columnName string) bool {
+	var query string
+	if m.IsPG {
+		query = `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 LIMIT 1`
+	} else {
+		query = `SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1`
+	}
+
+	row, err := m.QueryOne(query, tableName, columnName)
+	if err != nil {
+		return false
+	}
+	return row != nil
+}
+
 // Helper functions to extract connection info from DSN (for logging)
 
 func extractHost(dsn string) string {

@@ -376,14 +376,39 @@ func (s *IPMonitoringService) GetUserIPs(userID int64, window string) (map[strin
 	}, nil
 }
 
-// EnableAllIPRecording enables IP recording for all users
+// EnableAllIPRecording enables IP recording for all users by updating the setting JSON field
 func (s *IPMonitoringService) EnableAllIPRecording() (map[string]interface{}, error) {
-	affected, err := s.db.Execute("UPDATE tokens SET ip_recording = 1 WHERE ip_recording = 0")
+	var updateSQL string
+	if s.db.IsPG {
+		// PostgreSQL: use jsonb_set to update the setting field
+		// For users with NULL or empty setting, set it to {"record_ip_log":true}
+		// For users with existing setting, merge record_ip_log into it
+		updateSQL = `
+			UPDATE users SET setting = 
+				CASE 
+					WHEN setting IS NULL OR setting = '' THEN '{"record_ip_log":true}'::jsonb::text
+					ELSE (setting::jsonb || '{"record_ip_log":true}'::jsonb)::text
+				END
+			WHERE deleted_at IS NULL 
+			AND (setting IS NULL OR setting = '' OR setting::jsonb->>'record_ip_log' IS NULL OR setting::jsonb->>'record_ip_log' != 'true')`
+	} else {
+		// MySQL: use JSON_SET to update the setting field
+		updateSQL = `
+			UPDATE users SET setting = 
+				CASE 
+					WHEN setting IS NULL OR setting = '' THEN '{"record_ip_log":true}'
+					ELSE JSON_SET(setting, '$.record_ip_log', true)
+				END
+			WHERE deleted_at IS NULL 
+			AND (setting IS NULL OR setting = '' OR JSON_EXTRACT(setting, '$.record_ip_log') IS NULL OR JSON_EXTRACT(setting, '$.record_ip_log') != true)`
+	}
+
+	affected, err := s.db.Execute(updateSQL)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{
 		"affected": affected,
-		"message":  fmt.Sprintf("已为 %d 个 Token 开启 IP 记录", affected),
+		"message":  fmt.Sprintf("已为 %d 个用户开启 IP 记录", affected),
 	}, nil
 }
