@@ -57,10 +57,10 @@ var cfg *Config
 // Load reads configuration from environment variables
 func Load() *Config {
 	cfg = &Config{
-		// Server defaults
-		ServerPort: getEnvInt("PORT", 8000),
-		ServerHost: getEnvStr("HOST", "0.0.0.0"),
-		TimeZone:   getEnvStr("TZ", "Asia/Shanghai"),
+		// Server defaults (support both SERVER_PORT/PORT and SERVER_HOST/HOST)
+		ServerPort: getEnvIntMulti([]string{"SERVER_PORT", "PORT"}, 8000),
+		ServerHost: getEnvStrMulti([]string{"SERVER_HOST", "HOST"}, "0.0.0.0"),
+		TimeZone:   getEnvStrMulti([]string{"TIMEZONE", "TZ"}, "Asia/Shanghai"),
 
 		// Database
 		SQLDSN: getEnvStr("SQL_DSN", ""),
@@ -71,13 +71,13 @@ func Load() *Config {
 		// Authentication
 		APIKey:         getEnvStr("API_KEY", ""),
 		AdminPassword:  getEnvStr("ADMIN_PASSWORD", ""),
-		JWTSecretKey:   getEnvStr("JWT_SECRET_KEY", "newapi-middleware-secret-key-change-in-production"),
+		JWTSecretKey:   getEnvStrMulti([]string{"JWT_SECRET_KEY", "JWT_SECRET"}, "newapi-middleware-secret-key-change-in-production"),
 		JWTAlgorithm:   "HS256",
 		JWTExpireHours: time.Duration(getEnvInt("JWT_EXPIRE_HOURS", 24)) * time.Hour,
 
 		// NewAPI
-		NewAPIBaseURL: getEnvStr("NEWAPI_BASE_URL", "http://localhost:3000"),
-		NewAPIKey:     getEnvStr("NEWAPI_API_KEY", ""),
+		NewAPIBaseURL: getEnvStrMulti([]string{"NEWAPI_BASEURL", "NEWAPI_BASE_URL"}, "http://localhost:3000"),
+		NewAPIKey:     getEnvStrMulti([]string{"NEWAPI_API_KEY", "API_KEY"}, ""),
 
 		// Logging
 		LogFile:  getEnvStr("LOG_FILE", ""),
@@ -85,6 +85,16 @@ func Load() *Config {
 
 		// Data
 		DataDir: getEnvStr("DATA_DIR", "./data"),
+	}
+
+	// ======== Backward compatibility: build SQL_DSN from split fields ========
+	if cfg.SQLDSN == "" {
+		cfg.SQLDSN = buildDSNFromSplitFields()
+	}
+
+	// ======== Backward compatibility: build Redis conn string ========
+	if cfg.RedisConnString == "" {
+		cfg.RedisConnString = buildRedisConnString()
 	}
 
 	// Auto-detect database engine from DSN
@@ -101,6 +111,52 @@ func Load() *Config {
 	}
 
 	return cfg
+}
+
+// buildDSNFromSplitFields constructs SQL_DSN from legacy DB_ENGINE/DB_DNS/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD
+func buildDSNFromSplitFields() string {
+	engine := strings.ToLower(getEnvStr("DB_ENGINE", ""))
+	host := getEnvStr("DB_DNS", "")
+	port := getEnvStr("DB_PORT", "")
+	name := getEnvStr("DB_NAME", "")
+	user := getEnvStr("DB_USER", "")
+	pass := getEnvStr("DB_PASSWORD", "")
+
+	if host == "" {
+		return ""
+	}
+
+	switch engine {
+	case "postgres", "postgresql":
+		// PostgreSQL: host=xxx port=5432 user=xxx password=xxx dbname=xxx sslmode=disable
+		dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s sslmode=disable", host, user, pass, name)
+		if port != "" {
+			dsn = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", host, port, user, pass, name)
+		}
+		return dsn
+	default:
+		// MySQL: user:pass@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True
+		if port == "" {
+			port = "3306"
+		}
+		return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True", user, pass, host, port, name)
+	}
+}
+
+// buildRedisConnString constructs Redis connection string from legacy REDIS_HOST/REDIS_PORT/REDIS_PASSWORD
+func buildRedisConnString() string {
+	host := getEnvStrMulti([]string{"REDIS_HOST"}, "")
+	port := getEnvStrMulti([]string{"REDIS_PORT"}, "6379")
+	pass := getEnvStr("REDIS_PASSWORD", "")
+
+	if host == "" {
+		return ""
+	}
+
+	if pass != "" {
+		return fmt.Sprintf("redis://:%s@%s:%s/0", pass, host, port)
+	}
+	return fmt.Sprintf("redis://%s:%s/0", host, port)
 }
 
 // Get returns the global config, panics if not loaded
@@ -181,6 +237,28 @@ func getEnvInt(key string, defaultVal int) int {
 	if val := os.Getenv(key); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
 			return i
+		}
+	}
+	return defaultVal
+}
+
+// getEnvStrMulti tries multiple env var keys in order, returns first found or default
+func getEnvStrMulti(keys []string, defaultVal string) string {
+	for _, key := range keys {
+		if val := os.Getenv(key); val != "" {
+			return val
+		}
+	}
+	return defaultVal
+}
+
+// getEnvIntMulti tries multiple env var keys in order, returns first found or default
+func getEnvIntMulti(keys []string, defaultVal int) int {
+	for _, key := range keys {
+		if val := os.Getenv(key); val != "" {
+			if i, err := strconv.Atoi(val); err == nil {
+				return i
+			}
 		}
 	}
 	return defaultVal
