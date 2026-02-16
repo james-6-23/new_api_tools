@@ -29,7 +29,7 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 		return cached, nil
 	}
 
-	result := map[string]interface{}{}
+	windowsData := map[string]interface{}{}
 
 	for _, window := range windows {
 		seconds, ok := WindowSeconds[window]
@@ -57,7 +57,7 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 
 		rows, err := s.db.Query(query)
 		if err != nil {
-			result[window] = []map[string]interface{}{}
+			windowsData[window] = []map[string]interface{}{}
 			continue
 		}
 
@@ -72,7 +72,12 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 			}
 		}
 
-		result[window] = rows
+		windowsData[window] = rows
+	}
+
+	result := map[string]interface{}{
+		"windows":      windowsData,
+		"generated_at": time.Now().Unix(),
 	}
 
 	cm.Set(cacheKey, result, 3*time.Minute)

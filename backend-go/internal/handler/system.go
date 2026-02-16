@@ -31,8 +31,10 @@ func GetSystemScale(c *gin.Context) {
 				"total_logs":  0,
 			},
 			"settings": gin.H{
-				"cache_ttl":        300,
-				"refresh_interval": 300,
+				"cache_ttl":                 300,
+				"refresh_interval":          300,
+				"frontend_refresh_interval": 60,
+				"description":               "中型系统",
 			},
 		},
 	})
