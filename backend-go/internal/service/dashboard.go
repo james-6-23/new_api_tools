@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/database"
@@ -289,35 +290,228 @@ func (s *DashboardService) GetChannelStatus() ([]map[string]interface{}, error) 
 func (s *DashboardService) GetIPDistribution(window string) (map[string]interface{}, error) {
 	startTime, endTime := parsePeriodToTimestamps(window)
 
-	// Get total distinct IPs and requests
-	totalQuery := fmt.Sprintf(`
-		SELECT COUNT(DISTINCT ip) as total_ips,
-			COUNT(*) as total_requests
+	// Step 1: Query distinct IPs with request counts and user counts
+	ipQuery := fmt.Sprintf(`
+		SELECT ip, 
+			COUNT(*) as request_count,
+			COUNT(DISTINCT user_id) as user_count
 		FROM logs
-		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''`,
-		startTime, endTime)
+		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
+		GROUP BY ip
+		ORDER BY request_count DESC
+		LIMIT 3000`, startTime, endTime)
 
-	summary, _ := s.db.QueryOne(totalQuery)
-
-	totalIPs := int64(0)
-	totalRequests := int64(0)
-	if summary != nil {
-		totalIPs = toInt64(summary["total_ips"])
-		totalRequests = toInt64(summary["total_requests"])
+	rows, err := s.db.Query(ipQuery)
+	if err != nil || len(rows) == 0 {
+		return map[string]interface{}{
+			"total_ips":           0,
+			"total_requests":      0,
+			"domestic_percentage": 0.0,
+			"overseas_percentage": 0.0,
+			"by_country":          []map[string]interface{}{},
+			"by_province":         []map[string]interface{}{},
+			"top_cities":          []map[string]interface{}{},
+			"snapshot_time":       time.Now().Unix(),
+		}, nil
 	}
 
-	result := map[string]interface{}{
+	// Step 2: Collect IPs and look up GeoIP
+	geoSvc := GetIPGeoService()
+
+	type ipStat struct {
+		IP           string
+		RequestCount int64
+		UserCount    int64
+	}
+
+	var ipStats []ipStat
+	var ips []string
+	for _, row := range rows {
+		ip := fmt.Sprintf("%v", row["ip"])
+		if ip == "" || ip == "<nil>" {
+			continue
+		}
+		ipStats = append(ipStats, ipStat{
+			IP:           ip,
+			RequestCount: toInt64(row["request_count"]),
+			UserCount:    toInt64(row["user_count"]),
+		})
+		ips = append(ips, ip)
+	}
+
+	geoResults := geoSvc.QueryBatch(ips)
+
+	// Step 3: Aggregate by country, province, city
+	type countryAgg struct {
+		CountryCode  string
+		IPCount      int64
+		RequestCount int64
+		UserCount    int64
+	}
+	type provinceAgg struct {
+		Country      string
+		CountryCode  string
+		IPCount      int64
+		RequestCount int64
+		UserCount    int64
+	}
+	type cityAgg struct {
+		Country      string
+		CountryCode  string
+		Region       string
+		City         string
+		IPCount      int64
+		RequestCount int64
+		UserCount    int64
+	}
+
+	byCountry := map[string]*countryAgg{}
+	byProvince := map[string]*provinceAgg{}
+	byCity := map[string]*cityAgg{}
+
+	var totalIPs int64
+	var totalRequests int64
+	var domesticRequests int64
+	var overseasRequests int64
+
+	for _, stat := range ipStats {
+		geo := geoResults[stat.IP]
+		country := geo.Country
+		countryCode := geo.CountryCode
+		region := geo.Region
+		city := geo.City
+
+		if !geo.Success || country == "" {
+			country = "未知"
+			countryCode = "XX"
+		}
+
+		totalIPs++
+		totalRequests += stat.RequestCount
+
+		// Domestic vs overseas
+		if domesticCountryCodes[countryCode] {
+			domesticRequests += stat.RequestCount
+		} else {
+			overseasRequests += stat.RequestCount
+		}
+
+		// By country
+		if _, ok := byCountry[country]; !ok {
+			byCountry[country] = &countryAgg{CountryCode: countryCode}
+		}
+		byCountry[country].IPCount++
+		byCountry[country].RequestCount += stat.RequestCount
+		byCountry[country].UserCount += stat.UserCount
+
+		// By province (Chinese mainland only)
+		if countryCode == "CN" && region != "" {
+			if _, ok := byProvince[region]; !ok {
+				byProvince[region] = &provinceAgg{Country: country, CountryCode: countryCode}
+			}
+			byProvince[region].IPCount++
+			byProvince[region].RequestCount += stat.RequestCount
+			byProvince[region].UserCount += stat.UserCount
+		}
+
+		// By city
+		if city != "" {
+			cityKey := fmt.Sprintf("%s:%s:%s", country, region, city)
+			if _, ok := byCity[cityKey]; !ok {
+				byCity[cityKey] = &cityAgg{Country: country, CountryCode: countryCode, Region: region, City: city}
+			}
+			byCity[cityKey].IPCount++
+			byCity[cityKey].RequestCount += stat.RequestCount
+			byCity[cityKey].UserCount += stat.UserCount
+		}
+	}
+
+	// Step 4: Convert to sorted lists
+	countryList := make([]map[string]interface{}, 0, len(byCountry))
+	for name, agg := range byCountry {
+		pct := float64(0)
+		if totalRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		}
+		countryList = append(countryList, map[string]interface{}{
+			"country":       name,
+			"country_code":  agg.CountryCode,
+			"ip_count":      agg.IPCount,
+			"request_count": agg.RequestCount,
+			"user_count":    agg.UserCount,
+			"percentage":    math.Round(pct*100) / 100,
+		})
+	}
+	sortByRequestCount(countryList)
+
+	provinceList := make([]map[string]interface{}, 0, len(byProvince))
+	for name, agg := range byProvince {
+		pct := float64(0)
+		if totalRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		}
+		provinceList = append(provinceList, map[string]interface{}{
+			"country":       agg.Country,
+			"country_code":  agg.CountryCode,
+			"region":        name,
+			"ip_count":      agg.IPCount,
+			"request_count": agg.RequestCount,
+			"user_count":    agg.UserCount,
+			"percentage":    math.Round(pct*100) / 100,
+		})
+	}
+	sortByRequestCount(provinceList)
+
+	cityList := make([]map[string]interface{}, 0, len(byCity))
+	for _, agg := range byCity {
+		pct := float64(0)
+		if totalRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		}
+		cityList = append(cityList, map[string]interface{}{
+			"country":       agg.Country,
+			"country_code":  agg.CountryCode,
+			"region":        agg.Region,
+			"city":          agg.City,
+			"ip_count":      agg.IPCount,
+			"request_count": agg.RequestCount,
+			"user_count":    agg.UserCount,
+			"percentage":    math.Round(pct*100) / 100,
+		})
+	}
+	sortByRequestCount(cityList)
+
+	// Domestic/overseas percentage
+	domesticPct := float64(0)
+	overseasPct := float64(0)
+	if totalRequests > 0 {
+		domesticPct = math.Round(float64(domesticRequests)/float64(totalRequests)*10000) / 100
+		overseasPct = math.Round(float64(overseasRequests)/float64(totalRequests)*10000) / 100
+	}
+
+	return map[string]interface{}{
 		"total_ips":           totalIPs,
 		"total_requests":      totalRequests,
-		"domestic_percentage": 0.0,
-		"overseas_percentage": 0.0,
-		"by_country":          []map[string]interface{}{},
-		"by_province":         []map[string]interface{}{},
-		"top_cities":          []map[string]interface{}{},
+		"domestic_percentage": domesticPct,
+		"overseas_percentage": overseasPct,
+		"by_country":          countryList,
+		"by_province":         provinceList,
+		"top_cities":          cityList,
 		"snapshot_time":       time.Now().Unix(),
-	}
+	}, nil
+}
 
-	return result, nil
+// sortByRequestCount sorts a slice of maps by request_count descending
+func sortByRequestCount(list []map[string]interface{}) {
+	for i := 0; i < len(list); i++ {
+		for j := i + 1; j < len(list); j++ {
+			iCount := toInt64(list[i]["request_count"])
+			jCount := toInt64(list[j]["request_count"])
+			if jCount > iCount {
+				list[i], list[j] = list[j], list[i]
+			}
+		}
+	}
 }
 
 // toFloat64 safely converts interface{} to float64
