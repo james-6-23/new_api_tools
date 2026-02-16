@@ -1,22 +1,38 @@
 # NewAPI Middleware Tool - All-in-One Dockerfile (Go Backend)
 # 前端 + Go 后端合并到单个镜像
+# 
+# 构建缓存说明:
+#   - npm 依赖缓存: /root/.npm
+#   - Go 模块缓存: /go/pkg/mod
+#   - Go 编译缓存: /root/.cache/go-build
+#   使用 docker buildx build 或 DOCKER_BUILDKIT=1 启用缓存挂载
+
+# syntax=docker/dockerfile:1
 
 # Stage 1: 构建前端
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: 构建 Go 后端
-FROM golang:1.23-alpine AS backend-builder
+FROM golang:1.25-alpine AS backend-builder
 WORKDIR /build
 RUN apk add --no-cache git ca-certificates tzdata
+
+# 先复制依赖文件，利用层缓存
 COPY backend-go/go.mod backend-go/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# 复制源码并编译，挂载 Go 编译缓存
 COPY backend-go/ .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w" \
     -o /build/server \
     ./cmd/server

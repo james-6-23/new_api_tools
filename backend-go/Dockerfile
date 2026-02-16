@@ -1,23 +1,29 @@
 # NewAPI Middleware Tool - Go Backend Dockerfile
 # Multi-stage build for minimal production image
+#
+# 构建缓存: 使用 BuildKit 缓存挂载加速二次构建
+#   DOCKER_BUILDKIT=1 docker build -t backend-go .
+
+# syntax=docker/dockerfile:1
 
 # Stage 1: Build Go binary
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
 
-# Copy module files first for better layer caching
+# Copy module files first for layer caching
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-# Copy source code
+# Copy source code and build with cache
 COPY . .
-
-# Build static binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w" \
     -o /build/server \
     ./cmd/server
