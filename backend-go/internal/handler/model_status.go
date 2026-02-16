@@ -25,14 +25,18 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.GET("/config/time-window", GetTimeWindowConfig)
 		g.PUT("/config/time-window", SetTimeWindowConfig)
 		g.PUT("/config/window", SetTimeWindowConfig)
+		g.POST("/config/window", SetTimeWindowConfig)
 		g.GET("/config/theme", GetThemeConfig)
 		g.PUT("/config/theme", SetThemeConfig)
+		g.POST("/config/theme", SetThemeConfig)
 		g.GET("/config/refresh-interval", GetRefreshIntervalConfig)
 		g.PUT("/config/refresh-interval", SetRefreshIntervalConfig)
 		g.PUT("/config/refresh", SetRefreshIntervalConfig)
+		g.POST("/config/refresh", SetRefreshIntervalConfig)
 		g.GET("/config/sort-mode", GetSortModeConfig)
 		g.PUT("/config/sort-mode", SetSortModeConfig)
 		g.PUT("/config/sort", SetSortModeConfig)
+		g.POST("/config/sort", SetSortModeConfig)
 		g.PUT("/config/custom-order", SetCustomOrderConfig)
 	}
 

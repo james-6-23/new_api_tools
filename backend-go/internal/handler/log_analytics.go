@@ -17,8 +17,11 @@ func RegisterLogAnalyticsRoutes(r *gin.RouterGroup) {
 		g.POST("/process", ProcessLogs)
 		g.POST("/batch-process", BatchProcessLogs)
 		g.POST("/batch", BatchProcessLogs)
+		// Python-compatible routes: /ranking/* and /users/*
 		g.GET("/ranking/requests", GetUserRequestRanking)
 		g.GET("/ranking/quota", GetUserQuotaRanking)
+		g.GET("/users/requests", GetUserRequestRanking)
+		g.GET("/users/quota", GetUserQuotaRanking)
 		g.GET("/models", GetModelStatistics)
 		g.GET("/summary", GetAnalyticsSummary)
 		g.POST("/reset", ResetAnalytics)
@@ -42,14 +45,10 @@ func ProcessLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("PROCESS_ERROR", err.Error(), ""))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
-		"processed": result["processed"],
-		"message":   result["message"],
-	})
+	c.JSON(http.StatusOK, result)
 }
 
-// POST /api/analytics/batch-process
+// POST /api/analytics/batch-process or /api/analytics/batch
 func BatchProcessLogs(c *gin.Context) {
 	maxIter, _ := strconv.Atoi(c.DefaultQuery("max_iterations", "100"))
 	svc := service.NewLogAnalyticsService()
@@ -58,21 +57,10 @@ func BatchProcessLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("PROCESS_ERROR", err.Error(), ""))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success":          true,
-		"total_processed":  result["total_processed"],
-		"iterations":       result["iterations"],
-		"elapsed_seconds":  result["elapsed_seconds"],
-		"logs_per_second":  result["logs_per_second"],
-		"progress_percent": result["progress_percent"],
-		"remaining_logs":   result["remaining_logs"],
-		"last_log_id":      result["last_log_id"],
-		"completed":        result["completed"],
-		"timed_out":        result["timed_out"],
-	})
+	c.JSON(http.StatusOK, result)
 }
 
-// GET /api/analytics/ranking/requests
+// GET /api/analytics/ranking/requests or /api/analytics/users/requests
 func GetUserRequestRanking(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	svc := service.NewLogAnalyticsService()
@@ -84,7 +72,7 @@ func GetUserRequestRanking(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
 
-// GET /api/analytics/ranking/quota
+// GET /api/analytics/ranking/quota or /api/analytics/users/quota
 func GetUserQuotaRanking(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	svc := service.NewLogAnalyticsService()

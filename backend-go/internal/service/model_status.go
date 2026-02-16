@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/cache"
@@ -10,12 +11,51 @@ import (
 
 // Constants for model status
 var (
-	AvailableTimeWindows      = []string{"1h", "6h", "12h", "24h"}
-	DefaultTimeWindow         = "6h"
-	AvailableThemes           = []string{"light", "dark", "system"}
+	AvailableTimeWindows = []string{"1h", "6h", "12h", "24h"}
+	DefaultTimeWindow    = "24h"
+	AvailableThemes      = []string{
+		"daylight", "obsidian", "minimal", "neon", "forest", "ocean", "terminal",
+		"cupertino", "material", "openai", "anthropic", "vercel", "linear",
+		"stripe", "github", "discord", "tesla",
+		// Legacy compatibility
+		"light", "dark", "system",
+	}
 	AvailableRefreshIntervals = []int{0, 30, 60, 120, 300}
 	AvailableSortModes        = []string{"default", "availability", "custom"}
 )
+
+// Time window slot configurations: {totalSeconds, numSlots, slotSeconds}
+// Must match Python backend and frontend TIME_WINDOWS exactly
+type timeWindowConfig struct {
+	totalSeconds int64
+	numSlots     int
+	slotSeconds  int64
+}
+
+var timeWindowConfigs = map[string]timeWindowConfig{
+	"1h":  {3600, 60, 60},    // 1 hour, 60 slots, 1 minute each
+	"6h":  {21600, 24, 900},  // 6 hours, 24 slots, 15 minutes each
+	"12h": {43200, 24, 1800}, // 12 hours, 24 slots, 30 minutes each
+	"24h": {86400, 24, 3600}, // 24 hours, 24 slots, 1 hour each
+}
+
+// getStatusColor determines status color based on success rate (matches Python backend)
+func getStatusColor(successRate float64, totalRequests int64) string {
+	if totalRequests == 0 {
+		return "green" // No requests = no issues
+	}
+	if successRate >= 95 {
+		return "green"
+	} else if successRate >= 80 {
+		return "yellow"
+	}
+	return "red"
+}
+
+// roundRate rounds a float to 2 decimal places
+func roundRate(rate float64) float64 {
+	return math.Round(rate*100) / 100
+}
 
 // ModelStatusService handles model availability monitoring
 type ModelStatusService struct {
@@ -55,6 +95,7 @@ func (s *ModelStatusService) GetAvailableModels() ([]map[string]interface{}, err
 }
 
 // GetModelStatus returns status for a specific model
+// Uses a single GROUP BY FLOOR query (matches Python backend optimization)
 func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[string]interface{}, error) {
 	cacheKey := fmt.Sprintf("model_status:%s:%s", modelName, window)
 	cm := cache.Get()
@@ -64,82 +105,74 @@ func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[strin
 		return cached, nil
 	}
 
-	seconds, ok := WindowSeconds[window]
+	// Get window configuration (dynamic slot count per window)
+	twConfig, ok := timeWindowConfigs[window]
 	if !ok {
-		seconds = 21600 // default 6h
+		twConfig = timeWindowConfigs["24h"]
 	}
+
 	now := time.Now().Unix()
-	startTime := now - seconds
+	startTime := now - twConfig.totalSeconds
+	numSlots := twConfig.numSlots
+	slotSeconds := twConfig.slotSeconds
 
-	// Overall stats
-	statsQuery := fmt.Sprintf(`
-		SELECT COUNT(*) as total_requests,
-			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_count,
-			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_count
+	// Single optimized query — aggregate by time slot using FLOOR division
+	// This reduces N queries to 1 query per model (matches Python backend)
+	slotQuery := fmt.Sprintf(`
+		SELECT FLOOR((created_at - %d) / %d) as slot_idx,
+			COUNT(*) as total,
+			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success
 		FROM logs
-		WHERE model_name = '%s' AND created_at >= %d AND type IN (2, 5)`,
-		modelName, startTime)
+		WHERE model_name = '%s'
+			AND created_at >= %d AND created_at < %d
+			AND type IN (2, 5)
+		GROUP BY FLOOR((created_at - %d) / %d)`,
+		startTime, slotSeconds,
+		modelName, startTime, now,
+		startTime, slotSeconds)
 
-	statsRow, _ := s.db.QueryOne(statsQuery)
+	rows, _ := s.db.Query(slotQuery)
 
-	totalReqs := int64(0)
-	successCount := int64(0)
-	successRate := float64(100)
-	currentStatus := "healthy"
-
-	if statsRow != nil {
-		totalReqs = toInt64(statsRow["total_requests"])
-		successCount = toInt64(statsRow["success_count"])
-		if totalReqs > 0 {
-			successRate = float64(successCount) / float64(totalReqs) * 100
-		}
+	// Initialize all slots with zeros
+	type slotInfo struct {
+		total   int64
+		success int64
 	}
+	slotMap := make(map[int64]*slotInfo, numSlots)
 
-	if totalReqs == 0 {
-		currentStatus = "unknown"
-	} else if successRate < 50 {
-		currentStatus = "down"
-	} else if successRate < 80 {
-		currentStatus = "degraded"
-	}
-
-	// Time slots (divide window into 12 slots)
-	slotCount := 12
-	slotDuration := seconds / int64(slotCount)
-	slotData := make([]map[string]interface{}, 0, slotCount)
-
-	for i := 0; i < slotCount; i++ {
-		slotStart := startTime + int64(i)*slotDuration
-		slotEnd := slotStart + slotDuration
-
-		slotQuery := fmt.Sprintf(`
-			SELECT COUNT(*) as total,
-				SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success
-			FROM logs
-			WHERE model_name = '%s' AND created_at >= %d AND created_at < %d AND type IN (2, 5)`,
-			modelName, slotStart, slotEnd)
-
-		slotRow, _ := s.db.QueryOne(slotQuery)
-
-		slotTotal := int64(0)
-		slotSuccess := int64(0)
-		slotRate := float64(100)
-		slotStatus := "healthy"
-
-		if slotRow != nil {
-			slotTotal = toInt64(slotRow["total"])
-			slotSuccess = toInt64(slotRow["success"])
-			if slotTotal > 0 {
-				slotRate = float64(slotSuccess) / float64(slotTotal) * 100
+	// Fill in actual data from query results
+	if rows != nil {
+		for _, row := range rows {
+			idx := toInt64(row["slot_idx"])
+			if idx >= 0 && idx < int64(numSlots) {
+				slotMap[idx] = &slotInfo{
+					total:   toInt64(row["total"]),
+					success: toInt64(row["success"]),
+				}
 			}
 		}
+	}
 
-		if slotTotal == 0 {
-			slotStatus = "unknown"
-		} else if slotRate < 50 {
-			slotStatus = "down"
-		} else if slotRate < 80 {
-			slotStatus = "degraded"
+	// Build slot_data list with status colors
+	slotData := make([]map[string]interface{}, 0, numSlots)
+	totalReqs := int64(0)
+	totalSuccess := int64(0)
+
+	for i := 0; i < numSlots; i++ {
+		slotStart := startTime + int64(i)*slotSeconds
+		slotEnd := slotStart + slotSeconds
+
+		si := slotMap[int64(i)]
+		slotTotal := int64(0)
+		slotSuccess := int64(0)
+		if si != nil {
+			slotTotal = si.total
+			slotSuccess = si.success
+		}
+
+		slotRate := float64(100)
+		if slotTotal > 0 {
+			slotRate = float64(slotSuccess) / float64(slotTotal) * 100
 		}
 
 		slotData = append(slotData, map[string]interface{}{
@@ -148,9 +181,17 @@ func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[strin
 			"end_time":       slotEnd,
 			"total_requests": slotTotal,
 			"success_count":  slotSuccess,
-			"success_rate":   slotRate,
-			"status":         slotStatus,
+			"success_rate":   roundRate(slotRate),
+			"status":         getStatusColor(slotRate, slotTotal),
 		})
+
+		totalReqs += slotTotal
+		totalSuccess += slotSuccess
+	}
+
+	overallRate := float64(100)
+	if totalReqs > 0 {
+		overallRate = float64(totalSuccess) / float64(totalReqs) * 100
 	}
 
 	result := map[string]interface{}{
@@ -158,13 +199,13 @@ func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[strin
 		"display_name":   modelName,
 		"time_window":    window,
 		"total_requests": totalReqs,
-		"success_count":  successCount,
-		"success_rate":   successRate,
-		"current_status": currentStatus,
+		"success_count":  totalSuccess,
+		"success_rate":   roundRate(overallRate),
+		"current_status": getStatusColor(overallRate, totalReqs),
 		"slot_data":      slotData,
 	}
 
-	cm.Set(cacheKey, result, 1*time.Minute)
+	cm.Set(cacheKey, result, 30*time.Second)
 	return result, nil
 }
 

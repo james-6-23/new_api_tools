@@ -63,8 +63,9 @@ func GetUsers(c *gin.Context) {
 	params := service.ListUsersParams{
 		Page:           page,
 		PageSize:       pageSize,
-		ActivityFilter: c.Query("activity_filter"),
+		ActivityFilter: c.Query("activity"),
 		GroupFilter:    c.Query("group"),
+		SourceFilter:   c.Query("source"),
 		Search:         c.Query("search"),
 		OrderBy:        c.DefaultQuery("order_by", "request_count"),
 		OrderDir:       c.DefaultQuery("order_dir", "DESC"),

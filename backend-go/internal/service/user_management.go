@@ -52,12 +52,12 @@ func (s *UserManagementService) GetActivityStats(quick bool) (map[string]interfa
 			neverCount = toInt64(neverRow["count"])
 		}
 		return map[string]interface{}{
-			"total_users":     totalUsers,
-			"active_users":    0,
-			"inactive_users":  0,
-			"very_inactive":   0,
-			"never_requested": neverCount,
-			"quick_mode":      true,
+			"total_users":         totalUsers,
+			"active_users":        0,
+			"inactive_users":      0,
+			"very_inactive_users": 0,
+			"never_requested":     neverCount,
+			"quick_mode":          true,
 		}, nil
 	}
 
@@ -97,11 +97,11 @@ func (s *UserManagementService) GetActivityStats(quick bool) (map[string]interfa
 	veryInactive := total - activeCount - inactiveCount - neverCount
 
 	return map[string]interface{}{
-		"total_users":     total,
-		"active_users":    activeCount,
-		"inactive_users":  inactiveCount,
-		"very_inactive":   veryInactive,
-		"never_requested": neverCount,
+		"total_users":         total,
+		"active_users":        activeCount,
+		"inactive_users":      inactiveCount,
+		"very_inactive_users": veryInactive,
+		"never_requested":     neverCount,
 	}, nil
 }
 
@@ -111,6 +111,7 @@ type ListUsersParams struct {
 	PageSize       int    `json:"page_size"`
 	ActivityFilter string `json:"activity_filter"`
 	GroupFilter    string `json:"group_filter"`
+	SourceFilter   string `json:"source_filter"`
 	Search         string `json:"search"`
 	OrderBy        string `json:"order_by"`
 	OrderDir       string `json:"order_dir"`
@@ -144,6 +145,11 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 		orderDir = "DESC"
 	}
 
+	groupCol := "`group`"
+	if s.db.IsPG {
+		groupCol = `"group"`
+	}
+
 	offset := (params.Page - 1) * params.PageSize
 	where := []string{"u.deleted_at IS NULL"}
 	args := []interface{}{}
@@ -151,25 +157,45 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 
 	if params.Search != "" {
 		if s.db.IsPG {
-			where = append(where, fmt.Sprintf("(u.username ILIKE $%d OR u.display_name ILIKE $%d)", argIdx, argIdx+1))
-			args = append(args, "%"+params.Search+"%", "%"+params.Search+"%")
-			argIdx += 2
+			where = append(where, fmt.Sprintf(
+				"(u.username ILIKE $%d OR COALESCE(u.display_name,'') ILIKE $%d OR COALESCE(u.email,'') ILIKE $%d OR COALESCE(u.linux_do_id,'') ILIKE $%d OR COALESCE(u.aff_code,'') ILIKE $%d)",
+				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4))
+			searchPattern := "%" + params.Search + "%"
+			args = append(args, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
+			argIdx += 5
 		} else {
-			where = append(where, "(u.username LIKE ? OR u.display_name LIKE ?)")
-			args = append(args, "%"+params.Search+"%", "%"+params.Search+"%")
+			where = append(where, "(u.username LIKE ? OR COALESCE(u.display_name,'') LIKE ? OR COALESCE(u.email,'') LIKE ? OR COALESCE(u.linux_do_id,'') LIKE ? OR COALESCE(u.aff_code,'') LIKE ?)")
+			searchPattern := "%" + params.Search + "%"
+			args = append(args, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 		}
 	}
 	if params.GroupFilter != "" {
 		if s.db.IsPG {
-			where = append(where, fmt.Sprintf("u.\"group\" = $%d", argIdx))
+			where = append(where, fmt.Sprintf("u.%s = $%d", groupCol, argIdx))
 			argIdx++
 		} else {
-			where = append(where, "u.`group` = ?")
+			where = append(where, fmt.Sprintf("u.%s = ?", groupCol))
 		}
 		args = append(args, params.GroupFilter)
 	}
 	if params.ActivityFilter == ActivityNever {
 		where = append(where, "u.request_count = 0")
+	}
+
+	// Source filter
+	if params.SourceFilter != "" {
+		sourceConditions := map[string]string{
+			"github":   "u.github_id IS NOT NULL AND u.github_id <> ''",
+			"wechat":   "u.wechat_id IS NOT NULL AND u.wechat_id <> ''",
+			"telegram": "u.telegram_id IS NOT NULL AND u.telegram_id <> ''",
+			"discord":  "u.discord_id IS NOT NULL AND u.discord_id <> ''",
+			"oidc":     "u.oidc_id IS NOT NULL AND u.oidc_id <> ''",
+			"linux_do": "u.linux_do_id IS NOT NULL AND u.linux_do_id <> ''",
+			"password": "(u.github_id IS NULL OR u.github_id = '') AND (u.wechat_id IS NULL OR u.wechat_id = '') AND (u.telegram_id IS NULL OR u.telegram_id = '') AND (u.discord_id IS NULL OR u.discord_id = '') AND (u.oidc_id IS NULL OR u.oidc_id = '') AND (u.linux_do_id IS NULL OR u.linux_do_id = '')",
+		}
+		if cond, ok := sourceConditions[params.SourceFilter]; ok {
+			where = append(where, "("+cond+")")
+		}
 	}
 
 	whereClause := strings.Join(where, " AND ")
@@ -185,21 +211,23 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 	}
 	total := toInt64(countRow["count"])
 
-	// Query users
+	// Query users — include linux_do_id field
 	var selectQuery string
 	if s.db.IsPG {
 		selectQuery = fmt.Sprintf(
 			`SELECT u.id, u.username, u.display_name, u.email, u.role, u.status,
-			 u.quota, u.used_quota, u.request_count, u."group", u.created_at
+			 u.quota, u.used_quota, u.request_count, u.%s, u.created_at, u.linux_do_id,
+			 u.github_id, u.wechat_id, u.telegram_id, u.discord_id, u.oidc_id
 			 FROM users u WHERE %s ORDER BY u.%s %s LIMIT $%d OFFSET $%d`,
-			whereClause, params.OrderBy, orderDir, argIdx, argIdx+1)
+			groupCol, whereClause, params.OrderBy, orderDir, argIdx, argIdx+1)
 		args = append(args, params.PageSize, offset)
 	} else {
 		selectQuery = fmt.Sprintf(
 			"SELECT u.id, u.username, u.display_name, u.email, u.role, u.status, "+
-				"u.quota, u.used_quota, u.request_count, u.`group`, u.created_at "+
+				"u.quota, u.used_quota, u.request_count, u.%s, u.created_at, u.linux_do_id, "+
+				"u.github_id, u.wechat_id, u.telegram_id, u.discord_id, u.oidc_id "+
 				"FROM users u WHERE %s ORDER BY u.%s %s LIMIT ? OFFSET ?",
-			whereClause, params.OrderBy, orderDir)
+			groupCol, whereClause, params.OrderBy, orderDir)
 		args = append(args, params.PageSize, offset)
 		selectQuery = s.db.RebindQuery(selectQuery)
 	}
@@ -207,6 +235,41 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 	rows, err := s.db.Query(selectQuery, args...)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enrich rows with computed fields (activity_level, source)
+	for _, row := range rows {
+		reqCount := toInt64(row["request_count"])
+		if reqCount == 0 {
+			row["activity_level"] = ActivityNever
+		} else {
+			row["activity_level"] = ActivityActive
+		}
+		row["last_request_time"] = nil
+
+		// Compute source from OAuth ID fields
+		source := "password"
+		if toString(row["linux_do_id"]) != "" {
+			source = "linux_do"
+		} else if toString(row["github_id"]) != "" {
+			source = "github"
+		} else if toString(row["wechat_id"]) != "" {
+			source = "wechat"
+		} else if toString(row["telegram_id"]) != "" {
+			source = "telegram"
+		} else if toString(row["discord_id"]) != "" {
+			source = "discord"
+		} else if toString(row["oidc_id"]) != "" {
+			source = "oidc"
+		}
+		row["source"] = source
+
+		// Clean up internal fields
+		delete(row, "github_id")
+		delete(row, "wechat_id")
+		delete(row, "telegram_id")
+		delete(row, "discord_id")
+		delete(row, "oidc_id")
 	}
 
 	totalPages := int((total + int64(params.PageSize) - 1) / int64(params.PageSize))
@@ -445,6 +508,21 @@ func toInt64(v interface{}) int64 {
 		return n
 	default:
 		return 0
+	}
+}
+
+// toString safely converts interface{} to string
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []byte:
+		return string(val)
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }
 

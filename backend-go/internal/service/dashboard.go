@@ -78,25 +78,31 @@ func (s *DashboardService) GetSystemOverview(period string) (map[string]interfac
 		result["active_tokens"] = row["count"]
 	}
 
-	// Total channels
+	// Total channels (channels table has no deleted_at column)
 	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM channels WHERE deleted_at IS NULL"))
+		`SELECT COUNT(*) as total, 
+		 SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active 
+		 FROM channels`))
 	if err == nil && row != nil {
-		result["total_channels"] = row["count"]
+		result["total_channels"] = row["total"]
+		result["active_channels"] = row["active"]
 	}
 
-	// Active channels (status=1)
+	// Total models (from abilities table — count distinct enabled models on active channels)
 	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM channels WHERE deleted_at IS NULL AND status = 1"))
-	if err == nil && row != nil {
-		result["active_channels"] = row["count"]
-	}
-
-	// Total models (distinct from logs)
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(DISTINCT model_name) as count FROM logs WHERE type = 2"))
+		`SELECT COUNT(DISTINCT a.model) as count 
+		 FROM abilities a
+		 INNER JOIN channels c ON c.id = a.channel_id
+		 WHERE c.status = 1`))
 	if err == nil && row != nil {
 		result["total_models"] = row["count"]
+	} else {
+		// Fallback: try models table
+		row, err = s.db.QueryOne(s.db.RebindQuery(
+			"SELECT COUNT(*) as count FROM models WHERE deleted_at IS NULL"))
+		if err == nil && row != nil {
+			result["total_models"] = row["count"]
+		}
 	}
 
 	// Redemption count
@@ -120,14 +126,16 @@ func (s *DashboardService) GetSystemOverview(period string) (map[string]interfac
 func (s *DashboardService) GetUsageStatistics(period string) (map[string]interface{}, error) {
 	startTime, endTime := parsePeriodToTimestamps(period)
 
+	// Only type=2 (success) for usage stats, matching Python backend
 	query := fmt.Sprintf(`
 		SELECT 
 			COUNT(*) as total_requests,
 			COALESCE(SUM(quota), 0) as total_quota_used,
 			COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
-			COALESCE(SUM(completion_tokens), 0) as total_completion_tokens
+			COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
+			COALESCE(AVG(use_time), 0) as avg_response_time
 		FROM logs 
-		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5)`,
+		WHERE created_at >= %d AND created_at <= %d AND type = 2`,
 		startTime, endTime)
 
 	row, err := s.db.QueryOne(query)
@@ -140,6 +148,7 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 		"total_quota_used":        0,
 		"total_prompt_tokens":     0,
 		"total_completion_tokens": 0,
+		"average_response_time":   float64(0),
 		"period":                  period,
 	}
 
@@ -148,6 +157,10 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 		result["total_quota_used"] = row["total_quota_used"]
 		result["total_prompt_tokens"] = row["total_prompt_tokens"]
 		result["total_completion_tokens"] = row["total_completion_tokens"]
+		// Average response time in milliseconds
+		if avgTime, ok := row["avg_response_time"]; ok {
+			result["average_response_time"] = toFloat64(avgTime)
+		}
 	}
 
 	return result, nil
@@ -305,4 +318,33 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	}
 
 	return result, nil
+}
+
+// toFloat64 safely converts interface{} to float64
+func toFloat64(v interface{}) float64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int32:
+		return float64(val)
+	case string:
+		var f float64
+		fmt.Sscanf(val, "%f", &f)
+		return f
+	case []byte:
+		var f float64
+		fmt.Sscanf(string(val), "%f", &f)
+		return f
+	default:
+		return 0
+	}
 }
