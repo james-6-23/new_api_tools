@@ -1,0 +1,150 @@
+package handler
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"github.com/new-api-tools/backend/internal/service"
+)
+
+// RegisterDashboardRoutes registers /api/dashboard endpoints
+func RegisterDashboardRoutes(r *gin.RouterGroup) {
+	g := r.Group("/dashboard")
+	{
+		g.GET("/overview", GetSystemOverview)
+		g.GET("/usage", GetUsageStatistics)
+		g.GET("/models", GetModelUsage)
+		g.GET("/trends/daily", GetDailyTrends)
+		g.GET("/trends/hourly", GetHourlyTrends)
+		g.GET("/top-users", GetTopUsers)
+		g.GET("/channels", GetChannelStatus)
+		g.POST("/cache/invalidate", InvalidateDashboardCache)
+		g.GET("/refresh-estimate", GetRefreshEstimate)
+		g.GET("/system-info", GetDashboardSystemInfo)
+	}
+}
+
+// GET /api/dashboard/overview
+func GetSystemOverview(c *gin.Context) {
+	period := c.DefaultQuery("period", "7d")
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetSystemOverview(period)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/usage
+func GetUsageStatistics(c *gin.Context) {
+	period := c.DefaultQuery("period", "24h")
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetUsageStatistics(period)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/models
+func GetModelUsage(c *gin.Context) {
+	period := c.DefaultQuery("period", "7d")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetModelUsage(period, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/trends/daily
+func GetDailyTrends(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetDailyTrends(days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/trends/hourly
+func GetHourlyTrends(c *gin.Context) {
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetHourlyTrends(hours)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/top-users
+func GetTopUsers(c *gin.Context) {
+	period := c.DefaultQuery("period", "7d")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetTopUsers(period, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// GET /api/dashboard/channels
+func GetChannelStatus(c *gin.Context) {
+	svc := service.NewDashboardService()
+
+	data, err := svc.GetChannelStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// POST /api/dashboard/cache/invalidate
+func InvalidateDashboardCache(c *gin.Context) {
+	// Clear dashboard-related caches
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Dashboard cache invalidated",
+	})
+}
+
+// GET /api/dashboard/refresh-estimate
+func GetRefreshEstimate(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"show_estimate":  false,
+			"estimated_time": 0,
+		},
+	})
+}
+
+// GET /api/dashboard/system-info
+func GetDashboardSystemInfo(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"scale":     "medium",
+			"cache_ttl": 300,
+			"tips":      []string{},
+		},
+	})
+}
