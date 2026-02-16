@@ -159,7 +159,7 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 	// Validate order_by
 	allowedOrderBy := map[string]bool{
 		"id": true, "username": true, "request_count": true,
-		"quota": true, "used_quota": true, "created_at": true,
+		"quota": true, "used_quota": true,
 	}
 	if !allowedOrderBy[params.OrderBy] {
 		params.OrderBy = "request_count"
@@ -284,7 +284,8 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 	total := toInt64(countRow["count"])
 
 	// Build SELECT columns dynamically based on available OAuth columns
-	selectCols := fmt.Sprintf("u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, u.%s, u.created_at", groupCol)
+	// NOTE: users table does NOT have created_at — do not select it
+	selectCols := fmt.Sprintf("u.id, u.username, u.display_name, u.email, u.role, u.status, u.quota, u.used_quota, u.request_count, u.%s, u.aff_code, u.remark", groupCol)
 	for _, col := range oauthCols {
 		selectCols += fmt.Sprintf(", u.%s", col)
 	}
@@ -305,10 +306,14 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 
 	rows, err := s.db.Query(selectQuery, args...)
 	if err != nil {
+		logger.L.Error(fmt.Sprintf("GetUsers 查询失败: %v, SQL: %s, args: %v", err, selectQuery, args))
 		return nil, err
 	}
+	if rows == nil {
+		rows = []map[string]interface{}{}
+	}
 
-	// Enrich rows with computed fields (activity_level, source)
+	// Enrich rows with computed fields (activity_level, source, linux_do_id)
 	for _, row := range rows {
 		reqCount := toInt64(row["request_count"])
 		if reqCount == 0 {
@@ -317,6 +322,13 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 			row["activity_level"] = ActivityActive
 		}
 		row["last_request_time"] = nil
+
+		// Preserve linux_do_id for frontend display
+		linuxDoID := ""
+		if oauthColSet["linux_do_id"] {
+			linuxDoID = toString(row["linux_do_id"])
+		}
+		row["linux_do_id"] = linuxDoID
 
 		// Compute source from OAuth ID fields (only check existing columns)
 		source := "password"
@@ -335,9 +347,11 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 		}
 		row["source"] = source
 
-		// Clean up internal OAuth fields
+		// Clean up internal OAuth fields (except linux_do_id which is kept)
 		for _, col := range oauthCols {
-			delete(row, col)
+			if col != "linux_do_id" {
+				delete(row, col)
+			}
 		}
 	}
 
