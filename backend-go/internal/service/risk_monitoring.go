@@ -100,7 +100,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		groupCol = `"group"`
 	}
 	userRow, _ := s.db.QueryOne(s.db.RebindQuery(
-		fmt.Sprintf("SELECT id, username, display_name, email, status, %s, request_count FROM users WHERE id = ?", groupCol)), userID)
+		fmt.Sprintf("SELECT id, username, display_name, email, status, %s, remark, linux_do_id, request_count FROM users WHERE id = ? AND deleted_at IS NULL", groupCol)), userID)
 
 	// Build user object
 	userInfo := map[string]interface{}{
@@ -110,6 +110,8 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		"email":        nil,
 		"status":       1,
 		"group":        nil,
+		"remark":       nil,
+		"linux_do_id":  nil,
 	}
 	if userRow != nil {
 		userInfo["id"] = userRow["id"]
@@ -117,7 +119,9 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		userInfo["display_name"] = userRow["display_name"]
 		userInfo["email"] = userRow["email"]
 		userInfo["status"] = userRow["status"]
-		userInfo["group"] = userRow[groupCol]
+		userInfo["group"] = userRow["group"]
+		userInfo["remark"] = userRow["remark"]
+		userInfo["linux_do_id"] = userRow["linux_do_id"]
 	}
 
 	// Usage stats in window
@@ -128,10 +132,11 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 			COALESCE(SUM(quota), 0) as quota_used,
 			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
-			COUNT(DISTINCT ip) as unique_ips,
+			COUNT(DISTINCT NULLIF(ip, '')) as unique_ips,
 			COUNT(DISTINCT token_id) as unique_tokens,
 			COUNT(DISTINCT model_name) as unique_models,
-			COUNT(DISTINCT channel) as unique_channels
+			COUNT(DISTINCT channel_id) as unique_channels,
+			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)`,
 		userID, startTime, now)
@@ -148,6 +153,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	uniqueTokens := int64(0)
 	uniqueModels := int64(0)
 	uniqueChannels := int64(0)
+	emptyCount := int64(0)
 
 	if statsRow != nil {
 		totalRequests = toInt64(statsRow["total_requests"])
@@ -160,13 +166,17 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		uniqueTokens = toInt64(statsRow["unique_tokens"])
 		uniqueModels = toInt64(statsRow["unique_models"])
 		uniqueChannels = toInt64(statsRow["unique_channels"])
+		emptyCount = toInt64(statsRow["empty_count"])
 	}
 
 	// Calculate rates
 	failureRate := 0.0
 	emptyRate := 0.0
 	if totalRequests > 0 {
-		failureRate = float64(failureRequests) / float64(totalRequests) * 100
+		failureRate = float64(failureRequests) / float64(totalRequests)
+	}
+	if successRequests > 0 {
+		emptyRate = float64(emptyCount) / float64(successRequests)
 	}
 
 	// Average use time
@@ -198,7 +208,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		"unique_tokens":     uniqueTokens,
 		"unique_models":     uniqueModels,
 		"unique_channels":   uniqueChannels,
-		"empty_count":       0,
+		"empty_count":       emptyCount,
 		"failure_rate":      failureRate,
 		"empty_rate":        emptyRate,
 	}
@@ -235,13 +245,14 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 
 	// Top models
 	modelsQuery := fmt.Sprintf(`
-		SELECT model_name, COUNT(*) as requests,
+		SELECT COALESCE(model_name, 'unknown') as model_name, COUNT(*) as requests,
 			COALESCE(SUM(quota), 0) as quota_used,
 			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
-			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests
+			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
-		GROUP BY model_name
+		GROUP BY COALESCE(model_name, 'unknown')
 		ORDER BY requests DESC
 		LIMIT 10`, userID, startTime, now)
 
@@ -249,28 +260,21 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	if topModels == nil {
 		topModels = []map[string]interface{}{}
 	}
-	// Add empty_count = 0 for each model
-	for _, m := range topModels {
-		m["empty_count"] = 0
-	}
 
 	// Top channels
 	channelsQuery := fmt.Sprintf(`
-		SELECT channel as channel_id, COUNT(*) as requests,
+		SELECT channel_id, COALESCE(MAX(channel_name), '') as channel_name,
+			COUNT(*) as requests,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
 		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
-		GROUP BY channel
+		GROUP BY channel_id
 		ORDER BY requests DESC
 		LIMIT 10`, userID, startTime, now)
 
 	topChannels, _ := s.db.Query(channelsQuery)
 	if topChannels == nil {
 		topChannels = []map[string]interface{}{}
-	}
-	// Add channel_name placeholder
-	for _, ch := range topChannels {
-		ch["channel_name"] = fmt.Sprintf("渠道 %v", ch["channel_id"])
 	}
 
 	// Top IPs
@@ -287,29 +291,26 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		topIPs = []map[string]interface{}{}
 	}
 
-	// Recent logs
+	// Recent logs (token_name and channel_name are directly in logs table)
 	recentLogsQuery := fmt.Sprintf(`
-		SELECT l.id, l.created_at, l.type, COALESCE(l.model_name,'') as model_name,
-			COALESCE(l.quota, 0) as quota,
-			COALESCE(l.prompt_tokens, 0) as prompt_tokens,
-			COALESCE(l.completion_tokens, 0) as completion_tokens,
-			COALESCE(l.use_time, 0) as use_time,
-			COALESCE(l.ip, '') as ip,
-			COALESCE(l.channel, 0) as channel,
-			COALESCE(t.name, '') as token_name
-		FROM logs l
-		LEFT JOIN tokens t ON l.token_id = t.id
-		WHERE l.user_id = %d AND l.created_at >= %d AND l.created_at <= %d AND l.type IN (2, 5)
-		ORDER BY l.created_at DESC
+		SELECT id, created_at, type, COALESCE(model_name,'') as model_name,
+			COALESCE(quota, 0) as quota,
+			COALESCE(prompt_tokens, 0) as prompt_tokens,
+			COALESCE(completion_tokens, 0) as completion_tokens,
+			COALESCE(use_time, 0) as use_time,
+			COALESCE(ip, '') as ip,
+			COALESCE(channel_id, 0) as channel_id,
+			COALESCE(channel_name, '') as channel_name,
+			COALESCE(token_id, 0) as token_id,
+			COALESCE(token_name, '') as token_name
+		FROM logs
+		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
+		ORDER BY id DESC
 		LIMIT 50`, userID, startTime, now)
 
 	recentLogs, _ := s.db.Query(recentLogsQuery)
 	if recentLogs == nil {
 		recentLogs = []map[string]interface{}{}
-	}
-	// Map channel -> channel_name
-	for _, log := range recentLogs {
-		log["channel_name"] = fmt.Sprintf("渠道 %v", log["channel"])
 	}
 
 	result := map[string]interface{}{
