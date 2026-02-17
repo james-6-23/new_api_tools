@@ -15,6 +15,7 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 
 	"github.com/new-api-tools/backend/internal/cache"
+	"github.com/new-api-tools/backend/internal/config"
 	"github.com/new-api-tools/backend/internal/logger"
 )
 
@@ -56,12 +57,19 @@ const (
 )
 
 // NewLinuxDoLookupService creates a new service with Chrome TLS fingerprint.
+// If LINUXDO_PROXY_URL is set (e.g. socks5://user:pass@host:port), the request
+// will be routed through that proxy to bypass Cloudflare IP reputation checks.
 func NewLinuxDoLookupService() *LinuxDoLookupService {
 	options := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(30),
 		tls_client.WithClientProfile(profiles.Chrome_120),
 		tls_client.WithNotFollowRedirects(),
 		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+	}
+
+	if cfg := config.Get(); cfg != nil && cfg.LinuxDoProxyURL != "" {
+		options = append(options, tls_client.WithProxyUrl(cfg.LinuxDoProxyURL))
+		logger.L.Info(fmt.Sprintf("[LinuxDoLookup] 使用代理: %s", cfg.LinuxDoProxyURL))
 	}
 
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)

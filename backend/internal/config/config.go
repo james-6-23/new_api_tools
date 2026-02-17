@@ -51,6 +51,9 @@ type Config struct {
 
 	// Data directory (for persistent local storage)
 	DataDir string `json:"data_dir"`
+
+	// LinuxDo Lookup proxy (optional, e.g. socks5://user:pass@host:port)
+	LinuxDoProxyURL string `json:"linuxdo_proxy_url"`
 }
 
 // Global config instance
@@ -87,6 +90,9 @@ func Load() *Config {
 
 		// Data
 		DataDir: getEnvStr("DATA_DIR", "./data"),
+
+		// LinuxDo proxy
+		LinuxDoProxyURL: getEnvStrMulti([]string{"LINUXDO_PROXY_URL", "LINUXDO_PROXY"}, ""),
 	}
 
 	// ======== Backward compatibility: build SQL_DSN from split fields ========

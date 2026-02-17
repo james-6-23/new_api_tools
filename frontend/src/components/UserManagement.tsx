@@ -1021,6 +1021,9 @@ export function UserManagement() {
                                   window.open(data.data.profile_url, '_blank')
                                 } else if (data.error_type === 'rate_limit') {
                                   showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
+                                } else if (data.fallback_url) {
+                                  window.open(data.fallback_url, '_blank')
+                                  showToast('warning', '服务器查询失败，已在新标签页打开 Linux.do 证书页面')
                                 } else {
                                   showToast('error', data.message || '查询 Linux.do 用户名失败')
                                 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -68,6 +69,13 @@ func LinuxDoLookup(c *gin.Context) {
 		}
 		if lookupErr.WaitSeconds > 0 {
 			resp["wait_seconds"] = lookupErr.WaitSeconds
+		}
+		// 非限速错误：附加 fallback_url，让前端可以直接在浏览器打开（绕过服务器IP限制）
+		if lookupErr.ErrorType != "rate_limit" {
+			resp["fallback_url"] = fmt.Sprintf(
+				"https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=%s",
+				linuxDoID,
+			)
 		}
 		c.JSON(lookupErr.StatusCode, resp)
 		return
