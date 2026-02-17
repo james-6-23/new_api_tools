@@ -831,6 +831,12 @@ migrate_env_file() {
     migrated=true
   fi
 
+  # 补充 REDIS_PASSWORD（避免 compose WARN）
+  if ! grep -q '^REDIS_PASSWORD=' "$env_file" 2>/dev/null; then
+    echo "REDIS_PASSWORD=" >> "$env_file"
+    migrated=true
+  fi
+
   if [[ "$migrated" == "true" ]]; then
     log_success "已自动补充 Go 版本所需的配置字段"
   fi

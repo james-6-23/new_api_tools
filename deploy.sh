@@ -403,6 +403,9 @@ LOG_LEVEL=info
 # JWT 配置
 JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
 JWT_EXPIRE_HOURS=24
+
+# Redis 配置
+REDIS_PASSWORD=
 EOF
 
   chmod 600 "$ENV_FILE"

@@ -68,17 +68,18 @@ services:
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
-      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     volumes:
       - redis_data:/data
     restart: unless-stopped
     networks:
       - default
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a ${REDIS_PASSWORD}} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
       retries: 3
+      start_period: 2s
 
 networks:
   default:
