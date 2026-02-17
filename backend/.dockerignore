@@ -1,45 +1,15 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# NewAPI Middleware Tool - Go Backend .dockerignore
+*.exe
+*.dll
 *.so
-.Python
-.venv/
-venv/
-ENV/
-env/
-.env
-.env.*
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Build
-dist/
-build/
-*.egg-info/
-
-# Git
-.git/
+*.dylib
+*.test
+*.out
+.git
 .gitignore
-
-# Docker
-Dockerfile
-docker-compose*.yml
-
-# Documentation
+.vscode
+.idea
 *.md
-docs/
-
-# Tests (not needed in production image)
-tests/
+!README.md
+vendor/
+tmp/

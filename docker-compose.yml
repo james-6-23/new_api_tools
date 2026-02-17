@@ -11,25 +11,36 @@
 services:
   newapi-tools:
     image: ghcr.io/james-6-23/new_api_tools:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: newapi-tools
     ports:
       - "${FRONTEND_PORT:-1145}:80"
     environment:
-      - DB_ENGINE=${DB_ENGINE}
-      - DB_DNS=${DB_DNS}
-      - DB_PORT=${DB_PORT}
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
+      # 数据库配置 (Go 版本统一使用 SQL_DSN)
+      - SQL_DSN=${SQL_DSN:-}
+      # 兼容旧版本分离配置
+      - DB_ENGINE=${DB_ENGINE:-}
+      - DB_DNS=${DB_DNS:-}
+      - DB_PORT=${DB_PORT:-}
+      - DB_NAME=${DB_NAME:-}
+      - DB_USER=${DB_USER:-}
+      - DB_PASSWORD=${DB_PASSWORD:-}
+      # 认证
       - API_KEY=${API_KEY}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - JWT_SECRET_KEY=${JWT_SECRET}
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
-      # Redis 缓存配置
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_DB=0
+      # Redis 缓存
+      - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # 服务配置
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - TIMEZONE=${TIMEZONE:-Asia/Shanghai}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # NewAPI 连接
+      - NEWAPI_BASEURL=${NEWAPI_BASEURL:-}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -56,10 +67,11 @@ services:
     image: redis:7-alpine
     container_name: newapi-tools-redis
     command: >
-      redis-server 
-      --appendonly yes 
-      --maxmemory 256mb 
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     restart: unless-stopped

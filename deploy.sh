@@ -366,6 +366,14 @@ interactive_config() {
 generate_env_file() {
   log_info "生成配置文件: $ENV_FILE"
 
+  # 构建 SQL_DSN
+  local sql_dsn=""
+  if [[ "$DB_ENGINE" == "postgres" ]]; then
+    sql_dsn="host=${DB_DNS} port=${DB_PORT} user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} sslmode=disable"
+  elif [[ "$DB_ENGINE" == "mysql" ]]; then
+    sql_dsn="${DB_USER}:${DB_PASSWORD}@tcp(${DB_DNS}:${DB_PORT})/${DB_NAME}?charset=utf8mb4&parseTime=True"
+  fi
+
   cat > "$ENV_FILE" <<EOF
 # NewAPI Middleware Tool 配置文件
 # 由 deploy.sh 自动生成于 $(date '+%Y-%m-%d %H:%M:%S')
@@ -374,7 +382,8 @@ generate_env_file() {
 NEWAPI_CONTAINER=${NEWAPI_CONTAINER}
 NEWAPI_NETWORK=${NEWAPI_NETWORK}
 
-# 数据库配置
+# 数据库配置 (Go 版本推荐 SQL_DSN)
+SQL_DSN=${sql_dsn}
 DB_ENGINE=${DB_ENGINE}
 DB_DNS=${DB_DNS}
 DB_PORT=${DB_PORT}
@@ -388,6 +397,8 @@ API_KEY=${API_KEY}
 
 # 服务配置
 FRONTEND_PORT=${FRONTEND_PORT}
+TIMEZONE=Asia/Shanghai
+LOG_LEVEL=info
 
 # JWT 配置
 JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | xxd -p | tr -d '\n' | head -c 64)
@@ -476,9 +487,9 @@ start_services() {
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
 
-  # 拉取最新镜像
-  log_info "拉取最新镜像..."
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
+  # 构建并启动服务
+  log_info "构建镜像..."
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
 
   # 启动服务
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
