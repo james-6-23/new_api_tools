@@ -39,11 +39,36 @@ func SaveAutoGroupConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid request body", err.Error()))
 		return
 	}
+
 	// Validate mode if provided
 	if mode, ok := req["mode"].(string); ok && mode != "simple" && mode != "by_source" {
 		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "无效的分组模式", ""))
 		return
 	}
+
+	// Validate scan_interval_minutes if provided
+	if interval, ok := req["scan_interval_minutes"]; ok {
+		var minutes int64
+		switch v := interval.(type) {
+		case float64:
+			minutes = int64(v)
+		case int:
+			minutes = int64(v)
+		case int64:
+			minutes = v
+		}
+		if minutes < 1 || minutes > 1440 {
+			c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "扫描间隔必须在 1-1440 分钟之间", ""))
+			return
+		}
+	}
+
+	// Validate no empty config
+	if len(req) == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "没有要保存的配置", ""))
+		return
+	}
+
 	svc := service.NewAutoGroupService()
 	if !svc.SaveConfig(req) {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("SAVE_ERROR", "保存配置失败", ""))
@@ -92,6 +117,18 @@ func GetAutoGroupUsers(c *gin.Context) {
 	group := c.Query("group")
 	source := c.Query("source")
 	keyword := c.Query("keyword")
+
+	// Validate source parameter
+	if source != "" {
+		validSources := map[string]bool{
+			"github": true, "wechat": true, "telegram": true,
+			"discord": true, "oidc": true, "linux_do": true, "password": true,
+		}
+		if !validSources[source] {
+			c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "无效的注册来源: "+source, ""))
+			return
+		}
+	}
 
 	svc := service.NewAutoGroupService()
 	data := svc.GetUsers(page, pageSize, group, source, keyword)
