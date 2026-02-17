@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -135,12 +136,13 @@ func (m *Manager) Execute(query string, args ...interface{}) (int64, error) {
 func (m *Manager) ExecuteDDL(query string) error {
 	if m.IsPG {
 		// PostgreSQL DDL with CONCURRENTLY needs its own connection
-		conn, err := m.DB.DB.Conn(nil)
+		ctx := context.Background()
+		conn, err := m.DB.DB.Conn(ctx)
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
-		_, err = conn.ExecContext(nil, query)
+		_, err = conn.ExecContext(ctx, query)
 		return err
 	}
 

@@ -1,24 +1,18 @@
 package service
 
 import (
-	"bufio"
-	"compress/flate"
-	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
+	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 
 	"github.com/new-api-tools/backend/internal/cache"
 	"github.com/new-api-tools/backend/internal/logger"
@@ -44,8 +38,10 @@ func (e *LookupError) Error() string {
 	return e.Message
 }
 
-// LinuxDoLookupService provides linux.do username lookup via uTLS CF bypass.
-type LinuxDoLookupService struct{}
+// LinuxDoLookupService provides linux.do username lookup via TLS fingerprint bypass.
+type LinuxDoLookupService struct {
+	client tls_client.HttpClient
+}
 
 var (
 	ldUsernameRe    = regexp.MustCompile(`font-size="34\.8841px"[^>]*>\s*(.+?)\s*</text>`)
@@ -59,13 +55,26 @@ const (
 	ldCertURLTpl  = "https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=%s"
 )
 
-// NewLinuxDoLookupService creates a new service.
+// NewLinuxDoLookupService creates a new service with Chrome TLS fingerprint.
 func NewLinuxDoLookupService() *LinuxDoLookupService {
-	return &LinuxDoLookupService{}
+	options := []tls_client.HttpClientOption{
+		tls_client.WithTimeoutSeconds(30),
+		tls_client.WithClientProfile(profiles.Chrome_120),
+		tls_client.WithNotFollowRedirects(),
+		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+	}
+
+	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
+	if err != nil {
+		logger.L.Error(fmt.Sprintf("[LinuxDoLookup] 创建 TLS client 失败: %v", err))
+		// Fallback: will fail on first request
+		return &LinuxDoLookupService{}
+	}
+
+	return &LinuxDoLookupService{client: client}
 }
 
 // LookupUsername looks up the linux.do username for a given user ID.
-// It first checks Redis cache, then makes a uTLS request.
 func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, *LookupError) {
 	// 1. Check Redis cache
 	cacheKey := ldCachePrefix + linuxDoID
@@ -82,11 +91,50 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 2. Make uTLS request
+	// 2. Check client
+	if s.client == nil {
+		return nil, &LookupError{
+			ErrorType:  "config",
+			Message:    "TLS client 未初始化",
+			StatusCode: http.StatusServiceUnavailable,
+		}
+	}
+
+	// 3. Make request with Chrome TLS fingerprint
 	targetURL := fmt.Sprintf(ldCertURLTpl, linuxDoID)
 	logger.L.Debug(fmt.Sprintf("[LinuxDoLookup] 请求: id=%s url=%s", linuxDoID, targetURL))
 
-	code, body, _, err := s.makeRequest(targetURL, utls.HelloChrome_120)
+	req, err := fhttp.NewRequest(fhttp.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, &LookupError{
+			ErrorType:  "network",
+			Message:    "创建请求失败",
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
+	req.Header = fhttp.Header{
+		"User-Agent":                {"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"},
+		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"},
+		"Accept-Language":           {"en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7"},
+		"Accept-Encoding":           {"gzip, deflate, br"},
+		"Sec-Ch-Ua":                 {`"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"`},
+		"Sec-Ch-Ua-Mobile":          {"?0"},
+		"Sec-Ch-Ua-Platform":        {`"Windows"`},
+		"Sec-Fetch-Dest":            {"document"},
+		"Sec-Fetch-Mode":            {"navigate"},
+		"Sec-Fetch-Site":            {"none"},
+		"Sec-Fetch-User":            {"?1"},
+		"Upgrade-Insecure-Requests": {"1"},
+		fhttp.HeaderOrderKey: {
+			"user-agent", "accept", "accept-language", "accept-encoding",
+			"sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+			"sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user",
+			"upgrade-insecure-requests",
+		},
+	}
+
+	resp, err := s.client.Do(req)
 	if err != nil {
 		logger.L.Warn(fmt.Sprintf("[LinuxDoLookup] 请求失败: id=%s err=%v", linuxDoID, err))
 		return nil, &LookupError{
@@ -95,8 +143,20 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 			StatusCode: http.StatusBadGateway,
 		}
 	}
+	defer resp.Body.Close()
 
-	// 3. Check rate limit
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &LookupError{
+			ErrorType:  "network",
+			Message:    "读取响应失败",
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+	body := string(bodyBytes)
+	code := resp.StatusCode
+
+	// 4. Check rate limit
 	if ldRateLimitRe.MatchString(body) {
 		waitSeconds := 0
 		if match := ldWaitSecondsRe.FindStringSubmatch(body); len(match) >= 2 {
@@ -111,7 +171,7 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 4. Check CF block
+	// 5. Check CF block
 	if code == 403 {
 		logger.L.Warn(fmt.Sprintf("[LinuxDoLookup] CF拦截: id=%s code=%d", linuxDoID, code))
 		return nil, &LookupError{
@@ -121,7 +181,7 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 5. Check successful SVG response
+	// 6. Check successful SVG response
 	if code == 200 && strings.Contains(strings.ToLower(body), "<svg") {
 		match := ldUsernameRe.FindStringSubmatch(body)
 		if len(match) >= 2 {
@@ -151,128 +211,11 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 6. Unexpected response
+	// 7. Unexpected response
 	logger.L.Warn(fmt.Sprintf("[LinuxDoLookup] 异常响应: id=%s code=%d bodyLen=%d", linuxDoID, code, len(body)))
 	return nil, &LookupError{
 		ErrorType:  "unknown",
 		Message:    fmt.Sprintf("获取用户信息失败 (HTTP %d)", code),
 		StatusCode: http.StatusBadGateway,
 	}
-}
-
-// makeRequest performs a CF-bypassed HTTP request using uTLS (direct connection, no proxy).
-func (s *LinuxDoLookupService) makeRequest(targetURL string, clientHelloID utls.ClientHelloID) (code int, body string, respHeaders http.Header, err error) {
-	parsed, err := url.Parse(targetURL)
-	if err != nil {
-		return 0, "", nil, err
-	}
-
-	host := parsed.Host
-	if !strings.Contains(host, ":") {
-		host += ":443"
-	}
-	serverName := parsed.Hostname()
-
-	// 1. Direct TCP connection
-	rawConn, err := net.DialTimeout("tcp", host, 15*time.Second)
-	if err != nil {
-		return 0, "", nil, fmt.Errorf("TCP 连接失败: %w", err)
-	}
-
-	// 2. uTLS handshake (Chrome fingerprint)
-	tlsConn := utls.UClient(rawConn, &utls.Config{
-		ServerName: serverName,
-	}, clientHelloID)
-
-	if err := tlsConn.Handshake(); err != nil {
-		rawConn.Close()
-		return 0, "", nil, fmt.Errorf("TLS 握手失败: %w", err)
-	}
-	defer tlsConn.Close()
-
-	// 3. Check negotiated protocol
-	negotiatedProto := tlsConn.ConnectionState().NegotiatedProtocol
-
-	// Build browser-like headers
-	headers := http.Header{
-		"User-Agent":                {"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"},
-		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"},
-		"Accept-Language":           {"en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7"},
-		"Accept-Encoding":           {"gzip, deflate, br"},
-		"Sec-Ch-Ua":                 {`"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"`},
-		"Sec-Ch-Ua-Mobile":          {"?0"},
-		"Sec-Ch-Ua-Platform":        {`"Windows"`},
-		"Sec-Fetch-Dest":            {"document"},
-		"Sec-Fetch-Mode":            {"navigate"},
-		"Sec-Fetch-Site":            {"none"},
-		"Sec-Fetch-User":            {"?1"},
-		"Upgrade-Insecure-Requests": {"1"},
-	}
-
-	var resp *http.Response
-
-	if negotiatedProto == "h2" {
-		// HTTP/2
-		h2Transport := &http2.Transport{
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return tlsConn, nil
-			},
-		}
-
-		req, err := http.NewRequest("GET", targetURL, nil)
-		if err != nil {
-			return 0, "", nil, err
-		}
-		req.Header = headers
-
-		resp, err = h2Transport.RoundTrip(req)
-		if err != nil {
-			return 0, "", nil, fmt.Errorf("H2 请求失败: %w", err)
-		}
-	} else {
-		// HTTP/1.1
-		path := parsed.RequestURI()
-		reqStr := fmt.Sprintf("GET %s HTTP/1.1\r\n", path)
-		reqStr += fmt.Sprintf("Host: %s\r\n", parsed.Host)
-		for k, vs := range headers {
-			for _, v := range vs {
-				reqStr += fmt.Sprintf("%s: %s\r\n", k, v)
-			}
-		}
-		reqStr += "Connection: close\r\n\r\n"
-
-		if _, err = tlsConn.Write([]byte(reqStr)); err != nil {
-			return 0, "", nil, fmt.Errorf("写请求失败: %w", err)
-		}
-
-		br := bufio.NewReader(tlsConn)
-		resp, err = http.ReadResponse(br, nil)
-		if err != nil {
-			return 0, "", nil, fmt.Errorf("读响应失败: %w", err)
-		}
-	}
-	defer resp.Body.Close()
-
-	// 4. Decompress response body
-	var reader io.Reader
-	switch resp.Header.Get("Content-Encoding") {
-	case "gzip":
-		reader, err = gzip.NewReader(resp.Body)
-		if err != nil {
-			return resp.StatusCode, "", resp.Header, err
-		}
-	case "br":
-		reader = brotli.NewReader(resp.Body)
-	case "deflate":
-		reader = flate.NewReader(resp.Body)
-	default:
-		reader = resp.Body
-	}
-
-	bodyBytes, err := io.ReadAll(reader)
-	if err != nil {
-		return resp.StatusCode, "", resp.Header, err
-	}
-
-	return resp.StatusCode, string(bodyBytes), resp.Header, nil
 }
