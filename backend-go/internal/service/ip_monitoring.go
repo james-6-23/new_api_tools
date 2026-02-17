@@ -325,12 +325,14 @@ func (s *IPMonitoringService) LookupIPUsers(ip, window string, limit int) (map[s
 
 	query := fmt.Sprintf(`
 		SELECT l.user_id, COALESCE(u.username, '') as username,
-			l.token_id, COUNT(*) as request_count,
+			l.token_id, COALESCE(t.name, '') as token_name,
+			COUNT(*) as request_count,
 			MIN(l.created_at) as first_seen, MAX(l.created_at) as last_seen
 		FROM logs l
 		LEFT JOIN users u ON l.user_id = u.id
+		LEFT JOIN tokens t ON l.token_id = t.id
 		WHERE l.created_at >= %d AND l.ip = '%s'
-		GROUP BY l.user_id, u.username, l.token_id
+		GROUP BY l.user_id, u.username, l.token_id, t.name
 		ORDER BY request_count DESC
 		LIMIT %d`, startTime, ip, limit)
 
@@ -339,11 +341,38 @@ func (s *IPMonitoringService) LookupIPUsers(ip, window string, limit int) (map[s
 		return nil, err
 	}
 
+	// Calculate aggregated stats
+	totalRequests := int64(0)
+	uniqueUsers := map[int64]bool{}
+	uniqueTokens := map[int64]bool{}
+	for _, row := range rows {
+		totalRequests += toInt64(row["request_count"])
+		uniqueUsers[toInt64(row["user_id"])] = true
+		uniqueTokens[toInt64(row["token_id"])] = true
+	}
+
+	// Get model usage for this IP
+	modelQuery := fmt.Sprintf(`
+		SELECT model_name as model, COUNT(*) as count
+		FROM logs
+		WHERE created_at >= %d AND ip = '%s' AND model_name IS NOT NULL AND model_name <> ''
+		GROUP BY model_name
+		ORDER BY count DESC
+		LIMIT 20`, startTime, ip)
+	modelRows, _ := s.db.Query(modelQuery)
+	if modelRows == nil {
+		modelRows = []map[string]interface{}{}
+	}
+
 	return map[string]interface{}{
-		"ip":     ip,
-		"items":  rows,
-		"total":  len(rows),
-		"window": window,
+		"ip":             ip,
+		"items":          rows,
+		"total":          len(rows),
+		"window":         window,
+		"total_requests": totalRequests,
+		"unique_users":   len(uniqueUsers),
+		"unique_tokens":  len(uniqueTokens),
+		"models":         modelRows,
 	}, nil
 }
 
