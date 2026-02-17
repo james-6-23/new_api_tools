@@ -229,6 +229,9 @@ export function UserManagement() {
   const [batchTargetGroup, setBatchTargetGroup] = useState('')
   const [batchMoving, setBatchMoving] = useState(false)
 
+  // Linux.do 用户名查询状态
+  const [linuxDoLookupLoading, setLinuxDoLookupLoading] = useState<string | null>(null)
+
   const allSelectedOnPage = users.length > 0 && users.every((u) => selectedUserIds.has(u.id))
 
   const toggleSelectAllOnPage = () => {
@@ -1105,15 +1108,30 @@ export function UserManagement() {
                       <TableCell>{getStatusBadge(user.status)}</TableCell>
                       <TableCell className="hidden lg:table-cell">
                         {user.linux_do_id ? (
-                          <a
-                            href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${user.linux_do_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
-                            title="查看 Linux.do 证书"
+                          <button
+                            onClick={async () => {
+                              const lid = user.linux_do_id
+                              if (!lid || linuxDoLookupLoading) return
+                              setLinuxDoLookupLoading(lid)
+                              try {
+                                const res = await fetch(`${apiUrl}/api/linuxdo/lookup/${encodeURIComponent(lid)}`, { headers: getAuthHeaders() })
+                                const data = await res.json()
+                                if (data.success && data.data?.profile_url) {
+                                  window.open(data.data.profile_url, '_blank')
+                                } else if (data.error_type === 'rate_limit') {
+                                  showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
+                                } else {
+                                  showToast('error', data.message || '查询 Linux.do 用户名失败')
+                                }
+                              } catch { showToast('error', '查询 Linux.do 用户名失败') }
+                              finally { setLinuxDoLookupLoading(null) }
+                            }}
+                            disabled={linuxDoLookupLoading === user.linux_do_id}
+                            className="text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline disabled:opacity-50 cursor-pointer"
+                            title="点击查看 Linux.do 用户主页"
                           >
-                            {user.linux_do_id}
-                          </a>
+                            {linuxDoLookupLoading === user.linux_do_id ? '查询中...' : user.linux_do_id}
+                          </button>
                         ) : (
                           <span className="text-xs text-muted-foreground">-</span>
                         )}
@@ -1332,16 +1350,31 @@ export function UserManagement() {
                   <span>用户: <span className="font-mono text-foreground font-medium">{selectedUser?.username}</span></span>
                   <span className="text-muted-foreground">ID: {selectedUser?.id}</span>
                   {analysis?.user?.linux_do_id && (
-                    <a
-                      href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${analysis.user.linux_do_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
-                      title="查看 Linux.do 证书"
+                    <button
+                      onClick={async () => {
+                        const lid = analysis.user.linux_do_id
+                        if (!lid || linuxDoLookupLoading) return
+                        setLinuxDoLookupLoading(lid)
+                        try {
+                          const res = await fetch(`${apiUrl}/api/linuxdo/lookup/${encodeURIComponent(lid)}`, { headers: getAuthHeaders() })
+                          const data = await res.json()
+                          if (data.success && data.data?.profile_url) {
+                            window.open(data.data.profile_url, '_blank')
+                          } else if (data.error_type === 'rate_limit') {
+                            showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
+                          } else {
+                            showToast('error', data.message || '查询 Linux.do 用户名失败')
+                          }
+                        } catch { showToast('error', '查询 Linux.do 用户名失败') }
+                        finally { setLinuxDoLookupLoading(null) }
+                      }}
+                      disabled={linuxDoLookupLoading === analysis.user.linux_do_id}
+                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline disabled:opacity-50 cursor-pointer"
+                      title="点击查看 Linux.do 用户主页"
                     >
                       <span>Linux.do:</span>
-                      <span>{analysis.user.linux_do_id}</span>
-                    </a>
+                      <span>{linuxDoLookupLoading === analysis.user.linux_do_id ? '查询中...' : analysis.user.linux_do_id}</span>
+                    </button>
                   )}
                 </DialogDescription>
               </div>

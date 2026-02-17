@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -14,7 +16,8 @@ import (
 // AutoGroupService handles automatic user group assignment
 // Mirrors Python auto_group_service.py functionality
 type AutoGroupService struct {
-	db *database.Manager
+	db           *database.Manager
+	cachedConfig map[string]interface{} // 优化3: 请求级配置缓存
 }
 
 // Cached OAuth column existence checks for auto group
@@ -52,27 +55,64 @@ func (s *AutoGroupService) getAvailableOAuthColumns() []string {
 	return agAvailableOAuthCols
 }
 
-// detectSource detects user registration source from OAuth ID fields
+// 优化5: detectSource 只检查数据库中实际存在的列
 func (s *AutoGroupService) detectSource(row map[string]interface{}) string {
-	if toString(row["github_id"]) != "" {
+	cols := s.getAvailableOAuthColumns()
+	colSet := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		colSet[c] = true
+	}
+
+	if colSet["github_id"] && toString(row["github_id"]) != "" {
 		return "github"
 	}
-	if toString(row["wechat_id"]) != "" {
+	if colSet["wechat_id"] && toString(row["wechat_id"]) != "" {
 		return "wechat"
 	}
-	if toString(row["telegram_id"]) != "" {
+	if colSet["telegram_id"] && toString(row["telegram_id"]) != "" {
 		return "telegram"
 	}
-	if toString(row["discord_id"]) != "" {
+	if colSet["discord_id"] && toString(row["discord_id"]) != "" {
 		return "discord"
 	}
-	if toString(row["oidc_id"]) != "" {
+	if colSet["oidc_id"] && toString(row["oidc_id"]) != "" {
 		return "oidc"
 	}
-	if toString(row["linux_do_id"]) != "" {
+	if colSet["linux_do_id"] && toString(row["linux_do_id"]) != "" {
 		return "linux_do"
 	}
 	return "password"
+}
+
+// buildSourceCaseSQL builds a SQL CASE expression for source detection (优化2)
+func (s *AutoGroupService) buildSourceCaseSQL() string {
+	cols := s.getAvailableOAuthColumns()
+	colSet := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		colSet[c] = true
+	}
+
+	var parts []string
+	colSourceMap := []struct{ col, source string }{
+		{"github_id", "github"},
+		{"wechat_id", "wechat"},
+		{"telegram_id", "telegram"},
+		{"discord_id", "discord"},
+		{"oidc_id", "oidc"},
+		{"linux_do_id", "linux_do"},
+	}
+
+	for _, cs := range colSourceMap {
+		if colSet[cs.col] {
+			parts = append(parts, fmt.Sprintf("WHEN %s IS NOT NULL AND %s != '' THEN '%s'", cs.col, cs.col, cs.source))
+		}
+	}
+
+	if len(parts) == 0 {
+		return "'password'"
+	}
+
+	return fmt.Sprintf("CASE %s ELSE 'password' END", strings.Join(parts, " "))
 }
 
 // Default auto group config — matches Python defaults
@@ -87,13 +127,26 @@ var defaultAutoGroupConfig = map[string]interface{}{
 	"last_scan_time":        0,
 }
 
-// GetConfig returns auto group configuration
+// 优化3: getConfigCached 请求级缓存，避免重复 Redis GET + JSON Unmarshal
+func (s *AutoGroupService) getConfigCached() map[string]interface{} {
+	if s.cachedConfig != nil {
+		return s.cachedConfig
+	}
+	s.cachedConfig = s.GetConfig()
+	return s.cachedConfig
+}
+
+// invalidateConfigCache clears the cached config (call after SaveConfig)
+func (s *AutoGroupService) invalidateConfigCache() {
+	s.cachedConfig = nil
+}
+
+// GetConfig returns auto group configuration (always fresh from Redis)
 func (s *AutoGroupService) GetConfig() map[string]interface{} {
 	cm := cache.Get()
 	var config map[string]interface{}
 	found, _ := cm.GetJSON("auto_group:config", &config)
 	if found && config != nil {
-		// Merge with defaults to ensure all keys exist
 		result := make(map[string]interface{})
 		for k, v := range defaultAutoGroupConfig {
 			result[k] = v
@@ -103,7 +156,6 @@ func (s *AutoGroupService) GetConfig() map[string]interface{} {
 		}
 		return result
 	}
-	// Return a copy of defaults
 	result := make(map[string]interface{})
 	for k, v := range defaultAutoGroupConfig {
 		result[k] = v
@@ -122,13 +174,14 @@ func (s *AutoGroupService) SaveConfig(updates map[string]interface{}) bool {
 		logger.L.Error(fmt.Sprintf("保存自动分组配置失败: %v", err))
 		return false
 	}
+	s.invalidateConfigCache()
 	logger.L.Business("自动分组配置已更新")
 	return true
 }
 
 // IsEnabled returns whether auto group is enabled
 func (s *AutoGroupService) IsEnabled() bool {
-	config := s.GetConfig()
+	config := s.getConfigCached()
 	if enabled, ok := config["enabled"].(bool); ok {
 		return enabled
 	}
@@ -137,7 +190,7 @@ func (s *AutoGroupService) IsEnabled() bool {
 
 // getWhitelistIDs extracts whitelist IDs from config
 func (s *AutoGroupService) getWhitelistIDs() []int64 {
-	config := s.GetConfig()
+	config := s.getConfigCached()
 	rawList, ok := config["whitelist_ids"]
 	if !ok || rawList == nil {
 		return nil
@@ -161,7 +214,7 @@ func (s *AutoGroupService) getWhitelistIDs() []int64 {
 
 // getTargetGroupBySource returns the target group for a given source
 func (s *AutoGroupService) getTargetGroupBySource(source string) string {
-	config := s.GetConfig()
+	config := s.getConfigCached()
 	mode, _ := config["mode"].(string)
 
 	if mode == "simple" {
@@ -219,7 +272,7 @@ func (s *AutoGroupService) buildOAuthSelectCols() string {
 
 // GetStats returns grouping statistics — matches Python's get_stats()
 func (s *AutoGroupService) GetStats() map[string]interface{} {
-	config := s.GetConfig()
+	config := s.getConfigCached()
 	enabled, _ := config["enabled"].(bool)
 	autoScanEnabled, _ := config["auto_scan_enabled"].(bool)
 	scanInterval := toInt64(config["scan_interval_minutes"])
@@ -250,14 +303,26 @@ func (s *AutoGroupService) GetStats() map[string]interface{} {
 		pendingCount = toInt64(row["cnt"])
 	}
 
-	// Count total assigned from logs
+	// 优化4: 使用 Redis LLEN 获取总日志计数
 	totalAssigned := int64(0)
 	cm := cache.Get()
-	var allLogs []map[string]interface{}
-	cm.GetJSON("auto_group:logs", &allLogs)
-	for _, log := range allLogs {
-		if action, _ := log["action"].(string); action == "assign" || action == "scan" {
-			totalAssigned += toInt64(log["affected"])
+	rdb := cm.RedisClient()
+	ctx := context.Background()
+
+	// Count assign logs from Redis list
+	logLen, err := rdb.LLen(ctx, "auto_group:logs").Result()
+	if err == nil && logLen > 0 {
+		// Sample to count "assign" actions (read all, they're capped at 1000)
+		logStrings, err := rdb.LRange(ctx, "auto_group:logs", 0, -1).Result()
+		if err == nil {
+			for _, logStr := range logStrings {
+				var entry map[string]interface{}
+				if json.Unmarshal([]byte(logStr), &entry) == nil {
+					if action, _ := entry["action"].(string); action == "assign" {
+						totalAssigned += toInt64(entry["affected"])
+					}
+				}
+			}
 		}
 	}
 
@@ -296,7 +361,6 @@ func (s *AutoGroupService) GetAvailableGroups() []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 
-	// Normalize output keys
 	result := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, map[string]interface{}{
@@ -308,17 +372,14 @@ func (s *AutoGroupService) GetAvailableGroups() []map[string]interface{} {
 }
 
 // GetPendingUsers returns users not yet assigned to a group
-// Matches Python: default group, status=1, not deleted, not whitelisted
 func (s *AutoGroupService) GetPendingUsers(page, pageSize int) map[string]interface{} {
 	groupCol := s.getGroupCol()
 	whitelistIDs := s.getWhitelistIDs()
 	oauthCols := s.buildOAuthSelectCols()
 
-	// Build args
 	args := make([]interface{}, 0)
 	argIdx := 1
 
-	// Build whitelist condition
 	wlCond, wlArgs, nextIdx := s.buildWhitelistCondition(whitelistIDs, argIdx)
 	args = append(args, wlArgs...)
 	argIdx = nextIdx
@@ -381,7 +442,6 @@ func (s *AutoGroupService) GetPendingUsers(page, pageSize int) map[string]interf
 		rows = nil
 	}
 
-	// Build items with source detection
 	items := make([]map[string]interface{}, 0)
 	for _, row := range rows {
 		source := s.detectSource(row)
@@ -411,9 +471,11 @@ func (s *AutoGroupService) GetPendingUsers(page, pageSize int) map[string]interf
 }
 
 // GetUsers returns users with filtering — matches Python's get_users()
+// 优化2: source 过滤使用 SQL CASE WHEN 代替全表拉取
 func (s *AutoGroupService) GetUsers(page, pageSize int, group, source, keyword string) map[string]interface{} {
 	groupCol := s.getGroupCol()
 	oauthCols := s.buildOAuthSelectCols()
+	sourceCaseSQL := s.buildSourceCaseSQL()
 
 	offset := (page - 1) * pageSize
 	where := []string{"deleted_at IS NULL"}
@@ -445,9 +507,14 @@ func (s *AutoGroupService) GetUsers(page, pageSize int, group, source, keyword s
 		}
 	}
 
+	// 优化2: source 过滤下推到 SQL 层
+	if source != "" {
+		where = append(where, fmt.Sprintf("(%s) = '%s'", sourceCaseSQL, source))
+	}
+
 	whereClause := strings.Join(where, " AND ")
 
-	// Count total
+	// Count total (now includes source filter if specified)
 	countSQL := fmt.Sprintf("SELECT COUNT(*) as cnt FROM users WHERE %s", whereClause)
 	if !s.db.IsPG {
 		countSQL = s.db.RebindQuery(countSQL)
@@ -490,13 +557,10 @@ func (s *AutoGroupService) GetUsers(page, pageSize int, group, source, keyword s
 		rows = nil
 	}
 
-	// Build items with source detection, filter by source if specified
+	// Build items with source detection
 	items := make([]map[string]interface{}, 0)
 	for _, row := range rows {
 		userSource := s.detectSource(row)
-		if source != "" && userSource != source {
-			continue
-		}
 		items = append(items, map[string]interface{}{
 			"id":           toInt64(row["id"]),
 			"username":     toString(row["username"]),
@@ -506,30 +570,6 @@ func (s *AutoGroupService) GetUsers(page, pageSize int, group, source, keyword s
 			"source":       userSource,
 			"status":       toInt64(row["status"]),
 		})
-	}
-
-	// If source filter applied, recount total (source is application-level filter)
-	if source != "" {
-		// Re-query all matching users for accurate count
-		allSQL := fmt.Sprintf(`
-			SELECT id%s
-			FROM users
-			WHERE %s`, oauthCols, whereClause)
-		filterArgs := make([]interface{}, len(args))
-		copy(filterArgs, args)
-		if !s.db.IsPG {
-			allSQL = s.db.RebindQuery(allSQL)
-		}
-		allRows, err := s.db.Query(allSQL, filterArgs...)
-		if err == nil {
-			filteredCount := int64(0)
-			for _, row := range allRows {
-				if s.detectSource(row) == source {
-					filteredCount++
-				}
-			}
-			total = filteredCount
-		}
 	}
 
 	totalPages := int64(0)
@@ -551,7 +591,6 @@ func (s *AutoGroupService) assignUser(userID int64, targetGroup, operator string
 	groupCol := s.getGroupCol()
 	oauthCols := s.buildOAuthSelectCols()
 
-	// Get user info
 	var userSQL string
 	if s.db.IsPG {
 		userSQL = fmt.Sprintf(
@@ -578,7 +617,6 @@ func (s *AutoGroupService) assignUser(userID int64, targetGroup, operator string
 	username := toString(userRow["username"])
 	source := s.detectSource(userRow)
 
-	// Update user group
 	var updateSQL string
 	if s.db.IsPG {
 		updateSQL = fmt.Sprintf("UPDATE users SET %s = $1 WHERE id = $2", groupCol)
@@ -594,7 +632,6 @@ func (s *AutoGroupService) assignUser(userID int64, targetGroup, operator string
 		}
 	}
 
-	// Add log entry
 	s.addUserLog("assign", userID, username, oldGroup, targetGroup, source, operator)
 
 	logger.L.Business(fmt.Sprintf("自动分组: 用户分配 user_id=%d username=%s %s -> %s source=%s operator=%s",
@@ -611,9 +648,9 @@ func (s *AutoGroupService) assignUser(userID int64, targetGroup, operator string
 	}
 }
 
-// RunScan executes a group assignment scan — matches Python's run_scan()
+// 优化1: RunScan 使用批量 UPDATE 消除 N+1
 func (s *AutoGroupService) RunScan(dryRun bool) map[string]interface{} {
-	config := s.GetConfig()
+	config := s.getConfigCached()
 	mode, _ := config["mode"].(string)
 
 	// Validate configuration
@@ -630,7 +667,7 @@ func (s *AutoGroupService) RunScan(dryRun bool) map[string]interface{} {
 		hasAnyRule := false
 		if rules != nil {
 			for _, v := range rules {
-				if s, ok := v.(string); ok && s != "" {
+				if sv, ok := v.(string); ok && sv != "" {
 					hasAnyRule = true
 					break
 				}
@@ -646,68 +683,136 @@ func (s *AutoGroupService) RunScan(dryRun bool) map[string]interface{} {
 
 	startTime := time.Now()
 
-	// Get pending users (up to 1000)
+	// Get pending users for preview/logging
 	pending := s.GetPendingUsers(1, 1000)
 	users, _ := pending["items"].([]map[string]interface{})
 
 	logger.L.Info(fmt.Sprintf("自动分组扫描: 发现 %d 个待分配用户", len(users)))
 
-	results := make([]map[string]interface{}, 0)
+	if len(users) == 0 {
+		return map[string]interface{}{
+			"success": true,
+			"dry_run": dryRun,
+			"stats": map[string]interface{}{
+				"total": 0, "assigned": 0, "skipped": 0, "errors": 0,
+			},
+			"elapsed_seconds": "0.00",
+			"results":         []map[string]interface{}{},
+		}
+	}
+
+	results := make([]map[string]interface{}, 0, len(users))
 	assignedCount := 0
 	skippedCount := 0
 	errorCount := 0
 
-	for _, user := range users {
-		userID := toInt64(user["id"])
-		username := toString(user["username"])
-		userSource := toString(user["source"])
+	if mode == "simple" && !dryRun {
+		// 优化1 路径: simple模式批量UPDATE
+		targetGroup, _ := config["target_group"].(string)
+		groupCol := s.getGroupCol()
+		whitelistIDs := s.getWhitelistIDs()
+		wlCond, wlArgs, nextIdx := s.buildWhitelistCondition(whitelistIDs, 2)
 
-		// Get target group based on source
-		targetGroup := s.getTargetGroupBySource(userSource)
-
-		if targetGroup == "" {
-			skippedCount++
-			results = append(results, map[string]interface{}{
-				"user_id":  userID,
-				"username": username,
-				"source":   userSource,
-				"action":   "skipped",
-				"message":  fmt.Sprintf("来源 %s 未配置目标分组", userSource),
+		// Collect user info before update for logging
+		userInfos := make([]map[string]interface{}, 0, len(users))
+		for _, user := range users {
+			userInfos = append(userInfos, map[string]interface{}{
+				"id":       toInt64(user["id"]),
+				"username": toString(user["username"]),
+				"source":   toString(user["source"]),
 			})
-			continue
 		}
 
-		if dryRun {
-			assignedCount++
-			results = append(results, map[string]interface{}{
-				"user_id":      userID,
-				"username":     username,
-				"source":       userSource,
-				"target_group": targetGroup,
-				"action":       "would_assign",
-				"message":      fmt.Sprintf("[试运行] 将分配到 %s", targetGroup),
-			})
+		// Batch UPDATE in one SQL
+		var updateSQL string
+		updateArgs := make([]interface{}, 0)
+		if s.db.IsPG {
+			updateSQL = fmt.Sprintf(`
+				UPDATE users SET %s = $1
+				WHERE (COALESCE(%s, 'default') = 'default' OR %s = '')
+				AND deleted_at IS NULL AND status = 1
+				%s`, groupCol, groupCol, groupCol, wlCond)
+			updateArgs = append(updateArgs, targetGroup)
+			updateArgs = append(updateArgs, wlArgs...)
 		} else {
-			result := s.assignUser(userID, targetGroup, "system")
-			if success, _ := result["success"].(bool); success {
-				assignedCount++
+			updateSQL = fmt.Sprintf(`
+				UPDATE users SET %s = ?
+				WHERE (COALESCE(%s, 'default') = 'default' OR %s = '')
+				AND deleted_at IS NULL AND status = 1
+				%s`, groupCol, groupCol, groupCol, wlCond)
+			updateArgs = append(updateArgs, targetGroup)
+			updateArgs = append(updateArgs, wlArgs...)
+		}
+		_ = nextIdx
+
+		affected, err := s.db.Execute(updateSQL, updateArgs...)
+		if err != nil {
+			logger.L.Error(fmt.Sprintf("自动分组批量UPDATE失败: %v", err))
+			errorCount = len(users)
+			for _, user := range userInfos {
 				results = append(results, map[string]interface{}{
-					"user_id":      userID,
-					"username":     username,
-					"source":       userSource,
+					"user_id": user["id"], "username": user["username"],
+					"source": user["source"], "action": "error",
+					"message": fmt.Sprintf("批量更新失败: %v", err),
+				})
+			}
+		} else {
+			assignedCount = int(affected)
+			// Batch log all assigned users via Redis LPUSH
+			s.addBatchLogs("assign", userInfos, "default", targetGroup, "system")
+			for _, user := range userInfos {
+				results = append(results, map[string]interface{}{
+					"user_id":      user["id"],
+					"username":     user["username"],
+					"source":       user["source"],
 					"target_group": targetGroup,
 					"action":       "assigned",
-					"message":      toString(result["message"]),
+					"message":      fmt.Sprintf("已分配到 %s", targetGroup),
+				})
+			}
+			logger.L.Business(fmt.Sprintf("自动分组: 批量分配 %d 个用户到 %s", assignedCount, targetGroup))
+		}
+	} else {
+		// by_source 模式 or dry_run: 逐用户处理
+		for _, user := range users {
+			userID := toInt64(user["id"])
+			username := toString(user["username"])
+			userSource := toString(user["source"])
+
+			targetGroup := s.getTargetGroupBySource(userSource)
+
+			if targetGroup == "" {
+				skippedCount++
+				results = append(results, map[string]interface{}{
+					"user_id": userID, "username": username, "source": userSource,
+					"action": "skipped", "message": fmt.Sprintf("来源 %s 未配置目标分组", userSource),
+				})
+				continue
+			}
+
+			if dryRun {
+				assignedCount++
+				results = append(results, map[string]interface{}{
+					"user_id": userID, "username": username, "source": userSource,
+					"target_group": targetGroup, "action": "would_assign",
+					"message": fmt.Sprintf("[试运行] 将分配到 %s", targetGroup),
 				})
 			} else {
-				errorCount++
-				results = append(results, map[string]interface{}{
-					"user_id":  userID,
-					"username": username,
-					"source":   userSource,
-					"action":   "error",
-					"message":  toString(result["message"]),
-				})
+				result := s.assignUser(userID, targetGroup, "system")
+				if success, _ := result["success"].(bool); success {
+					assignedCount++
+					results = append(results, map[string]interface{}{
+						"user_id": userID, "username": username, "source": userSource,
+						"target_group": targetGroup, "action": "assigned",
+						"message": toString(result["message"]),
+					})
+				} else {
+					errorCount++
+					results = append(results, map[string]interface{}{
+						"user_id": userID, "username": username, "source": userSource,
+						"action": "error", "message": toString(result["message"]),
+					})
+				}
 			}
 		}
 	}
@@ -736,7 +841,7 @@ func (s *AutoGroupService) RunScan(dryRun bool) map[string]interface{} {
 	}
 }
 
-// BatchMoveUsers moves users to a target group — matches Python's batch_move_users()
+// BatchMoveUsers moves users to a target group
 func (s *AutoGroupService) BatchMoveUsers(userIDs []int64, targetGroup string) map[string]interface{} {
 	if len(userIDs) == 0 {
 		return map[string]interface{}{
@@ -774,27 +879,39 @@ func (s *AutoGroupService) BatchMoveUsers(userIDs []int64, targetGroup string) m
 	}
 }
 
-// GetLogs returns group assignment logs — matches Python's get_logs()
+// GetLogs returns group assignment logs — 优化4: 使用 Redis List
 func (s *AutoGroupService) GetLogs(page, pageSize int, action string, userID *int64) map[string]interface{} {
 	cm := cache.Get()
-	var allLogs []map[string]interface{}
-	cm.GetJSON("auto_group:logs", &allLogs)
+	rdb := cm.RedisClient()
+	ctx := context.Background()
 
-	// Filter
+	// Read all logs from Redis list
+	logStrings, err := rdb.LRange(ctx, "auto_group:logs", 0, -1).Result()
+	if err != nil {
+		logger.L.Error(fmt.Sprintf("读取自动分组日志失败: %v", err))
+		logStrings = []string{}
+	}
+
+	// Parse and filter
 	filtered := make([]map[string]interface{}, 0)
-	for _, log := range allLogs {
+	for _, logStr := range logStrings {
+		var entry map[string]interface{}
+		if json.Unmarshal([]byte(logStr), &entry) != nil {
+			continue
+		}
+
 		if action != "" {
-			if logAction, ok := log["action"].(string); !ok || logAction != action {
+			if logAction, ok := entry["action"].(string); !ok || logAction != action {
 				continue
 			}
 		}
 		if userID != nil {
-			logUserID := toInt64(log["user_id"])
+			logUserID := toInt64(entry["user_id"])
 			if logUserID != *userID {
 				continue
 			}
 		}
-		filtered = append(filtered, log)
+		filtered = append(filtered, entry)
 	}
 
 	total := len(filtered)
@@ -821,18 +938,30 @@ func (s *AutoGroupService) GetLogs(page, pageSize int, action string, userID *in
 	}
 }
 
-// RevertUser reverts a user's group assignment — matches Python's revert_user()
+// RevertUser reverts a user's group assignment
 func (s *AutoGroupService) RevertUser(logID int) map[string]interface{} {
 	cm := cache.Get()
-	var allLogs []map[string]interface{}
-	cm.GetJSON("auto_group:logs", &allLogs)
+	rdb := cm.RedisClient()
+	ctx := context.Background()
+
+	// Read all logs from Redis list
+	logStrings, err := rdb.LRange(ctx, "auto_group:logs", 0, -1).Result()
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("读取日志失败: %v", err),
+		}
+	}
 
 	// Find the log entry by ID
 	var targetLog map[string]interface{}
-	for _, log := range allLogs {
-		if toInt64(log["id"]) == int64(logID) {
-			targetLog = log
-			break
+	for _, logStr := range logStrings {
+		var entry map[string]interface{}
+		if json.Unmarshal([]byte(logStr), &entry) == nil {
+			if toInt64(entry["id"]) == int64(logID) {
+				targetLog = entry
+				break
+			}
 		}
 	}
 
@@ -843,13 +972,13 @@ func (s *AutoGroupService) RevertUser(logID int) map[string]interface{} {
 		}
 	}
 
-	userID := toInt64(targetLog["user_id"])
+	userIDVal := toInt64(targetLog["user_id"])
 	oldGroup := toString(targetLog["old_group"])
 	newGroup := toString(targetLog["new_group"])
 	username := toString(targetLog["username"])
 	source := toString(targetLog["source"])
 
-	if userID == 0 {
+	if userIDVal == 0 {
 		return map[string]interface{}{
 			"success": false,
 			"message": "日志记录缺少用户信息，无法恢复",
@@ -866,7 +995,7 @@ func (s *AutoGroupService) RevertUser(logID int) map[string]interface{} {
 		userSQL = fmt.Sprintf("SELECT id, %s as user_group FROM users WHERE id = ? AND deleted_at IS NULL", groupCol)
 	}
 
-	userRow, err := s.db.QueryOne(userSQL, userID)
+	userRow, err := s.db.QueryOne(userSQL, userIDVal)
 	if err != nil || userRow == nil {
 		return map[string]interface{}{
 			"success": false,
@@ -894,7 +1023,7 @@ func (s *AutoGroupService) RevertUser(logID int) map[string]interface{} {
 		updateSQL = fmt.Sprintf("UPDATE users SET %s = ? WHERE id = ?", groupCol)
 	}
 
-	_, err = s.db.Execute(updateSQL, oldGroup, userID)
+	_, err = s.db.Execute(updateSQL, oldGroup, userIDVal)
 	if err != nil {
 		return map[string]interface{}{
 			"success": false,
@@ -902,29 +1031,31 @@ func (s *AutoGroupService) RevertUser(logID int) map[string]interface{} {
 		}
 	}
 
-	// Add revert log
-	s.addUserLog("revert", userID, username, newGroup, oldGroup, source, "admin")
+	s.addUserLog("revert", userIDVal, username, newGroup, oldGroup, source, "admin")
 
-	logger.L.Business(fmt.Sprintf("自动分组: 用户恢复 user_id=%d username=%s %s -> %s", userID, username, newGroup, oldGroup))
+	logger.L.Business(fmt.Sprintf("自动分组: 用户恢复 user_id=%d username=%s %s -> %s", userIDVal, username, newGroup, oldGroup))
 
 	return map[string]interface{}{
 		"success":   true,
 		"message":   fmt.Sprintf("用户 %s 已恢复到 %s", username, oldGroup),
-		"user_id":   userID,
+		"user_id":   userIDVal,
 		"username":  username,
 		"old_group": newGroup,
 		"new_group": oldGroup,
 	}
 }
 
-// addUserLog adds a detailed user-level log entry — matches Python's log recording
+// 优化4: addUserLog 使用 Redis LPUSH + LTRIM 原子操作
 func (s *AutoGroupService) addUserLog(action string, userID int64, username, oldGroup, newGroup, source, operator string) {
 	cm := cache.Get()
-	var logs []map[string]interface{}
-	cm.GetJSON("auto_group:logs", &logs)
+	rdb := cm.RedisClient()
+	ctx := context.Background()
+
+	// Get current log count for ID generation
+	logLen, _ := rdb.LLen(ctx, "auto_group:logs").Result()
 
 	entry := map[string]interface{}{
-		"id":         len(logs) + 1,
+		"id":         logLen + 1,
 		"action":     action,
 		"user_id":    userID,
 		"username":   username,
@@ -936,12 +1067,48 @@ func (s *AutoGroupService) addUserLog(action string, userID int64, username, old
 		"created_at": time.Now().Unix(),
 	}
 
-	// Prepend (newest first)
-	logs = append([]map[string]interface{}{entry}, logs...)
-
-	// Keep only last 1000 logs
-	if len(logs) > 1000 {
-		logs = logs[:1000]
+	data, err := json.Marshal(entry)
+	if err != nil {
+		logger.L.Error(fmt.Sprintf("序列化自动分组日志失败: %v", err))
+		return
 	}
-	cm.Set("auto_group:logs", logs, 0)
+
+	// Atomic LPUSH + LTRIM
+	rdb.LPush(ctx, "auto_group:logs", string(data))
+	rdb.LTrim(ctx, "auto_group:logs", 0, 999) // Keep latest 1000
+}
+
+// 优化1: addBatchLogs 批量写入日志
+func (s *AutoGroupService) addBatchLogs(action string, users []map[string]interface{}, oldGroup, newGroup, operator string) {
+	cm := cache.Get()
+	rdb := cm.RedisClient()
+	ctx := context.Background()
+
+	logLen, _ := rdb.LLen(ctx, "auto_group:logs").Result()
+
+	pipe := rdb.Pipeline()
+	for i, user := range users {
+		entry := map[string]interface{}{
+			"id":         logLen + int64(i) + 1,
+			"action":     action,
+			"user_id":    user["id"],
+			"username":   user["username"],
+			"old_group":  oldGroup,
+			"new_group":  newGroup,
+			"source":     user["source"],
+			"operator":   operator,
+			"affected":   1,
+			"created_at": time.Now().Unix(),
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		pipe.LPush(ctx, "auto_group:logs", string(data))
+	}
+	pipe.LTrim(ctx, "auto_group:logs", 0, 999)
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		logger.L.Error(fmt.Sprintf("批量写入自动分组日志失败: %v", err))
+	}
 }

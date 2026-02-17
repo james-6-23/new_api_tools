@@ -92,9 +92,10 @@ func main() {
 		handler.RegisterRiskMonitoringRoutes(api)
 		handler.RegisterModelStatusRoutes(api)
 
-		// Phase 3: AI AutoBan, AutoGroup
+		// Phase 3: AI AutoBan, AutoGroup, LinuxDo Lookup
 		handler.RegisterAIAutoBanRoutes(api)
 		handler.RegisterAutoGroupRoutes(api)
+		handler.RegisterLinuxDoRoutes(api)
 	}
 
 	// Public embed routes (no auth)

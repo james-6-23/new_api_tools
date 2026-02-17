@@ -40,6 +40,26 @@ var RecommendedIndexes = []IndexDef{
 	// === 其他表索引 ===
 	{"idx_users_deleted_status", "users", []string{"deleted_at", "status"}},
 	{"idx_tokens_user_deleted", "tokens", []string{"user_id", "deleted_at"}},
+
+	// === 自动分组查询优化 ===
+	{"idx_users_group", "users", []string{"group"}},
+}
+
+// reservedWords are SQL reserved keywords that need quoting in DDL
+var reservedWords = map[string]bool{
+	"group": true, "order": true, "key": true, "index": true,
+	"table": true, "column": true, "select": true, "where": true,
+}
+
+// quoteColumn quotes a column name if it is a SQL reserved word
+func (m *Manager) quoteColumn(col string) string {
+	if reservedWords[strings.ToLower(col)] {
+		if m.IsPG {
+			return fmt.Sprintf(`"%s"`, col)
+		}
+		return fmt.Sprintf("`%s`", col)
+	}
+	return col
 }
 
 // EnsureIndexes creates recommended indexes if they don't exist
@@ -73,8 +93,12 @@ func (m *Manager) EnsureIndexes(logProgress bool, delayBetween time.Duration) {
 			logger.L.System(fmt.Sprintf("创建索引 (%d/%d): %s ON %s...", i+1, total, idx.Name, idx.Table))
 		}
 
-		// Create index
-		columnsStr := strings.Join(idx.Columns, ", ")
+		// Create index (quote reserved words in column names)
+		quotedCols := make([]string, len(idx.Columns))
+		for j, col := range idx.Columns {
+			quotedCols[j] = m.quoteColumn(col)
+		}
+		columnsStr := strings.Join(quotedCols, ", ")
 		var createSQL string
 		if m.IsPG {
 			createSQL = fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS "%s" ON %s (%s)`, idx.Name, idx.Table, columnsStr)

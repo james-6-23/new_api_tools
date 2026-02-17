@@ -337,7 +337,7 @@ export function RealtimeRanking() {
   const [generatedAt, setGeneratedAt] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<WindowKey | 'all' | null>(null)  // 追踪哪个窗口正在刷新
-  
+
   // 刷新间隔状态 - 从 localStorage 恢复，支持持久化
   const LEADERBOARD_REFRESH_KEY = 'risk_leaderboard_refresh_interval'
   const IP_REFRESH_KEY = 'risk_ip_refresh_interval'
@@ -350,7 +350,7 @@ export function RealtimeRanking() {
     return saved ? parseInt(saved, 10) : 60
   })
   const [systemScale, setSystemScale] = useState<string>('')  // 系统规模
-  
+
   // IP 监控刷新间隔
   const [ipRefreshInterval, setIpRefreshInterval] = useState(() => {
     const saved = localStorage.getItem(IP_REFRESH_KEY)
@@ -366,6 +366,7 @@ export function RealtimeRanking() {
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [mutating, setMutating] = useState(false)
+  const [linuxDoLookupLoading, setLinuxDoLookupLoading] = useState<string | null>(null)
 
   // 封禁列表状态
   const [bannedUsers, setBannedUsers] = useState<BannedUserItem[]>([])
@@ -611,11 +612,11 @@ export function RealtimeRanking() {
         const settings = res.data.settings
         const interval = settings.frontend_refresh_interval || 60
         setSystemScale(settings.description || '')
-        
+
         // 只有在用户没有手动设置过时，才使用系统推荐值
         const savedLeaderboard = localStorage.getItem(LEADERBOARD_REFRESH_KEY)
         const savedIp = localStorage.getItem(IP_REFRESH_KEY)
-        
+
         if (!savedLeaderboard) {
           setRefreshInterval(interval)
           setCountdown(interval)
@@ -624,7 +625,7 @@ export function RealtimeRanking() {
           setIpRefreshInterval(interval)
           setIpCountdown(interval)
         }
-        
+
         console.log(`系统规模: ${settings.description}, 推荐刷新间隔: ${interval}秒`)
       }
     } catch (e) {
@@ -636,7 +637,7 @@ export function RealtimeRanking() {
   useEffect(() => {
     fetchSystemScale()
   }, [])  // 只在挂载时执行一次
-  
+
   // 保存刷新间隔到 localStorage
   const handleRefreshIntervalChange = useCallback((val: number) => {
     setRefreshInterval(val)
@@ -669,7 +670,7 @@ export function RealtimeRanking() {
   useEffect(() => {
     refreshIntervalRef.current = refreshInterval
   }, [refreshInterval])
-  
+
   // IP 刷新间隔 ref
   const ipRefreshIntervalRef = useRef(ipRefreshInterval)
   useEffect(() => {
@@ -1436,7 +1437,7 @@ export function RealtimeRanking() {
     fetchAiSuspiciousUsers,
     fetchAiAuditLogs,
   })
-  
+
   // 更新 ref 中的函数引用
   useEffect(() => {
     fetchFunctionsRef.current = {
@@ -1649,9 +1650,9 @@ export function RealtimeRanking() {
           {view === 'leaderboards' && (
             <>
               <div className="relative" ref={dropdownRef}>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
                   className="h-9 min-w-[100px]"
                 >
@@ -1665,7 +1666,7 @@ export function RealtimeRanking() {
                   )}
                   <ChevronDown className="h-3 w-3 ml-1" />
                 </Button>
-                
+
                 {showIntervalDropdown && (
                   <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
                     <div className="p-2 border-b">
@@ -2136,8 +2137,8 @@ export function RealtimeRanking() {
                                     <span className="text-[10px] text-muted-foreground flex items-center gap-1 opacity-70">
                                       <Activity className="w-3 h-3" />
                                       {user.ban_context.source === 'risk_center' ? '自动风控' :
-                                        user.ban_context.source === 'ip_monitoring' ? 'IP监控' : 
-                                        user.ban_context.source === 'ai_auto_ban' ? 'AI审查' : '人工操作'}
+                                        user.ban_context.source === 'ip_monitoring' ? 'IP监控' :
+                                          user.ban_context.source === 'ai_auto_ban' ? 'AI审查' : '人工操作'}
                                     </span>
                                   )}
                                 </div>
@@ -2559,9 +2560,9 @@ export function RealtimeRanking() {
               </div>
               <div className="flex items-center gap-3">
                 <div className="relative" ref={dropdownRef}>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => setShowIntervalDropdown(!showIntervalDropdown)}
                     className="h-9 min-w-[100px]"
                   >
@@ -2575,7 +2576,7 @@ export function RealtimeRanking() {
                     )}
                     <ChevronDown className="h-3 w-3 ml-1" />
                   </Button>
-                  
+
                   {showIntervalDropdown && (
                     <div className="absolute right-0 mt-1 w-48 bg-popover border rounded-md shadow-lg z-50">
                       <div className="p-2 border-b">
@@ -3697,123 +3698,123 @@ export function RealtimeRanking() {
             <div className="bg-white overflow-x-auto">
               {aiAuditLogs.length > 0 ? (
                 <>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
-                      <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[100px]">状态</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[100px]">模式</TableHead>
-                      <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
-                      <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
-                      <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
-                      <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[100px]">耗时</TableHead>
-                      <TableHead className="font-bold text-slate-600 w-[180px]">时间</TableHead>
-                      <TableHead className="font-bold text-slate-600">错误信息</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {aiAuditLogs.map((log) => (
-                      <TableRow
-                        key={log.id}
-                        className="hover:bg-slate-50/50 cursor-pointer"
-                        onClick={() => setSelectedAuditLog(log)}
-                      >
-                        <TableCell className="font-mono text-xs text-slate-500">{log.scan_id}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              log.status === 'success' ? 'success' :
-                                log.status === 'partial' ? 'warning' :
-                                  log.status === 'failed' ? 'destructive' :
-                                    log.status === 'empty' ? 'secondary' :
-                                      log.status === 'suspended' ? 'destructive' :
-                                        'outline'
-                            }
-                            className="text-xs whitespace-nowrap"
-                          >
-                            {log.status === 'success' ? '成功' :
-                              log.status === 'partial' ? '部分成功' :
-                                log.status === 'failed' ? '失败' :
-                                  log.status === 'empty' ? '无数据' :
-                                    log.status === 'suspended' ? '已暂停' :
-                                      log.status === 'skipped' ? '跳过' : log.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={log.dry_run ? 'secondary' : 'default'} className="text-xs whitespace-nowrap">
-                            {log.dry_run ? '试运行' : '正式'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center font-mono">{log.total_scanned}</TableCell>
-                        <TableCell className="text-center">
-                          {log.banned_count > 0 ? (
-                            <span className="font-bold text-red-600">{log.banned_count}</span>
-                          ) : (
-                            <span className="text-slate-400">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {log.warned_count > 0 ? (
-                            <span className="font-bold text-amber-600">{log.warned_count}</span>
-                          ) : (
-                            <span className="text-slate-400">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {log.error_count > 0 ? (
-                            <span className="font-bold text-red-600">{log.error_count}</span>
-                          ) : (
-                            <span className="text-slate-400">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{log.elapsed_seconds}s</TableCell>
-                        <TableCell className="text-xs text-slate-500">
-                          {new Date(log.created_at * 1000).toLocaleString('zh-CN')}
-                        </TableCell>
-                        <TableCell className="max-w-[200px]">
-                          {log.error_message ? (
-                            <span className="text-xs text-red-600 truncate block" title={log.error_message}>
-                              {log.error_message}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </TableCell>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                        <TableHead className="font-bold text-slate-600 w-[100px]">扫描ID</TableHead>
+                        <TableHead className="font-bold text-slate-600 w-[100px]">状态</TableHead>
+                        <TableHead className="font-bold text-slate-600 w-[100px]">模式</TableHead>
+                        <TableHead className="font-bold text-slate-600 text-center">扫描</TableHead>
+                        <TableHead className="font-bold text-slate-600 text-center">封禁</TableHead>
+                        <TableHead className="font-bold text-slate-600 text-center">告警</TableHead>
+                        <TableHead className="font-bold text-slate-600 text-center">错误</TableHead>
+                        <TableHead className="font-bold text-slate-600 w-[100px]">耗时</TableHead>
+                        <TableHead className="font-bold text-slate-600 w-[180px]">时间</TableHead>
+                        <TableHead className="font-bold text-slate-600">错误信息</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                
-                {/* 分页控件 */}
-                <div className="px-4 py-3 border-t flex items-center justify-between bg-slate-50/30">
-                  <div className="text-xs text-slate-500">
-                    显示 {(aiAuditLogsPage - 1) * aiAuditLogsLimit + 1} - {Math.min(aiAuditLogsPage * aiAuditLogsLimit, aiAuditLogsTotal)} 共 {aiAuditLogsTotal} 条
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAiAuditLogsPage(p => Math.max(1, p - 1))}
-                      disabled={aiAuditLogsPage <= 1 || aiAuditLogsLoading}
-                      className="h-8 w-8 p-0"
-                    >
-                      &lt;
-                    </Button>
-                    <div className="flex items-center justify-center min-w-[32px] text-sm font-medium">
-                      {aiAuditLogsPage} / {Math.max(1, Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit))}
+                    </TableHeader>
+                    <TableBody>
+                      {aiAuditLogs.map((log) => (
+                        <TableRow
+                          key={log.id}
+                          className="hover:bg-slate-50/50 cursor-pointer"
+                          onClick={() => setSelectedAuditLog(log)}
+                        >
+                          <TableCell className="font-mono text-xs text-slate-500">{log.scan_id}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                log.status === 'success' ? 'success' :
+                                  log.status === 'partial' ? 'warning' :
+                                    log.status === 'failed' ? 'destructive' :
+                                      log.status === 'empty' ? 'secondary' :
+                                        log.status === 'suspended' ? 'destructive' :
+                                          'outline'
+                              }
+                              className="text-xs whitespace-nowrap"
+                            >
+                              {log.status === 'success' ? '成功' :
+                                log.status === 'partial' ? '部分成功' :
+                                  log.status === 'failed' ? '失败' :
+                                    log.status === 'empty' ? '无数据' :
+                                      log.status === 'suspended' ? '已暂停' :
+                                        log.status === 'skipped' ? '跳过' : log.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={log.dry_run ? 'secondary' : 'default'} className="text-xs whitespace-nowrap">
+                              {log.dry_run ? '试运行' : '正式'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-center font-mono">{log.total_scanned}</TableCell>
+                          <TableCell className="text-center">
+                            {log.banned_count > 0 ? (
+                              <span className="font-bold text-red-600">{log.banned_count}</span>
+                            ) : (
+                              <span className="text-slate-400">0</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {log.warned_count > 0 ? (
+                              <span className="font-bold text-amber-600">{log.warned_count}</span>
+                            ) : (
+                              <span className="text-slate-400">0</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {log.error_count > 0 ? (
+                              <span className="font-bold text-red-600">{log.error_count}</span>
+                            ) : (
+                              <span className="text-slate-400">0</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{log.elapsed_seconds}s</TableCell>
+                          <TableCell className="text-xs text-slate-500">
+                            {new Date(log.created_at * 1000).toLocaleString('zh-CN')}
+                          </TableCell>
+                          <TableCell className="max-w-[200px]">
+                            {log.error_message ? (
+                              <span className="text-xs text-red-600 truncate block" title={log.error_message}>
+                                {log.error_message}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {/* 分页控件 */}
+                  <div className="px-4 py-3 border-t flex items-center justify-between bg-slate-50/30">
+                    <div className="text-xs text-slate-500">
+                      显示 {(aiAuditLogsPage - 1) * aiAuditLogsLimit + 1} - {Math.min(aiAuditLogsPage * aiAuditLogsLimit, aiAuditLogsTotal)} 共 {aiAuditLogsTotal} 条
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAiAuditLogsPage(p => p + 1)}
-                      disabled={aiAuditLogsPage >= Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit) || aiAuditLogsLoading}
-                      className="h-8 w-8 p-0"
-                    >
-                      &gt;
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAiAuditLogsPage(p => Math.max(1, p - 1))}
+                        disabled={aiAuditLogsPage <= 1 || aiAuditLogsLoading}
+                        className="h-8 w-8 p-0"
+                      >
+                        &lt;
+                      </Button>
+                      <div className="flex items-center justify-center min-w-[32px] text-sm font-medium">
+                        {aiAuditLogsPage} / {Math.max(1, Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit))}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAiAuditLogsPage(p => p + 1)}
+                        disabled={aiAuditLogsPage >= Math.ceil(aiAuditLogsTotal / aiAuditLogsLimit) || aiAuditLogsLoading}
+                        className="h-8 w-8 p-0"
+                      >
+                        &gt;
+                      </Button>
+                    </div>
                   </div>
-                </div>
                 </>
               ) : (
                 <div className="h-40 flex flex-col items-center justify-center text-muted-foreground bg-slate-50/30">
@@ -4127,9 +4128,9 @@ export function RealtimeRanking() {
                                           <span className="text-xs text-muted-foreground">/10</span>
                                         </div>
                                       </div>
-                                      
+
                                       <div className="w-px h-8 bg-border/60"></div>
-                                      
+
                                       <div className="flex flex-col gap-0.5">
                                         <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">置信度</span>
                                         <div className="text-lg font-bold tabular-nums">
@@ -4320,16 +4321,31 @@ export function RealtimeRanking() {
                   )}
                   <span>用户 ID: <span className="font-mono text-foreground">{selected?.item.user_id}</span></span>
                   {analysis?.user.linux_do_id && (
-                    <a
-                      href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${analysis.user.linux_do_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline"
-                      title="查看 Linux.do 证书"
+                    <button
+                      onClick={async () => {
+                        const lid = analysis.user.linux_do_id
+                        if (!lid || linuxDoLookupLoading) return
+                        setLinuxDoLookupLoading(lid)
+                        try {
+                          const res = await fetch(`${apiUrl}/api/linuxdo/lookup/${encodeURIComponent(lid)}`, { headers: getAuthHeaders() })
+                          const data = await res.json()
+                          if (data.success && data.data?.profile_url) {
+                            window.open(data.data.profile_url, '_blank')
+                          } else if (data.error_type === 'rate_limit') {
+                            showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
+                          } else {
+                            showToast('error', data.message || '查询 Linux.do 用户名失败')
+                          }
+                        } catch { showToast('error', '查询 Linux.do 用户名失败') }
+                        finally { setLinuxDoLookupLoading(null) }
+                      }}
+                      disabled={linuxDoLookupLoading === analysis.user.linux_do_id}
+                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline disabled:opacity-50 cursor-pointer"
+                      title="点击查看 Linux.do 用户主页"
                     >
                       <span>Linux.do:</span>
-                      <span>{analysis.user.linux_do_id}</span>
-                    </a>
+                      <span>{linuxDoLookupLoading === analysis.user.linux_do_id ? '查询中...' : analysis.user.linux_do_id}</span>
+                    </button>
                   )}
                 </DialogDescription>
               </div>
@@ -4443,10 +4459,10 @@ export function RealtimeRanking() {
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
                       IP 切换分析
-                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 || 
+                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 ||
                         (analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3)) && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
-                      )}
+                          <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                        )}
                       {(analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && (
                         <Badge variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
                           双栈用户
@@ -4527,10 +4543,10 @@ export function RealtimeRanking() {
                                 key={idx}
                                 className={cn(
                                   "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
-                                  detail.is_dual_stack 
-                                    ? "bg-blue-50/40 dark:bg-blue-900/10" 
-                                    : detail.interval <= 60 
-                                      ? "bg-red-50/40 dark:bg-red-900/10" 
+                                  detail.is_dual_stack
+                                    ? "bg-blue-50/40 dark:bg-blue-900/10"
+                                    : detail.interval <= 60
+                                      ? "bg-red-50/40 dark:bg-red-900/10"
                                       : "bg-background"
                                 )}
                               >

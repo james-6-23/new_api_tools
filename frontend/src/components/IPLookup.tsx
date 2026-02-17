@@ -132,6 +132,7 @@ export function IPLookup() {
   const [analysisWindow, setAnalysisWindow] = useState<string>('24h')
   const [analysis, setAnalysis] = useState<UserAnalysis | null>(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [linuxDoLookupLoading, setLinuxDoLookupLoading] = useState<string | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
 
@@ -477,17 +478,32 @@ export function IPLookup() {
                   <span>用户: <span className="font-mono text-foreground font-medium">{selectedUser?.username}</span></span>
                   <span className="text-muted-foreground">ID: {selectedUser?.id}</span>
                   {analysis?.user?.linux_do_id && (
-                    <a
-                      href={`https://linux.do/discobot/certificate.svg?date=Jan+29+2024&type=advanced&user_id=${analysis.user.linux_do_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 hover:border-orange-300 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800 dark:hover:bg-orange-900/30 transition-colors"
-                      title="查看 Linux.do 证书"
+                    <button
+                      onClick={async () => {
+                        const lid = analysis.user.linux_do_id
+                        if (!lid || linuxDoLookupLoading) return
+                        setLinuxDoLookupLoading(lid)
+                        try {
+                          const res = await fetch(`${apiUrl}/api/linuxdo/lookup/${encodeURIComponent(lid)}`, { headers: getAuthHeaders() })
+                          const data = await res.json()
+                          if (data.success && data.data?.profile_url) {
+                            globalThis.open(data.data.profile_url, '_blank')
+                          } else if (data.error_type === 'rate_limit') {
+                            showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
+                          } else {
+                            showToast('error', data.message || '查询 Linux.do 用户名失败')
+                          }
+                        } catch { showToast('error', '查询 Linux.do 用户名失败') }
+                        finally { setLinuxDoLookupLoading(null) }
+                      }}
+                      disabled={linuxDoLookupLoading === analysis.user.linux_do_id}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 hover:border-orange-300 dark:bg-orange-900/20 dark:text-orange-300 dark:border-orange-800 dark:hover:bg-orange-900/30 transition-colors disabled:opacity-50 cursor-pointer"
+                      title="点击查看 Linux.do 用户主页"
                     >
                       <img src="https://linux.do/uploads/default/optimized/3X/9/d/9dd49731091ce8656e94433a26a3ef36062b3994_2_32x32.png" alt="L" className="w-3.5 h-3.5 rounded-sm" />
-                      Linux.do: {analysis.user.linux_do_id}
+                      {linuxDoLookupLoading === analysis.user.linux_do_id ? 'Linux.do: 查询中...' : `Linux.do: ${analysis.user.linux_do_id}`}
                       <ExternalLink className="w-3 h-3" />
-                    </a>
+                    </button>
                   )}
                 </DialogDescription>
               </div>
