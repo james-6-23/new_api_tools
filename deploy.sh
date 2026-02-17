@@ -487,9 +487,9 @@ start_services() {
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
 
-  # 构建并启动服务
-  log_info "构建镜像..."
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
+  # 拉取最新镜像
+  log_info "拉取最新镜像..."
+  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
 
   # 启动服务
   $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d

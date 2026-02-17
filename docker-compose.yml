@@ -11,9 +11,6 @@
 services:
   newapi-tools:
     image: ghcr.io/james-6-23/new_api_tools:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     container_name: newapi-tools
     ports:
       - "${FRONTEND_PORT:-1145}:80"

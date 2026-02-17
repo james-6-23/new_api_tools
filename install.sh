@@ -395,6 +395,9 @@ do_update_interactive() {
   PROJECT_DIR="$project_dir"
   download_geoip_database
 
+  # 迁移旧版 .env（补充 Go 版本所需字段）
+  migrate_env_file "$project_dir"
+
   # 拉取最新镜像并重启
   log_info "拉取最新镜像..."
   $DOCKER_COMPOSE pull
@@ -780,38 +783,96 @@ check_and_update_configs() {
 }
 
 #######################################
+# 迁移旧版 .env 文件 (从 Python 版升级到 Go 版)
+# 为旧用户自动补充 Go 版本所需的新字段
+#######################################
+migrate_env_file() {
+  local project_dir="$1"
+  local env_file="${project_dir}/.env"
+
+  [[ -f "$env_file" ]] || return 0
+
+  local migrated=false
+
+  # 补充 SQL_DSN（从分离字段构建）
+  if ! grep -q '^SQL_DSN=' "$env_file" 2>/dev/null; then
+    local db_engine db_dns db_port db_user db_password db_name sql_dsn=""
+    db_engine=$(grep -E '^DB_ENGINE=' "$env_file" | cut -d'=' -f2)
+    db_dns=$(grep -E '^DB_DNS=' "$env_file" | cut -d'=' -f2)
+    db_port=$(grep -E '^DB_PORT=' "$env_file" | cut -d'=' -f2)
+    db_user=$(grep -E '^DB_USER=' "$env_file" | cut -d'=' -f2)
+    db_password=$(grep -E '^DB_PASSWORD=' "$env_file" | cut -d'=' -f2)
+    db_name=$(grep -E '^DB_NAME=' "$env_file" | cut -d'=' -f2)
+
+    if [[ -n "$db_dns" ]]; then
+      if [[ "$db_engine" == "postgres" || "$db_engine" == "postgresql" ]]; then
+        sql_dsn="host=${db_dns} port=${db_port:-5432} user=${db_user} password=${db_password} dbname=${db_name} sslmode=disable"
+      else
+        sql_dsn="${db_user}:${db_password}@tcp(${db_dns}:${db_port:-3306})/${db_name}?charset=utf8mb4&parseTime=True"
+      fi
+    fi
+
+    # 在数据库配置段后插入 SQL_DSN
+    sed -i "/^DB_ENGINE=/i SQL_DSN=${sql_dsn}" "$env_file" 2>/dev/null || \
+      echo "SQL_DSN=${sql_dsn}" >> "$env_file"
+    migrated=true
+    log_info "已补充 SQL_DSN 配置"
+  fi
+
+  # 补充 TIMEZONE
+  if ! grep -q '^TIMEZONE=' "$env_file" 2>/dev/null; then
+    echo "TIMEZONE=Asia/Shanghai" >> "$env_file"
+    migrated=true
+  fi
+
+  # 补充 LOG_LEVEL
+  if ! grep -q '^LOG_LEVEL=' "$env_file" 2>/dev/null; then
+    echo "LOG_LEVEL=info" >> "$env_file"
+    migrated=true
+  fi
+
+  if [[ "$migrated" == "true" ]]; then
+    log_success "已自动补充 Go 版本所需的配置字段"
+  fi
+}
+
+#######################################
 # 快速更新服务 (保留配置)
 #######################################
 quick_update() {
   log_info "执行快速更新..."
-  
+
   local env_file="${PROJECT_DIR}/.env"
   local compose_file="${PROJECT_DIR}/docker-compose.yml"
-  
+
   if [[ ! -f "$env_file" ]]; then
     log_warn "未找到 .env 配置文件，将执行完整部署流程"
     return 1
   fi
-  
+
   if [[ ! -f "$compose_file" ]]; then
     die "找不到 docker-compose.yml 文件"
   fi
-  
+
   cd "$PROJECT_DIR"
-  
+
   # 检查并更新配置（为老用户添加 GeoIP 支持）
   check_and_update_configs
-  
+
+  # 迁移旧版 .env（补充 Go 版本所需字段）
+  migrate_env_file "$PROJECT_DIR"
+
   # 下载 GeoIP 数据库
   download_geoip_database
-  
+
+  # 拉取最新镜像
   log_info "拉取最新镜像..."
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" pull
-  
+
   log_info "重启服务..."
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" down
   $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" up -d
-  
+
   # 确保容器连接到 NewAPI 网络
   local newapi_network
   newapi_network=$(grep -E '^NEWAPI_NETWORK=' "$env_file" | cut -d'=' -f2 || true)
@@ -819,15 +880,15 @@ quick_update() {
     log_info "连接到 NewAPI 网络: $newapi_network"
     docker network connect "$newapi_network" newapi-tools 2>/dev/null || log_warn "网络已连接"
   fi
-  
+
   # 获取前端端口
   local frontend_port
   frontend_port=$(grep -E '^FRONTEND_PORT=' "$env_file" | cut -d'=' -f2 || echo "1145")
-  
+
   # 获取服务器 IP
   local server_ip
   server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || server_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}')" || server_ip="localhost"
-  
+
   echo ""
   echo -e "${GREEN}========================================${NC}"
   echo -e "${GREEN}  更新完成!${NC}"
@@ -837,7 +898,7 @@ quick_update() {
   echo ""
   echo -e "查看日志: ${YELLOW}cd ${PROJECT_DIR} && docker compose logs -f${NC}"
   echo ""
-  
+
   return 0
 }
 
