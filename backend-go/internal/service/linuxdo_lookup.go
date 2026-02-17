@@ -181,7 +181,7 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 6. Check successful SVG response
+	// 6. Try to extract username from SVG (200 response)
 	if code == 200 && strings.Contains(strings.ToLower(body), "<svg") {
 		match := ldUsernameRe.FindStringSubmatch(body)
 		if len(match) >= 2 {
@@ -211,7 +211,17 @@ func (s *LinuxDoLookupService) LookupUsername(linuxDoID string) (*LookupResult, 
 		}
 	}
 
-	// 7. Unexpected response
+	// 7. 404 = user has no certificate
+	if code == 404 {
+		logger.L.Info(fmt.Sprintf("[LinuxDoLookup] 用户无证书: id=%s", linuxDoID))
+		return nil, &LookupError{
+			ErrorType:  "not_found",
+			Message:    "该用户没有 Linux.do 证书，无法获取用户名",
+			StatusCode: http.StatusNotFound,
+		}
+	}
+
+	// 8. Unexpected response
 	logger.L.Warn(fmt.Sprintf("[LinuxDoLookup] 异常响应: id=%s code=%d bodyLen=%d", linuxDoID, code, len(body)))
 	return nil, &LookupError{
 		ErrorType:  "unknown",
