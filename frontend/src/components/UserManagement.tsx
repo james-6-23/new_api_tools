@@ -15,8 +15,6 @@ import {
   RefreshCw,
   Eye,
   ShieldCheck,
-  Globe,
-  Activity,
   Github,
   MessageCircle,
   Send,
@@ -44,78 +42,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog'
-import { Progress } from './ui/progress'
 import { StatCard } from './StatCard'
 import { cn } from '../lib/utils'
+import { UserAnalysisDialog } from './UserAnalysisDialog'
 
-// IP切换分析类型
-interface IPSwitchDetail {
-  from_ip: string
-  to_ip: string
-  interval: number
-  time: number
-  is_dual_stack?: boolean
-  from_version?: string
-  to_version?: string
-}
 
-interface IPSwitchAnalysis {
-  switch_count: number
-  real_switch_count?: number
-  rapid_switch_count: number
-  dual_stack_switches?: number
-  avg_ip_duration: number
-  min_switch_interval: number
-  switch_details: IPSwitchDetail[]
-}
-
-// 用户分析相关类型
-interface UserAnalysis {
-  range: { start_time: number; end_time: number; window_seconds: number }
-  user: { id: number; username: string; display_name?: string | null; email?: string | null; status: number; group?: string | null; remark?: string | null; linux_do_id?: string | null }
-  summary: {
-    total_requests: number
-    success_requests: number
-    failure_requests: number
-    quota_used: number
-    prompt_tokens: number
-    completion_tokens: number
-    avg_use_time: number
-    unique_ips: number
-    unique_tokens: number
-    unique_models: number
-    unique_channels: number
-    empty_count: number
-    failure_rate: number
-    empty_rate: number
-  }
-  risk: { requests_per_minute: number; avg_quota_per_request: number; risk_flags: string[]; ip_switch_analysis?: IPSwitchAnalysis }
-  top_models: Array<{ model_name: string; requests: number; quota_used: number; success_requests: number; failure_requests: number; empty_count: number }>
-  top_channels: Array<{ channel_id: number; channel_name: string; requests: number; quota_used: number }>
-  top_ips: Array<{ ip: string; requests: number }>
-  recent_logs: Array<{ id: number; created_at: number; type: number; model_name: string; quota: number; prompt_tokens: number; completion_tokens: number; use_time: number; ip: string; channel_name: string; token_name: string }>
-}
-
-const WINDOW_LABELS: Record<string, string> = { '1h': '1小时内', '3h': '3小时内', '6h': '6小时内', '12h': '12小时内', '24h': '24小时内', '3d': '3天内', '7d': '7天内' }
-
-// 风险标签中文映射
-const RISK_FLAG_LABELS: Record<string, string> = {
-  'HIGH_RPM': '请求频率过高',
-  'MANY_IPS': '多IP访问',
-  'HIGH_FAILURE_RATE': '失败率过高',
-  'HIGH_EMPTY_RATE': '空回复率过高',
-  'IP_RAPID_SWITCH': 'IP快速切换',
-  'IP_HOPPING': 'IP跳动异常',
-}
-
-function formatAnalysisTime(ts: number) {
-  if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-function formatAnalysisNumber(n: number) {
-  return n.toLocaleString('zh-CN')
-}
 
 interface ActivityStats {
   total_users: number
@@ -207,9 +138,6 @@ export function UserManagement() {
   // 用户分析弹窗状态
   const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
-  const [analysisWindow, setAnalysisWindow] = useState<string>('24h')
-  const [analysis, setAnalysis] = useState<UserAnalysis | null>(null)
-  const [analysisLoading, setAnalysisLoading] = useState(false)
 
   // 邀请用户列表状态
   const [invitedUsers, setInvitedUsers] = useState<{
@@ -645,36 +573,9 @@ export function UserManagement() {
   const openUserAnalysis = (userId: number, username: string) => {
     setSelectedUser({ id: userId, username })
     setAnalysisDialogOpen(true)
-    setAnalysis(null)
     setInvitedUsers(null)
     setInvitedPage(1)
   }
-
-  // 获取用户分析数据
-  const fetchUserAnalysis = useCallback(async () => {
-    if (!selectedUser || !analysisDialogOpen) return
-    setAnalysisLoading(true)
-    try {
-      const response = await fetch(`${apiUrl}/api/risk/users/${selectedUser.id}/analysis?window=${analysisWindow}`, { headers: getAuthHeaders() })
-      const res = await response.json()
-      if (res.success) {
-        setAnalysis(res.data)
-      } else {
-        showToast('error', res.message || '加载分析失败')
-      }
-    } catch (e) {
-      console.error('Failed to fetch user analysis:', e)
-      showToast('error', '加载分析失败')
-    } finally {
-      setAnalysisLoading(false)
-    }
-  }, [apiUrl, getAuthHeaders, selectedUser, analysisWindow, analysisDialogOpen, showToast])
-
-  useEffect(() => {
-    if (analysisDialogOpen && selectedUser) {
-      fetchUserAnalysis()
-    }
-  }, [analysisDialogOpen, selectedUser, analysisWindow, fetchUserAnalysis])
 
   // 获取邀请用户列表
   const fetchInvitedUsers = useCallback(async () => {
@@ -1337,487 +1238,135 @@ export function UserManagement() {
       </Dialog>
 
       {/* User Analysis Dialog */}
-      <Dialog open={analysisDialogOpen} onOpenChange={setAnalysisDialogOpen}>
-        <DialogContent className="max-w-2xl w-full max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl border-border/50 shadow-2xl">
-          <DialogHeader className="p-5 border-b bg-muted/10 flex-shrink-0">
-            <div className="flex justify-between items-start pr-6">
-              <div>
-                <DialogTitle className="text-xl flex items-center gap-2">
-                  <Eye className="h-5 w-5 text-primary" />
-                  用户行为分析
-                </DialogTitle>
-                <DialogDescription className="mt-1.5 flex items-center gap-2 flex-wrap">
-                  <span>用户: <span className="font-mono text-foreground font-medium">{selectedUser?.username}</span></span>
-                  <span className="text-muted-foreground">ID: {selectedUser?.id}</span>
-                  {analysis?.user?.linux_do_id && (
-                    <button
-                      onClick={async () => {
-                        const lid = analysis.user.linux_do_id
-                        if (!lid || linuxDoLookupLoading) return
-                        setLinuxDoLookupLoading(lid)
-                        try {
-                          const res = await fetch(`${apiUrl}/api/linuxdo/lookup/${encodeURIComponent(lid)}`, { headers: getAuthHeaders() })
-                          const data = await res.json()
-                          if (data.success && data.data?.profile_url) {
-                            window.open(data.data.profile_url, '_blank')
-                          } else if (data.error_type === 'rate_limit') {
-                            showToast('error', data.message || `请求被限速，请等待 ${data.wait_seconds || '?'} 秒后重试`)
-                          } else {
-                            showToast('error', data.message || '查询 Linux.do 用户名失败')
-                          }
-                        } catch { showToast('error', '查询 Linux.do 用户名失败') }
-                        finally { setLinuxDoLookupLoading(null) }
-                      }}
-                      disabled={linuxDoLookupLoading === analysis.user.linux_do_id}
-                      className="inline-flex items-center gap-1 text-xs font-mono text-blue-500 hover:text-blue-600 hover:underline disabled:opacity-50 cursor-pointer"
-                      title="点击查看 Linux.do 用户主页"
-                    >
-                      <span>Linux.do:</span>
-                      <span>{linuxDoLookupLoading === analysis.user.linux_do_id ? '查询中...' : analysis.user.linux_do_id}</span>
-                    </button>
-                  )}
-                </DialogDescription>
-              </div>
-              <Select
-                value={analysisWindow}
-                onChange={(e) => setAnalysisWindow(e.target.value)}
-                className="w-28 h-8 text-sm"
-              >
-                {Object.entries(WINDOW_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </Select>
-            </div>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto p-5 min-h-0 bg-background">
-            {analysisLoading ? (
-              <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
-                <Loader2 className="h-8 w-8 mb-4 animate-spin text-primary/50" />
-                <p>正在分析用户行为数据...</p>
-              </div>
-            ) : analysis ? (
-              <div className="space-y-6">
-                {/* Risk Flags */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary" className="px-3 py-1 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                    RPM: {analysis.risk.requests_per_minute.toFixed(1)}
+      {selectedUser && (
+        <UserAnalysisDialog
+          open={analysisDialogOpen}
+          onOpenChange={setAnalysisDialogOpen}
+          userId={selectedUser.id}
+          username={selectedUser.username}
+          source="user_management"
+          onBanned={() => fetchUsers()}
+          onUnbanned={() => fetchUsers()}
+          onWhitelistChanged={() => fetchUsers()}
+          renderExtra={() => (
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                邀请用户
+                {invitedUsers?.inviter?.aff_code && (
+                  <Badge variant="outline" className="text-xs px-1.5 py-0 font-mono">
+                    邀请码: {invitedUsers.inviter.aff_code}
                   </Badge>
-                  <Badge variant="secondary" className="px-3 py-1 bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                    均额: ${((analysis.risk.avg_quota_per_request || 0) / 500000).toFixed(4)}
-                  </Badge>
-                  {analysis.risk.risk_flags.length > 0 ? (
-                    analysis.risk.risk_flags.map((f) => (
-                      <Badge key={f} variant="destructive" className="px-3 py-1 animate-pulse">
-                        <AlertTriangle className="w-3 h-3 mr-1" /> {RISK_FLAG_LABELS[f] || f}
-                      </Badge>
-                    ))
-                  ) : (
-                    <Badge variant="success" className="px-3 py-1 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
-                      <ShieldCheck className="w-3 h-3 mr-1" /> 无明显异常
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Summary Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <Card className="bg-muted/20 border-none shadow-sm">
-                    <CardContent className="p-4 text-center">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">请求总数</div>
-                      <div className="text-2xl font-bold tabular-nums">{formatAnalysisNumber(analysis.summary.total_requests)}</div>
-                    </CardContent>
-                  </Card>
-                  <Card className={cn("border-none shadow-sm", analysis.summary.failure_rate > 0.5 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/20")}>
-                    <CardContent className="p-4 text-center">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">失败率</div>
-                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.failure_rate > 0.5 && "text-red-600")}>
-                        {(analysis.summary.failure_rate * 100).toFixed(1)}%
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card className={cn("border-none shadow-sm", analysis.summary.empty_rate > 0.5 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/20")}>
-                    <CardContent className="p-4 text-center">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">空回复率</div>
-                      <div className={cn("text-2xl font-bold tabular-nums", analysis.summary.empty_rate > 0.5 && "text-yellow-600")}>
-                        {(analysis.summary.empty_rate * 100).toFixed(1)}%
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card className="bg-muted/20 border-none shadow-sm">
-                    <CardContent className="p-4 text-center">
-                      <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">IP 来源</div>
-                      <div className="text-2xl font-bold tabular-nums">{formatAnalysisNumber(analysis.summary.unique_ips)}</div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Models and IPs */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                      <Activity className="w-4 h-4" />
-                      模型偏好 (Top 5)
-                    </h4>
-                    {analysis.top_models.slice(0, 5).length ? (
-                      analysis.top_models.slice(0, 5).map((m) => {
-                        const pct = analysis.summary.total_requests ? (m.requests / analysis.summary.total_requests) * 100 : 0
-                        return (
-                          <div key={m.model_name} className="space-y-1.5">
-                            <div className="flex justify-between text-xs">
-                              <span className="font-medium truncate max-w-[180px]">{m.model_name}</span>
-                              <span className="text-muted-foreground tabular-nums">{formatAnalysisNumber(m.requests)} ({pct.toFixed(0)}%)</span>
-                            </div>
-                            <Progress value={pct} className="h-1.5" />
-                          </div>
-                        )
-                      })
-                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
-                  </div>
-
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                      <Globe className="w-4 h-4" />
-                      来源 IP (Top 5)
-                    </h4>
-                    {analysis.top_ips.slice(0, 5).length ? (
-                      analysis.top_ips.slice(0, 5).map((ip) => {
-                        const pct = analysis.summary.total_requests ? (ip.requests / analysis.summary.total_requests) * 100 : 0
-                        return (
-                          <div key={ip.ip} className="space-y-1.5">
-                            <div className="flex justify-between text-xs">
-                              <span className="font-medium font-mono truncate">{ip.ip}</span>
-                              <span className="text-muted-foreground tabular-nums">{formatAnalysisNumber(ip.requests)} ({pct.toFixed(0)}%)</span>
-                            </div>
-                            <Progress value={pct} className="h-1.5" />
-                          </div>
-                        )
-                      })
-                    ) : <div className="text-xs text-muted-foreground italic">无数据</div>}
-                  </div>
-                </div>
-
-                {/* IP 切换分析 */}
-                {analysis.risk.ip_switch_analysis && analysis.risk.ip_switch_analysis.switch_count > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                      IP 切换分析
-                      {(analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 ||
-                        (analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3)) && (
-                          <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
-                        )}
-                      {(analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && (
-                        <Badge variant="outline" className="text-xs px-1.5 py-0 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
-                          双栈用户
-                        </Badge>
-                      )}
-                    </h4>
-
-                    {/* 统计卡片 */}
-                    <div className="grid grid-cols-4 gap-2">
-                      <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
-                        <div className="text-lg font-bold">{analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count}</div>
-                        <div className="text-xs text-muted-foreground">真实切换</div>
-                      </div>
-                      <div className={cn(
-                        "rounded-lg border p-2.5 text-center",
-                        (analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0
-                          ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
-                          : "bg-muted/30"
-                      )}>
-                        <div className={cn(
-                          "text-lg font-bold",
-                          (analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0) > 0 && "text-blue-600 dark:text-blue-400"
-                        )}>
-                          {analysis.risk.ip_switch_analysis.dual_stack_switches ?? 0}
-                        </div>
-                        <div className="text-xs text-muted-foreground">双栈切换</div>
-                      </div>
-                      <div className={cn(
-                        "rounded-lg border p-2.5 text-center",
-                        analysis.risk.ip_switch_analysis.rapid_switch_count >= 3
-                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-                          : "bg-muted/30"
-                      )}>
-                        <div className={cn(
-                          "text-lg font-bold",
-                          analysis.risk.ip_switch_analysis.rapid_switch_count >= 3 && "text-red-600 dark:text-red-400"
-                        )}>
-                          {analysis.risk.ip_switch_analysis.rapid_switch_count}
-                        </div>
-                        <div className="text-xs text-muted-foreground">快速切换</div>
-                      </div>
-                      <div className={cn(
-                        "rounded-lg border p-2.5 text-center",
-                        analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3
-                          ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-                          : "bg-muted/30"
-                      )}>
-                        <div className={cn(
-                          "text-lg font-bold",
-                          analysis.risk.ip_switch_analysis.avg_ip_duration < 30 && (analysis.risk.ip_switch_analysis.real_switch_count ?? analysis.risk.ip_switch_analysis.switch_count) >= 3 && "text-red-600 dark:text-red-400"
-                        )}>
-                          {analysis.risk.ip_switch_analysis.avg_ip_duration}s
-                        </div>
-                        <div className="text-xs text-muted-foreground">平均停留</div>
-                      </div>
-                    </div>
-
-                    {/* 切换记录 */}
-                    {analysis.risk.ip_switch_analysis.switch_details.length > 0 && (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-muted-foreground">最近切换记录:</div>
-                          <div className="text-xs text-muted-foreground italic flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> 蓝色为双栈切换（正常），红色为异常切换
-                          </div>
-                        </div>
-                        <div className="rounded-lg border overflow-hidden shadow-sm">
-                          <div className="bg-muted/30 px-3 py-2 flex text-xs uppercase tracking-wider font-bold text-muted-foreground border-b border-border/60">
-                            <div className="w-[120px]">切换时间</div>
-                            <div className="flex-1 px-2 text-center">源 IP 地址</div>
-                            <div className="w-8"></div>
-                            <div className="flex-1 px-2 text-center">目标 IP 地址</div>
-                            <div className="w-28 text-right">切换间隔</div>
-                          </div>
-                          <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
-                            {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
-                              <div
-                                key={idx}
-                                className={cn(
-                                  "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
-                                  detail.is_dual_stack
-                                    ? "bg-blue-50/40 dark:bg-blue-900/10"
-                                    : detail.interval <= 60
-                                      ? "bg-red-50/40 dark:bg-red-900/10"
-                                      : "bg-background"
-                                )}
-                              >
-                                <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
-                                  {formatAnalysisTime(detail.time)}
-                                </div>
-                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
-                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                    {detail.from_ip}
-                                  </code>
-                                  {detail.from_version && (
-                                    <span className={cn(
-                                      "text-[10px] px-1 py-0.5 rounded",
-                                      detail.from_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                                    )}>
-                                      {detail.from_version}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="w-8 flex justify-center">
-                                  <span className={cn(
-                                    "transition-colors",
-                                    detail.is_dual_stack ? "text-blue-400" : "text-muted-foreground/50 group-hover:text-primary"
-                                  )}>→</span>
-                                </div>
-                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
-                                  <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                    {detail.to_ip}
-                                  </code>
-                                  {detail.to_version && (
-                                    <span className={cn(
-                                      "text-[10px] px-1 py-0.5 rounded",
-                                      detail.to_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                                    )}>
-                                      {detail.to_version}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="w-28 text-right">
-                                  {detail.is_dual_stack ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="px-2 py-0.5 h-6 text-xs font-mono bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400"
-                                    >
-                                      <span className="mr-1">⇄</span>
-                                      双栈
-                                    </Badge>
-                                  ) : (
-                                    <Badge
-                                      variant={detail.interval <= 60 ? "destructive" : "outline"}
-                                      className={cn(
-                                        "px-2 py-0.5 h-6 text-xs font-mono",
-                                        detail.interval > 60 && "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400"
-                                      )}
-                                    >
-                                      {detail.interval <= 60 ? <AlertTriangle className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />}
-                                      {detail.interval}s
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 )}
+                {invitedUsers?.stats && invitedUsers.stats.total_invited > 0 && (
+                  <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                    共 {invitedUsers.stats.total_invited} 人
+                  </Badge>
+                )}
+              </h4>
 
-                {/* Recent Logs */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold text-muted-foreground">最近轨迹 (Latest 10)</h4>
+              {invitedLoading ? (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : invitedUsers?.items && invitedUsers.items.length > 0 ? (
+                <>
+                  {/* 邀请统计 */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                      <div className="text-sm font-bold">{invitedUsers.stats.total_invited}</div>
+                      <div className="text-xs text-muted-foreground">邀请总数</div>
+                    </div>
+                    <div className="rounded-lg border bg-green-50 dark:bg-green-900/20 p-2 text-center">
+                      <div className="text-sm font-bold text-green-600">{invitedUsers.stats.active_count}</div>
+                      <div className="text-xs text-muted-foreground">活跃用户</div>
+                    </div>
+                    <div className={cn(
+                      "rounded-lg border p-2 text-center",
+                      invitedUsers.stats.banned_count > 0 ? "bg-red-50 dark:bg-red-900/20" : "bg-muted/30"
+                    )}>
+                      <div className={cn("text-sm font-bold", invitedUsers.stats.banned_count > 0 && "text-red-600")}>{invitedUsers.stats.banned_count}</div>
+                      <div className="text-xs text-muted-foreground">已封禁</div>
+                    </div>
+                    <div className="rounded-lg border bg-muted/30 p-2 text-center">
+                      <div className="text-sm font-bold">{(invitedUsers.stats.total_used_quota / 500000).toFixed(2)}</div>
+                      <div className="text-xs text-muted-foreground">总消耗 $</div>
+                    </div>
+                  </div>
+
+                  {/* 邀请用户列表 */}
                   <div className="rounded-lg border overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow className="h-8 bg-muted/50 hover:bg-muted/50">
-                          <TableHead className="h-8 text-xs w-[140px]">时间</TableHead>
+                          <TableHead className="h-8 text-xs w-[60px]">ID</TableHead>
+                          <TableHead className="h-8 text-xs">用户名</TableHead>
                           <TableHead className="h-8 text-xs w-[60px]">状态</TableHead>
-                          <TableHead className="h-8 text-xs">模型</TableHead>
-                          <TableHead className="h-8 text-xs text-right">耗时</TableHead>
-                          <TableHead className="h-8 text-xs text-right w-[120px]">IP</TableHead>
+                          <TableHead className="h-8 text-xs text-right">请求数</TableHead>
+                          <TableHead className="h-8 text-xs text-right">消耗 $</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {analysis.recent_logs.slice(0, 10).map((l) => (
-                          <TableRow key={l.id} className="h-8 hover:bg-muted/30">
-                            <TableCell className="py-1.5 text-xs text-muted-foreground whitespace-nowrap tabular-nums">{formatAnalysisTime(l.created_at)}</TableCell>
+                        {invitedUsers.items.map((u) => (
+                          <TableRow key={u.user_id} className="h-8 hover:bg-muted/30">
+                            <TableCell className="py-1.5 text-xs text-muted-foreground font-mono">{u.user_id}</TableCell>
                             <TableCell className="py-1.5 text-xs">
-                              {l.type === 5 ? <span className="text-red-500 font-medium">失败</span> : <span className="text-green-500">成功</span>}
+                              <span className="font-medium">{u.username}</span>
+                              {u.display_name && <span className="text-muted-foreground ml-1">({u.display_name})</span>}
                             </TableCell>
-                            <TableCell className="py-1.5 text-xs font-medium truncate max-w-[150px]" title={l.model_name}>{l.model_name}</TableCell>
-                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground tabular-nums">{l.use_time}ms</TableCell>
-                            <TableCell className="py-1.5 text-xs text-right text-muted-foreground font-mono">{l.ip}</TableCell>
+                            <TableCell className="py-1.5 text-xs">
+                              {u.status === 2 ? (
+                                <Badge variant="destructive" className="text-xs px-1 py-0">禁用</Badge>
+                              ) : (
+                                <Badge variant="success" className="text-xs px-1 py-0">正常</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-1.5 text-xs text-right tabular-nums">{u.request_count.toLocaleString()}</TableCell>
+                            <TableCell className="py-1.5 text-xs text-right tabular-nums font-mono">{(u.used_quota / 500000).toFixed(2)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
-                </div>
 
-                {/* Invited Users */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    邀请用户
-                    {invitedUsers?.inviter?.aff_code && (
-                      <Badge variant="outline" className="text-xs px-1.5 py-0 font-mono">
-                        邀请码: {invitedUsers.inviter.aff_code}
-                      </Badge>
-                    )}
-                    {invitedUsers?.stats && invitedUsers.stats.total_invited > 0 && (
-                      <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                        共 {invitedUsers.stats.total_invited} 人
-                      </Badge>
-                    )}
-                  </h4>
-
-                  {invitedLoading ? (
-                    <div className="flex items-center justify-center py-6">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : invitedUsers?.items && invitedUsers.items.length > 0 ? (
-                    <>
-                      {/* 邀请统计 */}
-                      <div className="grid grid-cols-4 gap-2">
-                        <div className="rounded-lg border bg-muted/30 p-2 text-center">
-                          <div className="text-sm font-bold">{invitedUsers.stats.total_invited}</div>
-                          <div className="text-xs text-muted-foreground">邀请总数</div>
-                        </div>
-                        <div className="rounded-lg border bg-green-50 dark:bg-green-900/20 p-2 text-center">
-                          <div className="text-sm font-bold text-green-600">{invitedUsers.stats.active_count}</div>
-                          <div className="text-xs text-muted-foreground">活跃用户</div>
-                        </div>
-                        <div className={cn(
-                          "rounded-lg border p-2 text-center",
-                          invitedUsers.stats.banned_count > 0 ? "bg-red-50 dark:bg-red-900/20" : "bg-muted/30"
-                        )}>
-                          <div className={cn("text-sm font-bold", invitedUsers.stats.banned_count > 0 && "text-red-600")}>{invitedUsers.stats.banned_count}</div>
-                          <div className="text-xs text-muted-foreground">已封禁</div>
-                        </div>
-                        <div className="rounded-lg border bg-muted/30 p-2 text-center">
-                          <div className="text-sm font-bold">{(invitedUsers.stats.total_used_quota / 500000).toFixed(2)}</div>
-                          <div className="text-xs text-muted-foreground">总消耗 $</div>
-                        </div>
+                  {/* 分页 */}
+                  {invitedUsers.total > 10 && (
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-xs text-muted-foreground">
+                        第 {invitedPage} 页，共 {Math.ceil(invitedUsers.total / 10)} 页
+                      </span>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setInvitedPage(p => Math.max(1, p - 1))}
+                          disabled={invitedPage === 1}
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setInvitedPage(p => p + 1)}
+                          disabled={invitedPage >= Math.ceil(invitedUsers.total / 10)}
+                        >
+                          <ChevronRight className="h-3 w-3" />
+                        </Button>
                       </div>
-
-                      {/* 邀请用户列表 */}
-                      <div className="rounded-lg border overflow-hidden">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="h-8 bg-muted/50 hover:bg-muted/50">
-                              <TableHead className="h-8 text-xs w-[60px]">ID</TableHead>
-                              <TableHead className="h-8 text-xs">用户名</TableHead>
-                              <TableHead className="h-8 text-xs w-[60px]">状态</TableHead>
-                              <TableHead className="h-8 text-xs text-right">请求数</TableHead>
-                              <TableHead className="h-8 text-xs text-right">消耗 $</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {invitedUsers.items.map((u) => (
-                              <TableRow key={u.user_id} className="h-8 hover:bg-muted/30">
-                                <TableCell className="py-1.5 text-xs text-muted-foreground font-mono">{u.user_id}</TableCell>
-                                <TableCell className="py-1.5 text-xs">
-                                  <span className="font-medium">{u.username}</span>
-                                  {u.display_name && <span className="text-muted-foreground ml-1">({u.display_name})</span>}
-                                </TableCell>
-                                <TableCell className="py-1.5 text-xs">
-                                  {u.status === 2 ? (
-                                    <Badge variant="destructive" className="text-xs px-1 py-0">禁用</Badge>
-                                  ) : (
-                                    <Badge variant="success" className="text-xs px-1 py-0">正常</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="py-1.5 text-xs text-right tabular-nums">{u.request_count.toLocaleString()}</TableCell>
-                                <TableCell className="py-1.5 text-xs text-right tabular-nums font-mono">{(u.used_quota / 500000).toFixed(2)}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-
-                      {/* 分页 */}
-                      {invitedUsers.total > 10 && (
-                        <div className="flex items-center justify-between pt-2">
-                          <span className="text-xs text-muted-foreground">
-                            第 {invitedPage} 页，共 {Math.ceil(invitedUsers.total / 10)} 页
-                          </span>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => setInvitedPage(p => Math.max(1, p - 1))}
-                              disabled={invitedPage === 1}
-                            >
-                              <ChevronLeft className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => setInvitedPage(p => p + 1)}
-                              disabled={invitedPage >= Math.ceil(invitedUsers.total / 10)}
-                            >
-                              <ChevronRight className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="text-xs text-muted-foreground italic py-4 text-center border rounded-lg bg-muted/10">
-                      该用户暂无邀请记录
                     </div>
                   )}
+                </>
+              ) : (
+                <div className="text-xs text-muted-foreground italic py-4 text-center border rounded-lg bg-muted/10">
+                  该用户暂无邀请记录
                 </div>
-              </div>
-            ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                暂无分析数据
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="p-4 border-t bg-muted/10 flex-shrink-0">
-            <Button variant="outline" onClick={() => setAnalysisDialogOpen(false)}>关闭</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              )}
+            </div>
+          )}
+        />
+      )}
     </div>
   )
 }
