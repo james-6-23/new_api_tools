@@ -6,23 +6,37 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/logger"
 	"github.com/redis/go-redis/v9"
 )
 
+// localEntry wraps cached data with an expiry time
+type localEntry struct {
+	data      []byte
+	expiresAt time.Time // zero means no expiry
+}
+
+// isExpired returns true if the entry has expired
+func (e *localEntry) isExpired() bool {
+	if e.expiresAt.IsZero() {
+		return false
+	}
+	return time.Now().After(e.expiresAt)
+}
+
 // Manager provides a two-level cache: local sync.Map + Redis
 // Matches Python's cache_manager.py functionality
 type Manager struct {
 	rdb        *redis.Client
-	localCache sync.Map // level-1 local cache
+	localCache sync.Map // level-1 local cache (stores *localEntry)
 	ctx        context.Context
 
-	// Stats
+	// Stats — use atomic for lock-free incrementing
 	hits   int64
 	misses int64
-	mu     sync.RWMutex
 }
 
 // Global cache manager
@@ -41,6 +55,10 @@ func Init(connString string) (*Manager, error) {
 		}
 	}
 
+	// Configure Redis connection pool
+	opt.PoolSize = 20
+	opt.MinIdleConns = 5
+
 	rdb := redis.NewClient(opt)
 
 	// Test connection
@@ -53,8 +71,25 @@ func Init(connString string) (*Manager, error) {
 		ctx: ctx,
 	}
 
+	// Start local cache cleanup goroutine
+	go mgr.cleanupExpiredEntries()
+
 	logger.L.System("Redis 连接成功")
 	return mgr, nil
+}
+
+// cleanupExpiredEntries periodically removes expired local cache entries
+func (m *Manager) cleanupExpiredEntries() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		m.localCache.Range(func(key, value interface{}) bool {
+			if entry, ok := value.(*localEntry); ok && entry.isExpired() {
+				m.localCache.Delete(key)
+			}
+			return true
+		})
+	}
 }
 
 // Get returns the global cache manager
@@ -88,8 +123,12 @@ func (m *Manager) Set(key string, value interface{}, ttl time.Duration) error {
 		return fmt.Errorf("failed to serialize cache value: %w", err)
 	}
 
-	// Store in local cache
-	m.localCache.Store(key, data)
+	// Store in local cache with TTL
+	entry := &localEntry{data: data}
+	if ttl > 0 {
+		entry.expiresAt = time.Now().Add(ttl)
+	}
+	m.localCache.Store(key, entry)
 
 	// Store in Redis
 	return m.rdb.Set(m.ctx, key, data, ttl).Err()
@@ -99,33 +138,35 @@ func (m *Manager) Set(key string, value interface{}, ttl time.Duration) error {
 func (m *Manager) GetJSON(key string, dest interface{}) (bool, error) {
 	// Try local cache first
 	if val, ok := m.localCache.Load(key); ok {
-		m.mu.Lock()
-		m.hits++
-		m.mu.Unlock()
-
-		if data, ok := val.([]byte); ok {
-			return true, json.Unmarshal(data, dest)
+		if entry, ok := val.(*localEntry); ok {
+			if !entry.isExpired() {
+				atomic.AddInt64(&m.hits, 1)
+				return true, json.Unmarshal(entry.data, dest)
+			}
+			// Expired — remove from local cache
+			m.localCache.Delete(key)
 		}
 	}
 
 	// Try Redis
 	data, err := m.rdb.Get(m.ctx, key).Bytes()
 	if err == redis.Nil {
-		m.mu.Lock()
-		m.misses++
-		m.mu.Unlock()
+		atomic.AddInt64(&m.misses, 1)
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
 
-	// Update local cache
-	m.localCache.Store(key, data)
+	// Get TTL from Redis to set local cache expiry
+	ttl, _ := m.rdb.TTL(m.ctx, key).Result()
+	entry := &localEntry{data: data}
+	if ttl > 0 {
+		entry.expiresAt = time.Now().Add(ttl)
+	}
+	m.localCache.Store(key, entry)
 
-	m.mu.Lock()
-	m.hits++
-	m.mu.Unlock()
+	atomic.AddInt64(&m.hits, 1)
 
 	return true, json.Unmarshal(data, dest)
 }
@@ -211,10 +252,8 @@ func (m *Manager) ClearAll() (int64, error) {
 
 // Stats returns cache statistics
 func (m *Manager) Stats() map[string]interface{} {
-	m.mu.RLock()
-	hits := m.hits
-	misses := m.misses
-	m.mu.RUnlock()
+	hits := atomic.LoadInt64(&m.hits)
+	misses := atomic.LoadInt64(&m.misses)
 
 	total := hits + misses
 	hitRate := float64(0)

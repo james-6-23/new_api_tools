@@ -615,7 +615,7 @@ func (s *UserManagementService) GetInvitedUsers(userID int64, page, pageSize int
 
 	// Get inviter info
 	inviterRow, err := s.db.QueryOne(s.db.RebindQuery(
-		fmt.Sprintf("SELECT id, username, display_name, aff_code, aff_count, aff_quota, aff_history FROM users WHERE id = %d AND deleted_at IS NULL", userID)))
+		"SELECT id, username, display_name, aff_code, aff_count, aff_quota, aff_history FROM users WHERE id = ? AND deleted_at IS NULL"), userID)
 	if err != nil || inviterRow == nil {
 		return map[string]interface{}{
 			"inviter":   nil,
@@ -639,7 +639,7 @@ func (s *UserManagementService) GetInvitedUsers(userID int64, page, pageSize int
 
 	// Count total invited
 	countRow, _ := s.db.QueryOne(s.db.RebindQuery(
-		fmt.Sprintf("SELECT COUNT(*) as total FROM users WHERE inviter_id = %d AND deleted_at IS NULL", userID)))
+		"SELECT COUNT(*) as total FROM users WHERE inviter_id = ? AND deleted_at IS NULL"), userID)
 	total := int64(0)
 	if countRow != nil {
 		total = toInt64(countRow["total"])
@@ -650,16 +650,16 @@ func (s *UserManagementService) GetInvitedUsers(userID int64, page, pageSize int
 	if s.db.IsPG {
 		groupCol = `"group"`
 	}
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT id, username, display_name, email, status,
 			quota, used_quota, request_count, %s, role
 		FROM users
-		WHERE inviter_id = %d AND deleted_at IS NULL
+		WHERE inviter_id = ? AND deleted_at IS NULL
 		ORDER BY id DESC
-		LIMIT %d OFFSET %d`,
-		groupCol, userID, pageSize, offset)
+		LIMIT ? OFFSET ?`,
+		groupCol))
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, userID, pageSize, offset)
 	if err != nil {
 		return nil, err
 	}

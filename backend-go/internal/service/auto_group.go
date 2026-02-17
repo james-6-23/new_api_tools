@@ -509,7 +509,20 @@ func (s *AutoGroupService) GetUsers(page, pageSize int, group, source, keyword s
 
 	// 优化2: source 过滤下推到 SQL 层
 	if source != "" {
-		where = append(where, fmt.Sprintf("(%s) = '%s'", sourceCaseSQL, source))
+		// Validate source against known values to prevent injection
+		validSources := map[string]bool{
+			"github": true, "wechat": true, "telegram": true,
+			"discord": true, "oidc": true, "linux_do": true, "password": true,
+		}
+		if validSources[source] {
+			if s.db.IsPG {
+				where = append(where, fmt.Sprintf("(%s) = $%d", sourceCaseSQL, argIdx))
+				argIdx++
+			} else {
+				where = append(where, fmt.Sprintf("(%s) = ?", sourceCaseSQL))
+			}
+			args = append(args, source)
+		}
 	}
 
 	whereClause := strings.Join(where, " AND ")

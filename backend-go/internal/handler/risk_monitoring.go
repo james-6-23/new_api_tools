@@ -27,7 +27,7 @@ func RegisterRiskMonitoringRoutes(r *gin.RouterGroup) {
 func GetLeaderboards(c *gin.Context) {
 	windowsStr := c.DefaultQuery("windows", "1h,3h,6h,12h,24h")
 	windows := strings.Split(windowsStr, ",")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit := parseLimit(c, 10, 100)
 	sortBy := c.DefaultQuery("sort_by", "requests")
 
 	if sortBy != "requests" && sortBy != "quota" && sortBy != "failure_rate" {
@@ -77,8 +77,8 @@ func GetUserRiskAnalysis(c *gin.Context) {
 
 // GET /api/risk/ban-records
 func ListBanRecords(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	page := parsePage(c)
+	pageSize := parsePageSize(c, 50, 200)
 	action := c.Query("action")
 
 	var userID *int64
@@ -97,9 +97,13 @@ func ListBanRecords(c *gin.Context) {
 // GET /api/risk/token-rotation
 func GetTokenRotationUsers(c *gin.Context) {
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 	minTokens, _ := strconv.Atoi(c.DefaultQuery("min_tokens", "5"))
 	maxReqPerToken, _ := strconv.Atoi(c.DefaultQuery("max_requests_per_token", "10"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, 500)
 
 	svc := service.NewRiskMonitoringService()
 	data, err := svc.GetTokenRotationUsers(window, minTokens, maxReqPerToken, limit)
@@ -113,7 +117,7 @@ func GetTokenRotationUsers(c *gin.Context) {
 // GET /api/risk/affiliated-accounts
 func GetAffiliatedAccounts(c *gin.Context) {
 	minInvited, _ := strconv.Atoi(c.DefaultQuery("min_invited", "3"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, 500)
 
 	svc := service.NewRiskMonitoringService()
 	data, err := svc.GetAffiliatedAccounts(minInvited, limit)
@@ -127,8 +131,12 @@ func GetAffiliatedAccounts(c *gin.Context) {
 // GET /api/risk/same-ip-registrations
 func GetSameIPRegistrations(c *gin.Context) {
 	window := c.DefaultQuery("window", "7d")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 	minUsers, _ := strconv.Atoi(c.DefaultQuery("min_users", "3"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, 500)
 
 	svc := service.NewRiskMonitoringService()
 	data, err := svc.GetSameIPRegistrations(window, minUsers, limit)

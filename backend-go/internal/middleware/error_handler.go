@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/gin-gonic/gin"
+	"github.com/new-api-tools/backend/internal/logger"
 	"github.com/new-api-tools/backend/internal/models"
 )
 
@@ -69,6 +72,8 @@ func ErrorHandlerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
+				// Log the panic with stack trace for debugging
+				logger.L.Error("Panic recovered: " + fmt.Sprintf("%v\n%s", err, debug.Stack()))
 				c.AbortWithStatusJSON(http.StatusInternalServerError, models.NewErrorResponse(
 					"INTERNAL_ERROR",
 					"An unexpected error occurred",

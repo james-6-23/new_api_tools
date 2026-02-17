@@ -8,10 +8,13 @@ import (
 )
 
 // CORSMiddleware configures CORS settings
-// Matches Python: allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+// Note: AllowAllOrigins and AllowCredentials cannot both be true per CORS spec.
+// We use AllowOriginFunc to dynamically allow all origins while supporting credentials.
 func CORSMiddleware() gin.HandlerFunc {
 	return cors.New(cors.Config{
-		AllowAllOrigins:  true,
+		AllowOriginFunc: func(origin string) bool {
+			return true // Allow all origins dynamically
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key"},
 		ExposeHeaders:    []string{"Content-Length"},

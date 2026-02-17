@@ -39,6 +39,11 @@ func main() {
 
 	// Ensure indexes (background, with delay to reduce load)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.L.Error(fmt.Sprintf("索引创建 goroutine panic: %v", r))
+			}
+		}()
 		time.Sleep(2 * time.Second)
 		db := database.Get()
 		db.EnsureIndexes(true, 500*time.Millisecond)

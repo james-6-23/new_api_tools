@@ -51,6 +51,7 @@ func ProcessLogs(c *gin.Context) {
 // POST /api/analytics/batch-process or /api/analytics/batch
 func BatchProcessLogs(c *gin.Context) {
 	maxIter, _ := strconv.Atoi(c.DefaultQuery("max_iterations", "100"))
+	maxIter = clampInt(maxIter, 1, 1000)
 	svc := service.NewLogAnalyticsService()
 	result, err := svc.BatchProcess(maxIter)
 	if err != nil {
@@ -62,7 +63,7 @@ func BatchProcessLogs(c *gin.Context) {
 
 // GET /api/analytics/ranking/requests or /api/analytics/users/requests
 func GetUserRequestRanking(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit := parseLimit(c, 10, 200)
 	svc := service.NewLogAnalyticsService()
 	data, err := svc.GetUserRequestRanking(limit)
 	if err != nil {
@@ -74,7 +75,7 @@ func GetUserRequestRanking(c *gin.Context) {
 
 // GET /api/analytics/ranking/quota or /api/analytics/users/quota
 func GetUserQuotaRanking(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit := parseLimit(c, 10, 200)
 	svc := service.NewLogAnalyticsService()
 	data, err := svc.GetUserQuotaRanking(limit)
 	if err != nil {
@@ -86,7 +87,7 @@ func GetUserQuotaRanking(c *gin.Context) {
 
 // GET /api/analytics/models
 func GetModelStatistics(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	limit := parseLimit(c, 20, 200)
 	svc := service.NewLogAnalyticsService()
 	data, err := svc.GetModelStatistics(limit)
 	if err != nil {

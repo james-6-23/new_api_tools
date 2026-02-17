@@ -55,7 +55,7 @@ func GetUsageStatistics(c *gin.Context) {
 // GET /api/dashboard/models
 func GetModelUsage(c *gin.Context) {
 	period := c.DefaultQuery("period", "7d")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit := parseLimit(c, 10, 200)
 	svc := service.NewDashboardService()
 
 	data, err := svc.GetModelUsage(period, limit)
@@ -69,6 +69,7 @@ func GetModelUsage(c *gin.Context) {
 // GET /api/dashboard/trends/daily
 func GetDailyTrends(c *gin.Context) {
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	days = clampInt(days, 1, 90)
 	svc := service.NewDashboardService()
 
 	data, err := svc.GetDailyTrends(days)
@@ -82,6 +83,7 @@ func GetDailyTrends(c *gin.Context) {
 // GET /api/dashboard/trends/hourly
 func GetHourlyTrends(c *gin.Context) {
 	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	hours = clampInt(hours, 1, 168)
 	svc := service.NewDashboardService()
 
 	data, err := svc.GetHourlyTrends(hours)
@@ -95,7 +97,7 @@ func GetHourlyTrends(c *gin.Context) {
 // GET /api/dashboard/top-users
 func GetTopUsers(c *gin.Context) {
 	period := c.DefaultQuery("period", "7d")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	limit := parseLimit(c, 10, 200)
 	svc := service.NewDashboardService()
 
 	data, err := svc.GetTopUsers(period, limit)
@@ -153,6 +155,10 @@ func GetDashboardSystemInfo(c *gin.Context) {
 // GET /api/dashboard/ip-distribution
 func GetIPDistribution(c *gin.Context) {
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "Invalid window value"}})
+		return
+	}
 
 	svc := service.NewDashboardService()
 	data, err := svc.GetIPDistribution(window)

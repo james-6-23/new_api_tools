@@ -9,6 +9,8 @@ import (
 	"github.com/new-api-tools/backend/internal/service"
 )
 
+const maxIPLimit = 500
+
 // RegisterIPMonitoringRoutes registers /api/ip endpoints
 func RegisterIPMonitoringRoutes(r *gin.RouterGroup) {
 	g := r.Group("/ip")
@@ -43,8 +45,12 @@ func GetIPStats(c *gin.Context) {
 // GET /api/ip/shared
 func GetSharedIPs(c *gin.Context) {
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 	minTokens, _ := strconv.Atoi(c.DefaultQuery("min_tokens", "2"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, maxIPLimit)
 
 	svc := service.NewIPMonitoringService()
 	data, err := svc.GetSharedIPs(window, minTokens, limit)
@@ -58,8 +64,12 @@ func GetSharedIPs(c *gin.Context) {
 // GET /api/ip/multi-ip-tokens
 func GetMultiIPTokens(c *gin.Context) {
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 	minIPs, _ := strconv.Atoi(c.DefaultQuery("min_ips", "2"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, maxIPLimit)
 
 	svc := service.NewIPMonitoringService()
 	data, err := svc.GetMultiIPTokens(window, minIPs, limit)
@@ -73,8 +83,12 @@ func GetMultiIPTokens(c *gin.Context) {
 // GET /api/ip/multi-ip-users
 func GetMultiIPUsers(c *gin.Context) {
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 	minIPs, _ := strconv.Atoi(c.DefaultQuery("min_ips", "3"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, maxIPLimit)
 
 	svc := service.NewIPMonitoringService()
 	data, err := svc.GetMultiIPUsers(window, minIPs, limit)
@@ -100,7 +114,11 @@ func EnableAllIPRecording(c *gin.Context) {
 func LookupIPUsers(c *gin.Context) {
 	ip := c.Param("ip")
 	window := c.DefaultQuery("window", "24h")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
+	limit := parseLimit(c, 100, maxIPLimit)
 
 	svc := service.NewIPMonitoringService()
 	data, err := svc.LookupIPUsers(ip, window, limit)
@@ -119,6 +137,10 @@ func GetUserIPs(c *gin.Context) {
 		return
 	}
 	window := c.DefaultQuery("window", "24h")
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
 
 	svc := service.NewIPMonitoringService()
 	data, err := svc.GetUserIPs(userID, window)

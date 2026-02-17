@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -71,7 +73,7 @@ func Load() *Config {
 		// Authentication
 		APIKey:         getEnvStr("API_KEY", ""),
 		AdminPassword:  getEnvStr("ADMIN_PASSWORD", ""),
-		JWTSecretKey:   getEnvStrMulti([]string{"JWT_SECRET_KEY", "JWT_SECRET"}, "newapi-middleware-secret-key-change-in-production"),
+		JWTSecretKey:   getEnvStrMulti([]string{"JWT_SECRET_KEY", "JWT_SECRET"}, ""),
 		JWTAlgorithm:   "HS256",
 		JWTExpireHours: time.Duration(getEnvInt("JWT_EXPIRE_HOURS", 24)) * time.Hour,
 
@@ -99,6 +101,12 @@ func Load() *Config {
 
 	// Auto-detect database engine from DSN
 	cfg.DatabaseEngine = detectEngine(cfg.SQLDSN)
+
+	// Generate random JWT secret if not explicitly configured
+	if cfg.JWTSecretKey == "" {
+		cfg.JWTSecretKey = generateRandomSecret(32)
+		log.Warn().Msg("JWT_SECRET_KEY 未配置，已自动生成随机密钥（重启后 token 将失效，建议显式配置）")
+	}
 
 	// Set timezone
 	if cfg.TimeZone != "" {
@@ -262,4 +270,14 @@ func getEnvIntMulti(keys []string, defaultVal int) int {
 		}
 	}
 	return defaultVal
+}
+
+// generateRandomSecret generates a cryptographically secure random hex string
+func generateRandomSecret(bytes int) string {
+	b := make([]byte, bytes)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use timestamp-based key (still better than hardcoded)
+		return fmt.Sprintf("auto-%d-%d", time.Now().UnixNano(), os.Getpid())
+	}
+	return hex.EncodeToString(b)
 }

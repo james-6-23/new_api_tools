@@ -71,8 +71,11 @@ func ResetAPIHealth(c *gin.Context) {
 
 // GET /api/ai-ban/audit-logs
 func GetAuditLogs(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit := parseLimit(c, 50, 500)
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if offset < 0 {
+		offset = 0
+	}
 	status := c.Query("status")
 
 	svc := service.NewAIAutoBanService()
@@ -114,7 +117,11 @@ func GetAvailableModelsForExclude(c *gin.Context) {
 // GET /api/ai-ban/suspicious
 func GetSuspiciousUsers(c *gin.Context) {
 	window := c.DefaultQuery("window", "1h")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
+	limit := parseLimit(c, 20, 200)
 
 	svc := service.NewAIAutoBanService()
 	data, err := svc.GetSuspiciousUsers(window, limit)
@@ -146,7 +153,11 @@ func ManualAssess(c *gin.Context) {
 // POST /api/ai-ban/scan
 func RunAIBanScan(c *gin.Context) {
 	window := c.DefaultQuery("window", "1h")
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if !validWindow(window) {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid window value", ""))
+		return
+	}
+	limit := parseLimit(c, 10, 100)
 
 	svc := service.NewAIAutoBanService()
 	data := svc.RunScan(window, limit)

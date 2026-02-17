@@ -42,8 +42,8 @@ func GetActivityStats(c *gin.Context) {
 
 // GET /api/users/banned
 func GetBannedUsers(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	page := parsePage(c)
+	pageSize := parsePageSize(c, 50, 200)
 	search := c.Query("search")
 
 	svc := service.NewUserManagementService()
@@ -57,8 +57,8 @@ func GetBannedUsers(c *gin.Context) {
 
 // GET /api/users
 func GetUsers(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	page := parsePage(c)
+	pageSize := parsePageSize(c, 20, 200)
 
 	params := service.ListUsersParams{
 		Page:           page,
@@ -254,8 +254,8 @@ func GetInvitedUsers(c *gin.Context) {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	page := parsePage(c)
+	pageSize := parsePageSize(c, 20, 200)
 
 	svc := service.NewUserManagementService()
 	data, err := svc.GetInvitedUsers(userID, page, pageSize)

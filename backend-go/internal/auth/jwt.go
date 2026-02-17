@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"time"
 
@@ -60,20 +61,22 @@ func ValidateToken(tokenString string) (*Claims, error) {
 }
 
 // VerifyPassword checks if the provided password matches the admin password
+// Uses constant-time comparison to prevent timing attacks
 func VerifyPassword(password string) bool {
 	cfg := config.Get()
 	if cfg.AdminPassword == "" {
 		return false
 	}
-	return password == cfg.AdminPassword
+	return subtle.ConstantTimeCompare([]byte(password), []byte(cfg.AdminPassword)) == 1
 }
 
 // VerifyAPIKey checks if the provided API key is valid
+// Uses constant-time comparison to prevent timing attacks
 func VerifyAPIKey(apiKey string) bool {
 	cfg := config.Get()
 	if cfg.APIKey == "" {
-		// Development mode: allow all
-		return true
+		// API key not configured: reject all requests to enforce explicit configuration
+		return false
 	}
-	return apiKey == cfg.APIKey
+	return subtle.ConstantTimeCompare([]byte(apiKey), []byte(cfg.APIKey)) == 1
 }

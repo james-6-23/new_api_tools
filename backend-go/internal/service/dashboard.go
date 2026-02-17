@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/database"
@@ -52,70 +53,71 @@ func (s *DashboardService) GetSystemOverview(period string) (map[string]interfac
 	result := map[string]interface{}{}
 
 	// Total users (not deleted)
-	row, err := s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL"))
+	row, err := s.db.QueryOne(
+		"SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL")
 	if err == nil && row != nil {
 		result["total_users"] = row["count"]
 	}
 
 	// Active users (with requests in period)
 	row, err = s.db.QueryOne(s.db.RebindQuery(
-		fmt.Sprintf("SELECT COUNT(DISTINCT user_id) as count FROM logs WHERE created_at >= %d AND type IN (2, 5)", startTime)))
+		"SELECT COUNT(DISTINCT user_id) as count FROM logs WHERE created_at >= ? AND type IN (2, 5)"),
+		startTime)
 	if err == nil && row != nil {
 		result["active_users"] = row["count"]
 	}
 
 	// Total tokens
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL"))
+	row, err = s.db.QueryOne(
+		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL")
 	if err == nil && row != nil {
 		result["total_tokens"] = row["count"]
 	}
 
 	// Active tokens (status=1)
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL AND status = 1"))
+	row, err = s.db.QueryOne(
+		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL AND status = 1")
 	if err == nil && row != nil {
 		result["active_tokens"] = row["count"]
 	}
 
 	// Total channels (channels table has no deleted_at column)
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		`SELECT COUNT(*) as total, 
-		 SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active 
-		 FROM channels`))
+	row, err = s.db.QueryOne(
+		`SELECT COUNT(*) as total,
+		 SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active
+		 FROM channels`)
 	if err == nil && row != nil {
 		result["total_channels"] = row["total"]
 		result["active_channels"] = row["active"]
 	}
 
 	// Total models (from abilities table — count distinct enabled models on active channels)
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		`SELECT COUNT(DISTINCT a.model) as count 
+	row, err = s.db.QueryOne(
+		`SELECT COUNT(DISTINCT a.model) as count
 		 FROM abilities a
 		 INNER JOIN channels c ON c.id = a.channel_id
-		 WHERE c.status = 1`))
+		 WHERE c.status = 1`)
 	if err == nil && row != nil {
 		result["total_models"] = row["count"]
 	} else {
 		// Fallback: try models table
-		row, err = s.db.QueryOne(s.db.RebindQuery(
-			"SELECT COUNT(*) as count FROM models WHERE deleted_at IS NULL"))
+		row, err = s.db.QueryOne(
+			"SELECT COUNT(*) as count FROM models WHERE deleted_at IS NULL")
 		if err == nil && row != nil {
 			result["total_models"] = row["count"]
 		}
 	}
 
 	// Redemption count
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL"))
+	row, err = s.db.QueryOne(
+		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL")
 	if err == nil && row != nil {
 		result["total_redemptions"] = row["count"]
 	}
 
 	// Unused redemptions
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL AND status = 1"))
+	row, err = s.db.QueryOne(
+		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL AND status = 1")
 	if err == nil && row != nil {
 		result["unused_redemptions"] = row["count"]
 	}
@@ -128,18 +130,17 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 	startTime, endTime := parsePeriodToTimestamps(period)
 
 	// Only type=2 (success) for usage stats, matching Python backend
-	query := fmt.Sprintf(`
-		SELECT 
+	query := s.db.RebindQuery(`
+		SELECT
 			COUNT(*) as total_requests,
 			COALESCE(SUM(quota), 0) as total_quota_used,
 			COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
 			COALESCE(AVG(use_time), 0) as avg_response_time
-		FROM logs 
-		WHERE created_at >= %d AND created_at <= %d AND type = 2`,
-		startTime, endTime)
+		FROM logs
+		WHERE created_at >= ? AND created_at <= ? AND type = 2`)
 
-	row, err := s.db.QueryOne(query)
+	row, err := s.db.QueryOne(query, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
@@ -171,20 +172,19 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string]interface{}, error) {
 	startTime, endTime := parsePeriodToTimestamps(period)
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT model_name,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used,
 			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) as completion_tokens
 		FROM logs
-		WHERE created_at >= %d AND created_at <= %d AND type = 2
+		WHERE created_at >= ? AND created_at <= ? AND type = 2
 		GROUP BY model_name
 		ORDER BY request_count DESC
-		LIMIT %d`,
-		startTime, endTime, limit)
+		LIMIT ?`)
 
-	return s.db.Query(query)
+	return s.db.Query(query, startTime, endTime, limit)
 }
 
 // GetDailyTrends returns daily usage trends
@@ -199,18 +199,18 @@ func (s *DashboardService) GetDailyTrends(days int) ([]map[string]interface{}, e
 		dateExpr = "DATE(FROM_UNIXTIME(created_at))"
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT %s as date,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used,
 			COUNT(DISTINCT user_id) as unique_users
 		FROM logs
-		WHERE created_at >= %d AND type IN (2, 5)
+		WHERE created_at >= ? AND type IN (2, 5)
 		GROUP BY %s
 		ORDER BY date ASC`,
-		dateExpr, startTime, dateExpr)
+		dateExpr, dateExpr))
 
-	return s.db.Query(query)
+	return s.db.Query(query, startTime)
 }
 
 // GetHourlyTrends returns hourly usage trends
@@ -224,62 +224,51 @@ func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{},
 		hourExpr = "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:00')"
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT %s as hour,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
-		WHERE created_at >= %d AND type IN (2, 5)
+		WHERE created_at >= ? AND type IN (2, 5)
 		GROUP BY %s
 		ORDER BY hour ASC`,
-		hourExpr, startTime, hourExpr)
+		hourExpr, hourExpr))
 
-	return s.db.Query(query)
+	return s.db.Query(query, startTime)
 }
 
 // GetTopUsers returns top users by quota usage
 func (s *DashboardService) GetTopUsers(period string, limit int) ([]map[string]interface{}, error) {
 	startTime, endTime := parsePeriodToTimestamps(period)
 
-	query := fmt.Sprintf(`
+	castExpr := "CAST(l.user_id AS CHAR)"
+	if s.db.IsPG {
+		castExpr = "CAST(l.user_id AS TEXT)"
+	}
+
+	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT l.user_id,
-			COALESCE(u.username, CAST(l.user_id AS CHAR)) as username,
+			COALESCE(u.username, %s) as username,
 			COUNT(*) as request_count,
 			COALESCE(SUM(l.quota), 0) as quota_used
 		FROM logs l
 		LEFT JOIN users u ON l.user_id = u.id
-		WHERE l.created_at >= %d AND l.created_at <= %d AND l.type IN (2, 5)
+		WHERE l.created_at >= ? AND l.created_at <= ? AND l.type IN (2, 5)
 		GROUP BY l.user_id, u.username
 		ORDER BY quota_used DESC
-		LIMIT %d`,
-		startTime, endTime, limit)
+		LIMIT ?`, castExpr))
 
-	if s.db.IsPG {
-		query = fmt.Sprintf(`
-			SELECT l.user_id,
-				COALESCE(u.username, CAST(l.user_id AS TEXT)) as username,
-				COUNT(*) as request_count,
-				COALESCE(SUM(l.quota), 0) as quota_used
-			FROM logs l
-			LEFT JOIN users u ON l.user_id = u.id
-			WHERE l.created_at >= %d AND l.created_at <= %d AND l.type IN (2, 5)
-			GROUP BY l.user_id, u.username
-			ORDER BY quota_used DESC
-			LIMIT %d`,
-			startTime, endTime, limit)
-	}
-
-	return s.db.Query(query)
+	return s.db.Query(query, startTime, endTime, limit)
 }
 
 // GetChannelStatus returns channel status overview
 func (s *DashboardService) GetChannelStatus() ([]map[string]interface{}, error) {
 	query := `
-		SELECT id, name, type, status, 
+		SELECT id, name, type, status,
 			COALESCE(used_quota, 0) as used_quota,
 			COALESCE(balance, 0) as balance,
 			priority
-		FROM channels 
+		FROM channels
 		WHERE deleted_at IS NULL
 		ORDER BY priority DESC, id ASC`
 
@@ -291,17 +280,17 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	startTime, endTime := parsePeriodToTimestamps(window)
 
 	// Step 1: Query distinct IPs with request counts and user counts
-	ipQuery := fmt.Sprintf(`
-		SELECT ip, 
+	ipQuery := s.db.RebindQuery(`
+		SELECT ip,
 			COUNT(*) as request_count,
 			COUNT(DISTINCT user_id) as user_count
 		FROM logs
-		WHERE created_at >= %d AND created_at <= %d AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
+		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
 		GROUP BY ip
 		ORDER BY request_count DESC
-		LIMIT 3000`, startTime, endTime)
+		LIMIT 3000`)
 
-	rows, err := s.db.Query(ipQuery)
+	rows, err := s.db.Query(ipQuery, startTime, endTime)
 	if err != nil || len(rows) == 0 {
 		return map[string]interface{}{
 			"total_ips":           0,
@@ -501,17 +490,11 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	}, nil
 }
 
-// sortByRequestCount sorts a slice of maps by request_count descending
+// sortByRequestCount sorts a slice of maps by request_count descending using sort.Slice
 func sortByRequestCount(list []map[string]interface{}) {
-	for i := 0; i < len(list); i++ {
-		for j := i + 1; j < len(list); j++ {
-			iCount := toInt64(list[i]["request_count"])
-			jCount := toInt64(list[j]["request_count"])
-			if jCount > iCount {
-				list[i], list[j] = list[j], list[i]
-			}
-		}
-	}
+	sort.Slice(list, func(i, j int) bool {
+		return toInt64(list[i]["request_count"]) > toInt64(list[j]["request_count"])
+	})
 }
 
 // toFloat64 safely converts interface{} to float64

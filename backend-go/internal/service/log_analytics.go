@@ -70,7 +70,7 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 		return cached, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT l.user_id,
 			COALESCE(l.username, '') as username,
 			COUNT(*) as request_count,
@@ -79,9 +79,9 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 		WHERE l.type IN (2, 5) AND l.user_id > 0
 		GROUP BY l.user_id, l.username
 		ORDER BY request_count DESC
-		LIMIT %d`, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 		return cached, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT l.user_id,
 			COALESCE(l.username, '') as username,
 			COUNT(*) as request_count,
@@ -111,9 +111,9 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 		WHERE l.type IN (2, 5) AND l.user_id > 0
 		GROUP BY l.user_id, l.username
 		ORDER BY quota_used DESC
-		LIMIT %d`, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 		return cached, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT model_name,
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_count,
@@ -144,9 +144,9 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 		WHERE type IN (2, 5) AND model_name != ''
 		GROUP BY model_name
 		ORDER BY total_requests DESC
-		LIMIT %d`, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, limit)
 	if err != nil {
 		return nil, err
 	}

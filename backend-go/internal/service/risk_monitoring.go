@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -31,6 +32,12 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 
 	windowsData := map[string]interface{}{}
 
+	// Validate sortBy to prevent SQL injection via column name
+	orderCol := "request_count"
+	if sortBy == "quota" {
+		orderCol = "quota_used"
+	}
+
 	for _, window := range windows {
 		seconds, ok := WindowSeconds[window]
 		if !ok {
@@ -38,24 +45,19 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 		}
 		startTime := time.Now().Unix() - seconds
 
-		orderCol := "request_count"
-		if sortBy == "quota" {
-			orderCol = "quota_used"
-		}
-
-		query := fmt.Sprintf(`
+		query := s.db.RebindQuery(fmt.Sprintf(`
 			SELECT l.user_id, COALESCE(u.username, '') as username,
 				COUNT(*) as request_count,
 				COALESCE(SUM(l.quota), 0) as quota_used,
 				SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_count
 			FROM logs l
 			LEFT JOIN users u ON l.user_id = u.id
-			WHERE l.created_at >= %d AND l.type IN (2, 5)
+			WHERE l.created_at >= ? AND l.type IN (2, 5)
 			GROUP BY l.user_id, u.username
 			ORDER BY %s DESC
-			LIMIT %d`, startTime, orderCol, limit)
+			LIMIT ?`, orderCol))
 
-		rows, err := s.db.Query(query)
+		rows, err := s.db.Query(query, startTime, limit)
 		if err != nil {
 			windowsData[window] = []map[string]interface{}{}
 			continue
@@ -85,8 +87,6 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 }
 
 // GetUserAnalysis returns detailed risk analysis for a user
-// Returns format matching frontend UserAnalysis interface:
-// { range, user, summary, risk, top_models, top_channels, top_ips, recent_logs }
 func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int64, endTime *int64) (map[string]interface{}, error) {
 	now := time.Now().Unix()
 	if endTime != nil {
@@ -125,7 +125,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	}
 
 	// Usage stats in window
-	statsQuery := fmt.Sprintf(`
+	statsQuery := s.db.RebindQuery(`
 		SELECT COUNT(*) as total_requests,
 			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
 			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
@@ -138,10 +138,9 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 			COUNT(DISTINCT channel_id) as unique_channels,
 			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)`,
-		userID, startTime, now)
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)`)
 
-	statsRow, _ := s.db.QueryOne(statsQuery)
+	statsRow, _ := s.db.QueryOne(statsQuery, userID, startTime, now)
 
 	totalRequests := int64(0)
 	successRequests := int64(0)
@@ -180,12 +179,11 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	}
 
 	// Average use time
-	avgUseTimeQuery := fmt.Sprintf(`
+	avgUseTimeQuery := s.db.RebindQuery(`
 		SELECT COALESCE(AVG(use_time), 0) as avg_use_time
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type = 2`,
-		userID, startTime, now)
-	avgRow, _ := s.db.QueryOne(avgUseTimeQuery)
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type = 2`)
+	avgRow, _ := s.db.QueryOne(avgUseTimeQuery, userID, startTime, now)
 	avgUseTime := 0.0
 	if avgRow != nil {
 		if v, ok := avgRow["avg_use_time"].(float64); ok {
@@ -225,6 +223,19 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		avgQuotaPerRequest = float64(quotaUsed) / float64(totalRequests)
 	}
 
+	// IP switch analysis — fetch IP sequence ordered by time
+	ipSeqQuery := s.db.RebindQuery(`
+		SELECT created_at, ip
+		FROM logs
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ?
+			AND type IN (2, 5) AND ip IS NOT NULL AND ip != ''
+		ORDER BY created_at ASC`)
+	ipSequence, _ := s.db.Query(ipSeqQuery, userID, startTime, now)
+	if ipSequence == nil {
+		ipSequence = []map[string]interface{}{}
+	}
+	ipSwitchAnalysis := analyzeIPSwitches(ipSequence)
+
 	// Risk flags
 	riskFlags := []string{}
 	if requestsPerMinute > 5.0 {
@@ -237,62 +248,74 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		riskFlags = append(riskFlags, "HIGH_FAILURE_RATE")
 	}
 
+	// IP switch risk flags (matching Python logic)
+	avgIPDuration := toFloat64(ipSwitchAnalysis["avg_ip_duration"])
+	rapidSwitchCount := toInt64(ipSwitchAnalysis["rapid_switch_count"])
+	realSwitchCount := toInt64(ipSwitchAnalysis["real_switch_count"])
+	if rapidSwitchCount >= 3 && avgIPDuration < 300 {
+		riskFlags = append(riskFlags, "IP_RAPID_SWITCH")
+	}
+	if avgIPDuration < 30 && realSwitchCount >= 3 {
+		riskFlags = append(riskFlags, "IP_HOPPING")
+	}
+
 	risk := map[string]interface{}{
 		"requests_per_minute":   requestsPerMinute,
 		"avg_quota_per_request": avgQuotaPerRequest,
 		"risk_flags":            riskFlags,
+		"ip_switch_analysis":    ipSwitchAnalysis,
 	}
 
 	// Top models
-	modelsQuery := fmt.Sprintf(`
+	modelsQuery := s.db.RebindQuery(`
 		SELECT COALESCE(model_name, 'unknown') as model_name, COUNT(*) as requests,
 			COALESCE(SUM(quota), 0) as quota_used,
 			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
 			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
 			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)
 		GROUP BY COALESCE(model_name, 'unknown')
 		ORDER BY requests DESC
-		LIMIT 10`, userID, startTime, now)
+		LIMIT 10`)
 
-	topModels, _ := s.db.Query(modelsQuery)
+	topModels, _ := s.db.Query(modelsQuery, userID, startTime, now)
 	if topModels == nil {
 		topModels = []map[string]interface{}{}
 	}
 
 	// Top channels
-	channelsQuery := fmt.Sprintf(`
+	channelsQuery := s.db.RebindQuery(`
 		SELECT channel_id, COALESCE(MAX(channel_name), '') as channel_name,
 			COUNT(*) as requests,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)
 		GROUP BY channel_id
 		ORDER BY requests DESC
-		LIMIT 10`, userID, startTime, now)
+		LIMIT 10`)
 
-	topChannels, _ := s.db.Query(channelsQuery)
+	topChannels, _ := s.db.Query(channelsQuery, userID, startTime, now)
 	if topChannels == nil {
 		topChannels = []map[string]interface{}{}
 	}
 
 	// Top IPs
-	ipsQuery := fmt.Sprintf(`
+	ipsQuery := s.db.RebindQuery(`
 		SELECT ip, COUNT(*) as requests
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND ip IS NOT NULL AND ip != ''
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND ip IS NOT NULL AND ip != ''
 		GROUP BY ip
 		ORDER BY requests DESC
-		LIMIT 20`, userID, startTime, now)
+		LIMIT 20`)
 
-	topIPs, _ := s.db.Query(ipsQuery)
+	topIPs, _ := s.db.Query(ipsQuery, userID, startTime, now)
 	if topIPs == nil {
 		topIPs = []map[string]interface{}{}
 	}
 
 	// Recent logs (token_name and channel_name are directly in logs table)
-	recentLogsQuery := fmt.Sprintf(`
+	recentLogsQuery := s.db.RebindQuery(`
 		SELECT id, created_at, type, COALESCE(model_name,'') as model_name,
 			COALESCE(quota, 0) as quota,
 			COALESCE(prompt_tokens, 0) as prompt_tokens,
@@ -304,11 +327,11 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 			COALESCE(token_id, 0) as token_id,
 			COALESCE(token_name, '') as token_name
 		FROM logs
-		WHERE user_id = %d AND created_at >= %d AND created_at <= %d AND type IN (2, 5)
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)
 		ORDER BY id DESC
-		LIMIT 50`, userID, startTime, now)
+		LIMIT 50`)
 
-	recentLogs, _ := s.db.Query(recentLogsQuery)
+	recentLogs, _ := s.db.Query(recentLogsQuery, userID, startTime, now)
 	if recentLogs == nil {
 		recentLogs = []map[string]interface{}{}
 	}
@@ -347,20 +370,20 @@ func (s *RiskMonitoringService) GetTokenRotationUsers(window string, minTokens, 
 		return cached, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT l.user_id, COALESCE(u.username, '') as username,
 			COUNT(DISTINCT l.token_id) as token_count,
 			COUNT(*) as total_requests
 		FROM logs l
 		LEFT JOIN users u ON l.user_id = u.id
-		WHERE l.created_at >= %d AND l.type IN (2, 5)
+		WHERE l.created_at >= ? AND l.type IN (2, 5)
 		GROUP BY l.user_id, u.username
-		HAVING COUNT(DISTINCT l.token_id) >= %d
-			AND (COUNT(*) * 1.0 / COUNT(DISTINCT l.token_id)) <= %d
+		HAVING COUNT(DISTINCT l.token_id) >= ?
+			AND (COUNT(*) * 1.0 / COUNT(DISTINCT l.token_id)) <= ?
 		ORDER BY token_count DESC
-		LIMIT %d`, startTime, minTokens, maxReqPerToken, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, startTime, minTokens, maxReqPerToken, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -393,16 +416,16 @@ func (s *RiskMonitoringService) GetAffiliatedAccounts(minInvited, limit int) (ma
 		return cached, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT inviter_id, COUNT(*) as invited_count
 		FROM users
 		WHERE inviter_id IS NOT NULL AND inviter_id > 0 AND deleted_at IS NULL
 		GROUP BY inviter_id
-		HAVING COUNT(*) >= %d
+		HAVING COUNT(*) >= ?
 		ORDER BY invited_count DESC
-		LIMIT %d`, minInvited, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, minInvited, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -434,21 +457,21 @@ func (s *RiskMonitoringService) GetSameIPRegistrations(window string, minUsers, 
 	}
 
 	// Find IPs with first requests from multiple users
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT first_ip, COUNT(*) as user_count
 		FROM (
 			SELECT user_id, ip as first_ip
 			FROM logs
 			WHERE type IN (2, 5) AND ip IS NOT NULL AND ip != ''
-			AND created_at >= %d
+			AND created_at >= ?
 			GROUP BY user_id, ip
 		) sub
 		GROUP BY first_ip
-		HAVING COUNT(*) >= %d
+		HAVING COUNT(*) >= ?
 		ORDER BY user_count DESC
-		LIMIT %d`, startTime, minUsers, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, startTime, minUsers, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -472,5 +495,168 @@ func (s *RiskMonitoringService) ListBanRecords(page, pageSize int, action string
 		"page":        page,
 		"page_size":   pageSize,
 		"total_pages": 0,
+	}
+}
+
+// ========== IP Switch Analysis ==========
+
+// getIPVersion returns "v4" or "v6" based on the IP string
+func getIPVersion(ip string) string {
+	if strings.Contains(ip, ":") {
+		return "v6"
+	}
+	return "v4"
+}
+
+// analyzeIPSwitches detects IP switching patterns from a time-ordered IP sequence.
+// Matches Python's _analyze_ip_switches logic.
+func analyzeIPSwitches(ipSequence []map[string]interface{}) map[string]interface{} {
+	empty := map[string]interface{}{
+		"switch_count":        int64(0),
+		"real_switch_count":   int64(0),
+		"rapid_switch_count":  int64(0),
+		"dual_stack_switches": int64(0),
+		"avg_ip_duration":     float64(0),
+		"min_switch_interval": int64(0),
+		"switch_details":      []map[string]interface{}{},
+	}
+
+	if len(ipSequence) < 2 {
+		return empty
+	}
+
+	type switchDetail struct {
+		Time        int64  `json:"time"`
+		FromIP      string `json:"from_ip"`
+		ToIP        string `json:"to_ip"`
+		Interval    int64  `json:"interval"`
+		IsDualStack bool   `json:"is_dual_stack"`
+		FromVersion string `json:"from_version"`
+		ToVersion   string `json:"to_version"`
+	}
+
+	var switches []switchDetail
+	ipDurations := map[string][]int64{} // track usage duration per IP
+	var rapidSwitches int64
+	var dualStackSwitches int64
+
+	var prevIP string
+	var prevTime int64
+	var ipStartTime int64
+
+	for _, row := range ipSequence {
+		currentIP := fmt.Sprintf("%v", row["ip"])
+		currentTime := toInt64(row["created_at"])
+		if currentIP == "" || currentTime == 0 {
+			continue
+		}
+
+		if prevIP == "" {
+			prevIP = currentIP
+			prevTime = currentTime
+			ipStartTime = currentTime
+			continue
+		}
+
+		if currentIP != prevIP {
+			switchInterval := currentTime - prevTime
+
+			prevVersion := getIPVersion(prevIP)
+			currVersion := getIPVersion(currentIP)
+
+			// Detect dual-stack switch (v4 <-> v6)
+			isDualStack := false
+			isV4V6Switch := (prevVersion == "v4" && currVersion == "v6") ||
+				(prevVersion == "v6" && currVersion == "v4")
+			if isV4V6Switch {
+				// Simple heuristic: v4/v6 switch within 60s is likely dual-stack
+				if switchInterval <= 60 {
+					isDualStack = true
+				}
+			}
+
+			switches = append(switches, switchDetail{
+				Time:        currentTime,
+				FromIP:      prevIP,
+				ToIP:        currentIP,
+				Interval:    switchInterval,
+				IsDualStack: isDualStack,
+				FromVersion: prevVersion,
+				ToVersion:   currVersion,
+			})
+
+			if isDualStack {
+				dualStackSwitches++
+			} else if switchInterval <= 60 {
+				rapidSwitches++
+			}
+
+			// Record IP usage duration
+			ipDuration := currentTime - ipStartTime
+			ipDurations[prevIP] = append(ipDurations[prevIP], ipDuration)
+
+			prevIP = currentIP
+			ipStartTime = currentTime
+		}
+
+		prevTime = currentTime
+	}
+
+	switchCount := int64(len(switches))
+	realSwitchCount := switchCount - dualStackSwitches
+
+	// Min switch interval (excluding dual-stack)
+	var minSwitchInterval int64
+	first := true
+	for _, s := range switches {
+		if !s.IsDualStack {
+			if first || s.Interval < minSwitchInterval {
+				minSwitchInterval = s.Interval
+				first = false
+			}
+		}
+	}
+
+	// Average IP duration
+	var allDurations []int64
+	for _, durations := range ipDurations {
+		allDurations = append(allDurations, durations...)
+	}
+	avgIPDuration := float64(0)
+	if len(allDurations) > 0 {
+		var sum int64
+		for _, d := range allDurations {
+			sum += d
+		}
+		avgIPDuration = math.Round(float64(sum)/float64(len(allDurations))*10) / 10
+	}
+
+	// Return last 10 switch details
+	detailLimit := 10
+	startIdx := 0
+	if len(switches) > detailLimit {
+		startIdx = len(switches) - detailLimit
+	}
+	recentSwitches := make([]map[string]interface{}, 0, detailLimit)
+	for _, s := range switches[startIdx:] {
+		recentSwitches = append(recentSwitches, map[string]interface{}{
+			"time":          s.Time,
+			"from_ip":       s.FromIP,
+			"to_ip":         s.ToIP,
+			"interval":      s.Interval,
+			"is_dual_stack": s.IsDualStack,
+			"from_version":  s.FromVersion,
+			"to_version":    s.ToVersion,
+		})
+	}
+
+	return map[string]interface{}{
+		"switch_count":        switchCount,
+		"real_switch_count":   realSwitchCount,
+		"rapid_switch_count":  rapidSwitches,
+		"dual_stack_switches": dualStackSwitches,
+		"avg_ip_duration":     avgIPDuration,
+		"min_switch_interval": minSwitchInterval,
+		"switch_details":      recentSwitches,
 	}
 }

@@ -114,14 +114,14 @@ func (s *AIAutoBanService) ClearAuditLogs() map[string]interface{} {
 // GetAvailableGroups returns groups used in recent logs
 func (s *AIAutoBanService) GetAvailableGroups(days int) ([]map[string]interface{}, error) {
 	startTime := time.Now().Unix() - int64(days*86400)
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT DISTINCT group_id as name, COUNT(*) as count
 		FROM logs
-		WHERE created_at >= %d AND group_id IS NOT NULL AND group_id != ''
+		WHERE created_at >= ? AND group_id IS NOT NULL AND group_id != ''
 		GROUP BY group_id
-		ORDER BY count DESC`, startTime)
+		ORDER BY count DESC`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -131,14 +131,14 @@ func (s *AIAutoBanService) GetAvailableGroups(days int) ([]map[string]interface{
 // GetAvailableModelsForExclude returns models used in recent logs
 func (s *AIAutoBanService) GetAvailableModelsForExclude(days int) ([]map[string]interface{}, error) {
 	startTime := time.Now().Unix() - int64(days*86400)
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT DISTINCT model_name as name, COUNT(*) as count
 		FROM logs
-		WHERE created_at >= %d AND model_name IS NOT NULL AND model_name != ''
+		WHERE created_at >= ? AND model_name IS NOT NULL AND model_name != ''
 		GROUP BY model_name
-		ORDER BY count DESC`, startTime)
+		ORDER BY count DESC`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (s *AIAutoBanService) GetSuspiciousUsers(window string, limit int) ([]map[s
 	}
 
 	// Find users with high failure rates or unusual patterns
-	query := fmt.Sprintf(`
+	query := s.db.RebindQuery(`
 		SELECT l.user_id, COALESCE(u.username, '') as username,
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_count,
@@ -171,13 +171,13 @@ func (s *AIAutoBanService) GetSuspiciousUsers(window string, limit int) ([]map[s
 			COUNT(DISTINCT l.model_name) as unique_models
 		FROM logs l
 		LEFT JOIN users u ON l.user_id = u.id
-		WHERE l.created_at >= %d AND l.type IN (2, 5)
+		WHERE l.created_at >= ? AND l.type IN (2, 5)
 		GROUP BY l.user_id, u.username
 		HAVING COUNT(*) >= 10
 		ORDER BY failure_count DESC, total_requests DESC
-		LIMIT %d`, startTime, limit)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, startTime, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -246,11 +246,18 @@ func (s *AIAutoBanService) GetWhitelist() map[string]interface{} {
 	cm.GetJSON("ai_ban:whitelist", &whitelist)
 
 	items := make([]map[string]interface{}, 0)
-	for _, uid := range whitelist {
-		userRow, _ := s.db.QueryOne(s.db.RebindQuery(
-			"SELECT id, username, status FROM users WHERE id = ?"), uid)
-		if userRow != nil {
-			items = append(items, userRow)
+	if len(whitelist) > 0 {
+		// Batch query all whitelist users in one query
+		placeholders := buildPlaceholders(s.db.IsPG, len(whitelist), 1)
+		args := make([]interface{}, len(whitelist))
+		for i, uid := range whitelist {
+			args[i] = uid
+		}
+		query := s.db.RebindQuery(fmt.Sprintf(
+			"SELECT id, username, status FROM users WHERE id IN (%s)", placeholders))
+		rows, err := s.db.Query(query, args...)
+		if err == nil && rows != nil {
+			items = rows
 		}
 	}
 
@@ -296,17 +303,18 @@ func (s *AIAutoBanService) RemoveFromWhitelist(userID int64) map[string]interfac
 func (s *AIAutoBanService) SearchUserForWhitelist(keyword string) ([]map[string]interface{}, error) {
 	// Try numeric first (user ID)
 	var query string
-	if _, err := strconv.ParseInt(keyword, 10, 64); err == nil {
-		query = fmt.Sprintf(
-			"SELECT id, username, status FROM users WHERE id = %s OR username LIKE '%%%s%%' LIMIT 20",
-			keyword, keyword)
+	var args []interface{}
+	if id, err := strconv.ParseInt(keyword, 10, 64); err == nil {
+		query = s.db.RebindQuery(
+			"SELECT id, username, status FROM users WHERE id = ? OR username LIKE ? LIMIT 20")
+		args = []interface{}{id, "%" + keyword + "%"}
 	} else {
-		query = fmt.Sprintf(
-			"SELECT id, username, status FROM users WHERE username LIKE '%%%s%%' LIMIT 20",
-			keyword)
+		query = s.db.RebindQuery(
+			"SELECT id, username, status FROM users WHERE username LIKE ? LIMIT 20")
+		args = []interface{}{"%" + keyword + "%"}
 	}
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
