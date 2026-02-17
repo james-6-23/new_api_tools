@@ -341,8 +341,8 @@ func GetRedemptionStatistics(startDate, endDate string) (*RedemptionStatistics, 
 	currentTime := time.Now().Unix()
 
 	where := []string{"deleted_at IS NULL"}
-	args := []interface{}{currentTime, currentTime, currentTime, currentTime, currentTime}
-	argIdx := 6
+	args := []interface{}{currentTime, currentTime, currentTime, currentTime}
+	argIdx := 5
 
 	if startDate != "" {
 		ts, err := util.ParseDateToTimestampPublic(startDate, false)
