@@ -201,6 +201,12 @@ func (s *DashboardService) GetModelUsage(period string, limit int, noCache bool)
 	return rows, nil
 }
 
+// localTZOffset returns the local timezone offset in seconds (e.g. 28800 for UTC+8).
+func localTZOffset() int {
+	_, offset := time.Now().Zone()
+	return offset
+}
+
 // GetDailyTrends returns daily usage trends
 func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]interface{}, error) {
 	cm := cache.Get()
@@ -214,48 +220,37 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 
 	now := time.Now()
 	startTime := now.AddDate(0, 0, -days).Unix()
+	tzOffset := localTZOffset()
+
+	// Group by local-time day using pure unix arithmetic — timezone-safe
+	dayGroupExpr := fmt.Sprintf("FLOOR((created_at + %d) / 86400)", tzOffset)
 
 	var rows []map[string]interface{}
 	var err error
 
 	if IsQuotaDataAvailable() {
-		// Fast path: use quota_data table (created_at is BIGINT unix timestamp)
-		var dateExpr string
-		if s.db.IsPG {
-			dateExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
-		} else {
-			dateExpr = "DATE(FROM_UNIXTIME(created_at))"
-		}
 		query := s.db.RebindQuery(fmt.Sprintf(`
-			SELECT %s as date,
+			SELECT %s as day_group,
 				COALESCE(SUM(count), 0) as request_count,
 				COALESCE(SUM(quota), 0) as quota_used,
-				COUNT(DISTINCT user_id) as unique_users,
-				MIN(created_at) as min_ts
+				COUNT(DISTINCT user_id) as unique_users
 			FROM quota_data
 			WHERE created_at >= ?
 			GROUP BY %s
-			ORDER BY date ASC`,
-			dateExpr, dateExpr))
+			ORDER BY day_group ASC`,
+			dayGroupExpr, dayGroupExpr))
 		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
 	} else {
-		var dateExpr string
-		if s.db.IsPG {
-			dateExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
-		} else {
-			dateExpr = "DATE(FROM_UNIXTIME(created_at))"
-		}
 		query := s.db.RebindQuery(fmt.Sprintf(`
-			SELECT %s as date,
+			SELECT %s as day_group,
 				COUNT(*) as request_count,
 				COALESCE(SUM(quota), 0) as quota_used,
-				COUNT(DISTINCT user_id) as unique_users,
-				MIN(created_at) as min_ts
+				COUNT(DISTINCT user_id) as unique_users
 			FROM logs
 			WHERE created_at >= ? AND type = 2
 			GROUP BY %s
-			ORDER BY date ASC`,
-			dateExpr, dateExpr))
+			ORDER BY day_group ASC`,
+			dayGroupExpr, dayGroupExpr))
 		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
 	}
 
@@ -263,8 +258,7 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 		return nil, err
 	}
 
-	// Fill missing dates so we always return exactly `days` rows
-	rows = fillDailyGaps(rows, days)
+	rows = fillDailyGaps(rows, days, tzOffset)
 
 	cm.Set(cacheKey, rows, 5*time.Minute)
 	return rows, nil
@@ -282,32 +276,27 @@ func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[strin
 	}
 
 	startTime := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+	tzOffset := localTZOffset()
 
-	var hourExpr string
-	if s.db.IsPG {
-		hourExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD HH24:00')"
-	} else {
-		hourExpr = "DATE_FORMAT(FROM_UNIXTIME(created_at), '%Y-%m-%d %H:00')"
-	}
+	// Group by local-time hour using pure unix arithmetic — timezone-safe
+	hourGroupExpr := fmt.Sprintf("FLOOR((created_at + %d) / 3600)", tzOffset)
 
 	query := s.db.RebindQuery(fmt.Sprintf(`
-		SELECT %s as hour,
+		SELECT %s as hour_group,
 			COUNT(*) as request_count,
-			COALESCE(SUM(quota), 0) as quota_used,
-			MIN(created_at) as min_ts
+			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
 		WHERE created_at >= ? AND type = 2
 		GROUP BY %s
-		ORDER BY hour ASC`,
-		hourExpr, hourExpr))
+		ORDER BY hour_group ASC`,
+		hourGroupExpr, hourGroupExpr))
 
 	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime)
 	if err != nil {
 		return nil, err
 	}
 
-	// Fill missing hours so we always return exactly `hours` rows
-	rows = fillHourlyGaps(rows, hours)
+	rows = fillHourlyGaps(rows, hours, tzOffset)
 
 	cm.Set(cacheKey, rows, 2*time.Minute)
 	return rows, nil
@@ -593,20 +582,19 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	}, nil
 }
 
-// fillDailyGaps ensures every day in the range has a row, using min_ts for
-// timezone-safe bucket matching instead of comparing formatted date strings.
-func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interface{} {
+// fillDailyGaps ensures every day in the range has a row.
+// Matches DB rows by day_group (FLOOR((unix_ts + tzOffset) / 86400)) for
+// timezone-safe bucket matching that is identical to the SQL grouping expression.
+func fillDailyGaps(rows []map[string]interface{}, days int, tzOffset int) []map[string]interface{} {
 	now := time.Now()
 	loc := now.Location()
 
-	// Build lookup keyed by local-date bucket (start-of-day unix timestamp)
+	// Build lookup keyed by day_group integer
 	lookup := make(map[int64]map[string]interface{}, len(rows))
 	for _, row := range rows {
-		ts := toInt64(row["min_ts"])
-		if ts > 0 {
-			t := time.Unix(ts, 0).In(loc)
-			dayStart := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
-			lookup[dayStart.Unix()] = row
+		group := toInt64(row["day_group"])
+		if group > 0 {
+			lookup[group] = row
 		}
 	}
 
@@ -614,18 +602,20 @@ func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interfa
 	for i := days - 1; i >= 0; i-- {
 		day := now.AddDate(0, 0, -i)
 		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
-		key := dayStart.Unix()
+		// Compute the same day_group as the SQL expression
+		expectedGroup := (dayStart.Unix() + int64(tzOffset)) / 86400
 		dateStr := dayStart.Format("2006-01-02")
+		ts := dayStart.Unix()
 
-		if existing, ok := lookup[key]; ok {
-			existing["timestamp"] = key
-			existing["date"] = dateStr // normalize to local timezone
-			delete(existing, "min_ts")
+		if existing, ok := lookup[expectedGroup]; ok {
+			existing["date"] = dateStr
+			existing["timestamp"] = ts
+			delete(existing, "day_group")
 			result = append(result, existing)
 		} else {
 			result = append(result, map[string]interface{}{
 				"date":          dateStr,
-				"timestamp":     key,
+				"timestamp":     ts,
 				"request_count": int64(0),
 				"quota_used":    int64(0),
 				"unique_users":  int64(0),
@@ -635,20 +625,19 @@ func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interfa
 	return result
 }
 
-// fillHourlyGaps ensures every hour in the range has a row, using min_ts for
-// timezone-safe bucket matching instead of comparing formatted hour strings.
-func fillHourlyGaps(rows []map[string]interface{}, hours int) []map[string]interface{} {
+// fillHourlyGaps ensures every hour in the range has a row.
+// Matches DB rows by hour_group (FLOOR((unix_ts + tzOffset) / 3600)) for
+// timezone-safe bucket matching that is identical to the SQL grouping expression.
+func fillHourlyGaps(rows []map[string]interface{}, hours int, tzOffset int) []map[string]interface{} {
 	now := time.Now()
 	loc := now.Location()
 
-	// Build lookup keyed by local-hour bucket (start-of-hour unix timestamp)
+	// Build lookup keyed by hour_group integer
 	lookup := make(map[int64]map[string]interface{}, len(rows))
 	for _, row := range rows {
-		ts := toInt64(row["min_ts"])
-		if ts > 0 {
-			t := time.Unix(ts, 0).In(loc)
-			hourStart := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
-			lookup[hourStart.Unix()] = row
+		group := toInt64(row["hour_group"])
+		if group > 0 {
+			lookup[group] = row
 		}
 	}
 
@@ -656,18 +645,20 @@ func fillHourlyGaps(rows []map[string]interface{}, hours int) []map[string]inter
 	for i := hours - 1; i >= 0; i-- {
 		t := now.Add(-time.Duration(i) * time.Hour)
 		hourStart := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
-		key := hourStart.Unix()
+		// Compute the same hour_group as the SQL expression
+		expectedGroup := (hourStart.Unix() + int64(tzOffset)) / 3600
 		hourStr := hourStart.Format("2006-01-02 15:00")
+		ts := hourStart.Unix()
 
-		if existing, ok := lookup[key]; ok {
-			existing["timestamp"] = key
-			existing["hour"] = hourStr // normalize to local timezone
-			delete(existing, "min_ts")
+		if existing, ok := lookup[expectedGroup]; ok {
+			existing["hour"] = hourStr
+			existing["timestamp"] = ts
+			delete(existing, "hour_group")
 			result = append(result, existing)
 		} else {
 			result = append(result, map[string]interface{}{
 				"hour":          hourStr,
-				"timestamp":     key,
+				"timestamp":     ts,
 				"request_count": int64(0),
 				"quota_used":    int64(0),
 			})
