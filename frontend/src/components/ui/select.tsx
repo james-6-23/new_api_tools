@@ -87,12 +87,19 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
 
       updateDropdownPosition()
 
-      const handleUpdate = () => updateDropdownPosition()
+      const handleUpdate = (e: Event) => {
+        // Skip position update if the scroll originated from the dropdown itself
+        if (dropdownRef.current && dropdownRef.current.contains(e.target as Node)) {
+          return
+        }
+        updateDropdownPosition()
+      }
+      const handleResize = () => updateDropdownPosition()
       window.addEventListener("scroll", handleUpdate, true)
-      window.addEventListener("resize", handleUpdate)
+      window.addEventListener("resize", handleResize)
       return () => {
         window.removeEventListener("scroll", handleUpdate, true)
-        window.removeEventListener("resize", handleUpdate)
+        window.removeEventListener("resize", handleResize)
       }
     }, [isOpen, updateDropdownPosition])
 
@@ -127,6 +134,19 @@ const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           ...dropdownStyle,
           WebkitOverflowScrolling: 'touch',
           overscrollBehavior: 'contain',
+          pointerEvents: 'auto',
+        }}
+        onWheel={(e) => {
+          // Prevent wheel events from propagating to the dialog/body
+          // This ensures the dropdown scrolls instead of the parent dialog
+          const el = e.currentTarget
+          const { scrollTop, scrollHeight, clientHeight } = el
+          const atTop = scrollTop === 0 && e.deltaY < 0
+          const atBottom = scrollTop + clientHeight >= scrollHeight && e.deltaY > 0
+          // Only stop propagation if there's room to scroll or we're at boundary
+          if (!atTop && !atBottom) {
+            e.stopPropagation()
+          }
         }}
       >
         <div className="p-1">
