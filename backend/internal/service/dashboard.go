@@ -219,12 +219,12 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 	var err error
 
 	if IsQuotaDataAvailable() {
-		// Fast path: use quota_data table
+		// Fast path: use quota_data table (created_at is BIGINT unix timestamp)
 		var dateExpr string
 		if s.db.IsPG {
-			dateExpr = "TO_CHAR(created_at, 'YYYY-MM-DD')"
+			dateExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
 		} else {
-			dateExpr = "DATE(created_at)"
+			dateExpr = "DATE(FROM_UNIXTIME(created_at))"
 		}
 		query := s.db.RebindQuery(fmt.Sprintf(`
 			SELECT %s as date,
@@ -236,7 +236,7 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 			GROUP BY %s
 			ORDER BY date ASC`,
 			dateExpr, dateExpr))
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, now.AddDate(0, 0, -days))
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
 	} else {
 		var dateExpr string
 		if s.db.IsPG {
@@ -260,6 +260,10 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 	if err != nil {
 		return nil, err
 	}
+
+	// Fill missing dates so we always return exactly `days` rows
+	rows = fillDailyGaps(rows, days)
+
 	cm.Set(cacheKey, rows, 5*time.Minute)
 	return rows, nil
 }
@@ -298,6 +302,10 @@ func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[strin
 	if err != nil {
 		return nil, err
 	}
+
+	// Fill missing hours so we always return exactly `hours` rows
+	rows = fillHourlyGaps(rows, hours)
+
 	cm.Set(cacheKey, rows, 2*time.Minute)
 	return rows, nil
 }
@@ -580,6 +588,76 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 		"top_cities":          cityList,
 		"snapshot_time":       time.Now().Unix(),
 	}, nil
+}
+
+// fillDailyGaps ensures every day in the range has a row, adding timestamp field
+func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interface{} {
+	// Build lookup from date string -> row
+	lookup := make(map[string]map[string]interface{}, len(rows))
+	for _, row := range rows {
+		if dateStr, ok := row["date"].(string); ok {
+			lookup[dateStr] = row
+		}
+	}
+
+	now := time.Now()
+	loc := now.Location()
+	result := make([]map[string]interface{}, 0, days)
+
+	for i := days - 1; i >= 0; i-- {
+		day := now.AddDate(0, 0, -i)
+		dateStr := day.Format("2006-01-02")
+		// Timestamp at start of day
+		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+
+		if existing, ok := lookup[dateStr]; ok {
+			existing["timestamp"] = dayStart.Unix()
+			result = append(result, existing)
+		} else {
+			result = append(result, map[string]interface{}{
+				"date":          dateStr,
+				"timestamp":     dayStart.Unix(),
+				"request_count": int64(0),
+				"quota_used":    int64(0),
+				"unique_users":  int64(0),
+			})
+		}
+	}
+	return result
+}
+
+// fillHourlyGaps ensures every hour in the range has a row, adding timestamp field
+func fillHourlyGaps(rows []map[string]interface{}, hours int) []map[string]interface{} {
+	// Build lookup from hour string -> row
+	lookup := make(map[string]map[string]interface{}, len(rows))
+	for _, row := range rows {
+		if hourStr, ok := row["hour"].(string); ok {
+			lookup[hourStr] = row
+		}
+	}
+
+	now := time.Now()
+	loc := now.Location()
+	result := make([]map[string]interface{}, 0, hours)
+
+	for i := hours - 1; i >= 0; i-- {
+		t := now.Add(-time.Duration(i) * time.Hour)
+		hourStart := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
+		hourStr := hourStart.Format("2006-01-02 15:00")
+
+		if existing, ok := lookup[hourStr]; ok {
+			existing["timestamp"] = hourStart.Unix()
+			result = append(result, existing)
+		} else {
+			result = append(result, map[string]interface{}{
+				"hour":          hourStr,
+				"timestamp":     hourStart.Unix(),
+				"request_count": int64(0),
+				"quota_used":    int64(0),
+			})
+		}
+	}
+	return result
 }
 
 // sortByRequestCount sorts a slice of maps by request_count descending using sort.Slice

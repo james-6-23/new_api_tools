@@ -622,7 +622,7 @@ export function Dashboard() {
                 key={p}
                 variant={period === p ? 'default' : 'ghost'}
                 size="sm"
-                onClick={() => setPeriod(p)}
+                onClick={() => { setDailyTrends([]); setPeriod(p) }}
                 className="h-7 text-xs px-3"
               >
                 {p === '24h' ? '24小时' : p === '3d' ? '3天' : p === '7d' ? '7天' : '14天'}
