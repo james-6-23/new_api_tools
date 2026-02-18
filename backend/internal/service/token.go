@@ -10,22 +10,22 @@ import (
 
 // TokenInfo represents a token record with joined user info
 type TokenInfo struct {
-	ID             int64       `json:"id"`
-	Key            string      `json:"key"`
-	Name           string      `json:"name"`
-	UserID         int64       `json:"user_id"`
-	Username       string      `json:"username"`
-	Status         int         `json:"status"`
-	Quota          int64       `json:"quota"`
-	UsedQuota      int64       `json:"used_quota"`
-	RemainQuota    int64       `json:"remain_quota"`
-	UnlimitedQuota bool        `json:"unlimited_quota"`
-	Models         string      `json:"models"`
-	Subnet         string      `json:"subnet"`
-	CreatedTime    int64       `json:"created_time"`
-	AccessedTime   int64       `json:"accessed_time"`
-	ExpiredTime    int64       `json:"expired_time"`
-	Group          string      `json:"group"`
+	ID             int64  `json:"id"`
+	Key            string `json:"key"`
+	Name           string `json:"name"`
+	UserID         int64  `json:"user_id"`
+	Username       string `json:"username"`
+	Status         int    `json:"status"`
+	Quota          int64  `json:"quota"`
+	UsedQuota      int64  `json:"used_quota"`
+	RemainQuota    int64  `json:"remain_quota"`
+	UnlimitedQuota bool   `json:"unlimited_quota"`
+	Models         string `json:"models"`
+	Subnet         string `json:"subnet"`
+	CreatedTime    int64  `json:"created_time"`
+	AccessedTime   int64  `json:"accessed_time"`
+	ExpiredTime    int64  `json:"expired_time"`
+	Group          string `json:"group"`
 }
 
 // TokenStatistics holds aggregate token counts
@@ -156,7 +156,6 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 			COALESCE(t.allow_ips, '') as subnet,
 			t.%s as token_group,
 			COALESCE(t.created_time, 0) as created_time,
-			COALESCE(t.accessed_time, 0) as accessed_time,
 			COALESCE(t.expired_time, 0) as expired_time
 		FROM tokens t
 		LEFT JOIN users u ON t.user_id = u.id
@@ -171,9 +170,39 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 		return nil, err
 	}
 
+	// 仅将 logs(type IN 2/5) 视为“最后使用时间”
+	lastUsedByToken := make(map[int64]int64)
+	tokenIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		tokenIDs = append(tokenIDs, toInt64(row["id"]))
+	}
+	if len(tokenIDs) > 0 {
+		placeholders := make([]string, 0, len(tokenIDs))
+		aggArgs := make([]interface{}, 0, len(tokenIDs))
+		for i, tokenID := range tokenIDs {
+			placeholders = append(placeholders, s.db.Placeholder(i+1))
+			aggArgs = append(aggArgs, tokenID)
+		}
+
+		lastUsedQuery := fmt.Sprintf(`
+			SELECT token_id, MAX(created_at) as accessed_time
+			FROM logs
+			WHERE type IN (2, 5) AND token_id IN (%s)
+			GROUP BY token_id`, strings.Join(placeholders, ","))
+
+		lastUsedRows, err := s.db.Query(lastUsedQuery, aggArgs...)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range lastUsedRows {
+			lastUsedByToken[toInt64(row["token_id"])] = toInt64(row["accessed_time"])
+		}
+	}
+
 	// Convert to TokenInfo-like maps
 	items := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
+		tokenID := toInt64(row["id"])
 		items = append(items, map[string]interface{}{
 			"id":              row["id"],
 			"key":             MaskTokenKey(fmt.Sprintf("%v", row["token_key"])),
@@ -189,7 +218,7 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 			"subnet":          row["subnet"],
 			"group":           row["token_group"],
 			"created_time":    row["created_time"],
-			"accessed_time":   row["accessed_time"],
+			"accessed_time":   lastUsedByToken[tokenID],
 			"expired_time":    row["expired_time"],
 		})
 	}
