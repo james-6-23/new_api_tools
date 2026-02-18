@@ -52,6 +52,11 @@ export interface UserAnalysis {
     risk: {
         requests_per_minute: number; avg_quota_per_request?: number
         risk_flags: string[]; ip_switch_analysis?: IPSwitchAnalysis
+        checkin_analysis?: {
+            checkin_count: number
+            total_quota_awarded: number
+            requests_per_checkin: number
+        }
     }
     top_models: Array<{ model_name: string; requests: number }>
     top_channels?: Array<{ channel_id: number; channel_name: string; requests: number; quota_used: number }>
@@ -72,6 +77,7 @@ export const RISK_FLAG_LABELS: Record<string, string> = {
     'HIGH_EMPTY_RATE': '空回复率过高',
     'IP_RAPID_SWITCH': 'IP快速切换',
     'IP_HOPPING': 'IP跳动异常',
+    'CHECKIN_ANOMALY': '签到刷额度异常',
 }
 
 export const BAN_REASONS = [
@@ -82,6 +88,7 @@ export const BAN_REASONS = [
     { value: '空回复率过高 (HIGH_EMPTY_RATE)', label: '空回复率过高 (HIGH_EMPTY_RATE)' },
     { value: 'IP快速切换 (IP_RAPID_SWITCH)', label: 'IP快速切换 (IP_RAPID_SWITCH)' },
     { value: 'IP跳动异常 (IP_HOPPING)', label: 'IP跳动异常 (IP_HOPPING)' },
+    { value: '签到刷额度异常 (CHECKIN_ANOMALY)', label: '签到刷额度异常 (CHECKIN_ANOMALY)' },
     { value: '账号共享嫌疑', label: '账号共享嫌疑' },
     { value: '令牌泄露风险', label: '令牌泄露风险' },
     { value: '滥用 API 资源', label: '滥用 API 资源' },
@@ -645,6 +652,42 @@ export function UserAnalysisDialog({
                                                 </div>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {/* 签到行为分析 */}
+                                {analysis.risk.checkin_analysis && analysis.risk.checkin_analysis.checkin_count > 0 && (
+                                    <div className="space-y-3">
+                                        <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                                            签到行为分析
+                                            {analysis.risk.risk_flags.includes('CHECKIN_ANOMALY') && (
+                                                <Badge variant="destructive" className="text-xs px-1.5 py-0">异常</Badge>
+                                            )}
+                                        </h4>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                                                <div className="text-lg font-bold">{analysis.risk.checkin_analysis.checkin_count}</div>
+                                                <div className="text-xs text-muted-foreground">签到次数</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                                                <div className="text-lg font-bold">${(analysis.risk.checkin_analysis.total_quota_awarded / 500000).toFixed(2)}</div>
+                                                <div className="text-xs text-muted-foreground">签到获得额度</div>
+                                            </div>
+                                            <div className={cn(
+                                                "rounded-lg border p-2.5 text-center",
+                                                analysis.risk.risk_flags.includes('CHECKIN_ANOMALY')
+                                                    ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                                                    : "bg-muted/30"
+                                            )}>
+                                                <div className={cn(
+                                                    "text-lg font-bold",
+                                                    analysis.risk.risk_flags.includes('CHECKIN_ANOMALY') && "text-red-600 dark:text-red-400"
+                                                )}>
+                                                    {analysis.risk.checkin_analysis.requests_per_checkin.toFixed(1)}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">次请求/签到</div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 

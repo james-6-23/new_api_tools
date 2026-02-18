@@ -84,6 +84,34 @@ func (m *Manager) Ping() error {
 	return m.DB.Ping()
 }
 
+// QueryWithTimeout executes a query with a context timeout
+func (m *Manager) QueryWithTimeout(timeout time.Duration, query string, args ...interface{}) ([]map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	rows, err := m.DB.QueryxContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		row := make(map[string]interface{})
+		if err := rows.MapScan(row); err != nil {
+			return nil, err
+		}
+		for k, v := range row {
+			if b, ok := v.([]byte); ok {
+				row[k] = string(b)
+			}
+		}
+		results = append(results, row)
+	}
+
+	return results, rows.Err()
+}
+
 // Query executes a query that returns rows
 func (m *Manager) Query(query string, args ...interface{}) ([]map[string]interface{}, error) {
 	rows, err := m.DB.Queryx(query, args...)

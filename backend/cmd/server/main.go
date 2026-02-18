@@ -97,6 +97,9 @@ func main() {
 		handler.RegisterRiskMonitoringRoutes(api)
 		handler.RegisterModelStatusRoutes(api)
 
+		// Phase 2.4: Token Management
+		handler.RegisterTokenRoutes(api)
+
 		// Phase 3: AI AutoBan, AutoGroup, LinuxDo Lookup
 		handler.RegisterAIAutoBanRoutes(api)
 		handler.RegisterAutoGroupRoutes(api)

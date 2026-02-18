@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/new-api-tools/backend/internal/cache"
 	"github.com/new-api-tools/backend/internal/database"
 )
 
@@ -170,6 +171,13 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 
 // GetModelUsage returns model usage distribution
 func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:models:%s:%d", period, limit)
+	var cached []map[string]interface{}
+	if found, _ := cm.GetJSON(cacheKey, &cached); found {
+		return cached, nil
+	}
+
 	startTime, endTime := parsePeriodToTimestamps(period)
 
 	query := s.db.RebindQuery(`
@@ -184,37 +192,84 @@ func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string
 		ORDER BY request_count DESC
 		LIMIT ?`)
 
-	return s.db.Query(query, startTime, endTime, limit)
+	rows, err := s.db.Query(query, startTime, endTime, limit)
+	if err != nil {
+		return nil, err
+	}
+	cm.Set(cacheKey, rows, 3*time.Minute)
+	return rows, nil
 }
 
 // GetDailyTrends returns daily usage trends
 func (s *DashboardService) GetDailyTrends(days int) ([]map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:daily:%d", days)
+	var cached []map[string]interface{}
+	if found, _ := cm.GetJSON(cacheKey, &cached); found {
+		return cached, nil
+	}
+
 	now := time.Now()
 	startTime := now.AddDate(0, 0, -days).Unix()
 
-	var dateExpr string
-	if s.db.IsPG {
-		dateExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+	var rows []map[string]interface{}
+	var err error
+
+	if IsQuotaDataAvailable() {
+		// Fast path: use quota_data table
+		var dateExpr string
+		if s.db.IsPG {
+			dateExpr = "TO_CHAR(created_at, 'YYYY-MM-DD')"
+		} else {
+			dateExpr = "DATE(created_at)"
+		}
+		query := s.db.RebindQuery(fmt.Sprintf(`
+			SELECT %s as date,
+				COALESCE(SUM(count), 0) as request_count,
+				COALESCE(SUM(quota), 0) as quota_used,
+				COUNT(DISTINCT user_id) as unique_users
+			FROM quota_data
+			WHERE created_at >= ?
+			GROUP BY %s
+			ORDER BY date ASC`,
+			dateExpr, dateExpr))
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, now.AddDate(0, 0, -days))
 	} else {
-		dateExpr = "DATE(FROM_UNIXTIME(created_at))"
+		var dateExpr string
+		if s.db.IsPG {
+			dateExpr = "TO_CHAR(TO_TIMESTAMP(created_at), 'YYYY-MM-DD')"
+		} else {
+			dateExpr = "DATE(FROM_UNIXTIME(created_at))"
+		}
+		query := s.db.RebindQuery(fmt.Sprintf(`
+			SELECT %s as date,
+				COUNT(*) as request_count,
+				COALESCE(SUM(quota), 0) as quota_used,
+				COUNT(DISTINCT user_id) as unique_users
+			FROM logs
+			WHERE created_at >= ? AND type IN (2, 5)
+			GROUP BY %s
+			ORDER BY date ASC`,
+			dateExpr, dateExpr))
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
 	}
 
-	query := s.db.RebindQuery(fmt.Sprintf(`
-		SELECT %s as date,
-			COUNT(*) as request_count,
-			COALESCE(SUM(quota), 0) as quota_used,
-			COUNT(DISTINCT user_id) as unique_users
-		FROM logs
-		WHERE created_at >= ? AND type IN (2, 5)
-		GROUP BY %s
-		ORDER BY date ASC`,
-		dateExpr, dateExpr))
-
-	return s.db.Query(query, startTime)
+	if err != nil {
+		return nil, err
+	}
+	cm.Set(cacheKey, rows, 5*time.Minute)
+	return rows, nil
 }
 
 // GetHourlyTrends returns hourly usage trends
 func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:hourly:%d", hours)
+	var cached []map[string]interface{}
+	if found, _ := cm.GetJSON(cacheKey, &cached); found {
+		return cached, nil
+	}
+
 	startTime := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
 
 	var hourExpr string
@@ -234,31 +289,61 @@ func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{},
 		ORDER BY hour ASC`,
 		hourExpr, hourExpr))
 
-	return s.db.Query(query, startTime)
+	rows, err := s.db.Query(query, startTime)
+	if err != nil {
+		return nil, err
+	}
+	cm.Set(cacheKey, rows, 2*time.Minute)
+	return rows, nil
 }
 
-// GetTopUsers returns top users by quota usage
+// GetTopUsers returns top users by quota usage (subquery-first optimization)
 func (s *DashboardService) GetTopUsers(period string, limit int) ([]map[string]interface{}, error) {
-	startTime, endTime := parsePeriodToTimestamps(period)
-
-	castExpr := "CAST(l.user_id AS CHAR)"
-	if s.db.IsPG {
-		castExpr = "CAST(l.user_id AS TEXT)"
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:topusers:%s:%d", period, limit)
+	var cached []map[string]interface{}
+	if found, _ := cm.GetJSON(cacheKey, &cached); found {
+		return cached, nil
 	}
 
-	query := s.db.RebindQuery(fmt.Sprintf(`
-		SELECT l.user_id,
-			COALESCE(u.username, %s) as username,
-			COUNT(*) as request_count,
-			COALESCE(SUM(l.quota), 0) as quota_used
-		FROM logs l
-		LEFT JOIN users u ON l.user_id = u.id
-		WHERE l.created_at >= ? AND l.created_at <= ? AND l.type IN (2, 5)
-		GROUP BY l.user_id, u.username
-		ORDER BY quota_used DESC
-		LIMIT ?`, castExpr))
+	startTime, endTime := parsePeriodToTimestamps(period)
 
-	return s.db.Query(query, startTime, endTime, limit)
+	castExpr := "CAST(sub.user_id AS CHAR)"
+	if s.db.IsPG {
+		castExpr = "CAST(sub.user_id AS TEXT)"
+	}
+
+	// Subquery aggregates first, then JOINs users — avoids scanning users table during GROUP BY
+	query := s.db.RebindQuery(fmt.Sprintf(`
+		SELECT sub.user_id,
+			COALESCE(u.username, %s) as username,
+			sub.request_count,
+			sub.quota_used
+		FROM (
+			SELECT user_id,
+				COUNT(*) as request_count,
+				COALESCE(SUM(quota), 0) as quota_used
+			FROM logs
+			WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5)
+			GROUP BY user_id
+			ORDER BY quota_used DESC
+			LIMIT ?
+		) sub
+		LEFT JOIN users u ON sub.user_id = u.id
+		ORDER BY sub.quota_used DESC`, castExpr))
+
+	rows, err := s.db.Query(query, startTime, endTime, limit)
+	if err != nil {
+		return nil, err
+	}
+	cm.Set(cacheKey, rows, 3*time.Minute)
+	return rows, nil
+}
+
+// InvalidateDashboardCache clears all dashboard-related caches
+func (s *DashboardService) InvalidateDashboardCache() {
+	cm := cache.Get()
+	cm.DeleteByPrefix("dashboard:")
 }
 
 // GetChannelStatus returns channel status overview

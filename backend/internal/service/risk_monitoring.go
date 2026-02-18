@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/cache"
 	"github.com/new-api-tools/backend/internal/database"
+	"github.com/new-api-tools/backend/internal/logger"
 )
 
 // RiskMonitoringService handles risk detection queries
@@ -259,11 +261,36 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		riskFlags = append(riskFlags, "IP_HOPPING")
 	}
 
+	// Checkin anomaly detection
+	checkin := analyzeCheckins(s.db, userID, startTime, now)
+	var checkinAnalysisMap map[string]interface{}
+	if checkin != nil && checkin.CheckinCount > 0 {
+		requestsPerCheckin := float64(0)
+		if checkin.CheckinCount > 0 {
+			requestsPerCheckin = float64(totalRequests) / float64(checkin.CheckinCount)
+		}
+		checkin.RequestsPerCheckin = math.Round(requestsPerCheckin*10) / 10
+
+		checkinAnalysisMap = map[string]interface{}{
+			"checkin_count":       checkin.CheckinCount,
+			"total_quota_awarded": checkin.TotalQuotaAwarded,
+			"requests_per_checkin": checkin.RequestsPerCheckin,
+		}
+
+		// Flag: many checkins but very few requests per checkin
+		if checkin.CheckinCount > 3 && requestsPerCheckin < 5 {
+			riskFlags = append(riskFlags, "CHECKIN_ANOMALY")
+		}
+	}
+
 	risk := map[string]interface{}{
 		"requests_per_minute":   requestsPerMinute,
 		"avg_quota_per_request": avgQuotaPerRequest,
 		"risk_flags":            riskFlags,
 		"ip_switch_analysis":    ipSwitchAnalysis,
+	}
+	if checkinAnalysisMap != nil {
+		risk["checkin_analysis"] = checkinAnalysisMap
 	}
 
 	// Top models
@@ -495,6 +522,57 @@ func (s *RiskMonitoringService) ListBanRecords(page, pageSize int, action string
 		"page":        page,
 		"page_size":   pageSize,
 		"total_pages": 0,
+	}
+}
+
+// ========== Checkin Analysis ==========
+
+var (
+	checkinTableOnce   sync.Once
+	checkinTableExists bool
+)
+
+// checkinAnalysis holds checkin anomaly detection results
+type checkinAnalysis struct {
+	CheckinCount      int64   `json:"checkin_count"`
+	TotalQuotaAwarded int64   `json:"total_quota_awarded"`
+	RequestsPerCheckin float64 `json:"requests_per_checkin"`
+}
+
+// analyzeCheckins checks for checkin abuse patterns
+func analyzeCheckins(db *database.Manager, userID int64, startTime, endTime int64) *checkinAnalysis {
+	checkinTableOnce.Do(func() {
+		exists, err := db.TableExists("checkins")
+		if err != nil {
+			logger.L.Warn("检查 checkins 表失败: " + err.Error())
+			return
+		}
+		checkinTableExists = exists
+		if exists {
+			logger.L.System("checkins 表已检测到，启用签到分析")
+		}
+	})
+
+	if !checkinTableExists {
+		return nil
+	}
+
+	row, err := db.QueryOne(db.RebindQuery(`
+		SELECT COUNT(*) as checkin_count,
+			COALESCE(SUM(quota), 0) as total_quota_awarded
+		FROM checkins
+		WHERE user_id = ? AND created_at >= ? AND created_at <= ?`),
+		userID, startTime, endTime)
+	if err != nil || row == nil {
+		return nil
+	}
+
+	count := toInt64(row["checkin_count"])
+	quotaAwarded := toInt64(row["total_quota_awarded"])
+
+	return &checkinAnalysis{
+		CheckinCount:      count,
+		TotalQuotaAwarded: quotaAwarded,
 	}
 }
 

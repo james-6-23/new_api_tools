@@ -122,7 +122,8 @@ func GetChannelStatus(c *gin.Context) {
 
 // POST /api/dashboard/cache/invalidate
 func InvalidateDashboardCache(c *gin.Context) {
-	// Clear dashboard-related caches
+	svc := service.NewDashboardService()
+	svc.InvalidateDashboardCache()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Dashboard cache invalidated",

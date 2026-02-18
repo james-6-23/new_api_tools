@@ -54,7 +54,7 @@ func (s *LogAnalyticsService) GetAnalyticsState() map[string]interface{} {
 		"total_processed":   toInt64(row["total_processed"]),
 	}
 
-	cm.Set("analytics:state", result, 30*time.Second)
+	cm.Set("analytics:state", result, 60*time.Second)
 	return result
 }
 
@@ -70,18 +70,38 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 		return cached, nil
 	}
 
-	query := s.db.RebindQuery(`
-		SELECT l.user_id,
-			COALESCE(l.username, '') as username,
-			COUNT(*) as request_count,
-			COALESCE(SUM(l.quota), 0) as quota_used
-		FROM logs l
-		WHERE l.type IN (2, 5) AND l.user_id > 0
-		GROUP BY l.user_id, l.username
-		ORDER BY request_count DESC
-		LIMIT ?`)
+	var rows []map[string]interface{}
+	var err error
 
-	rows, err := s.db.Query(query, limit)
+	if IsQuotaDataAvailable() {
+		// Fast path: aggregate from quota_data
+		query := s.db.RebindQuery(`
+			SELECT q.user_id,
+				COALESCE(u.username, '') as username,
+				COALESCE(SUM(q.count), 0) as request_count,
+				COALESCE(SUM(q.quota), 0) as quota_used
+			FROM quota_data q
+			LEFT JOIN users u ON q.user_id = u.id
+			WHERE q.user_id > 0
+			GROUP BY q.user_id, u.username
+			ORDER BY request_count DESC
+			LIMIT ?`)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, limit)
+	} else {
+		// Fallback: scan logs with 30-day filter
+		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
+		query := s.db.RebindQuery(`
+			SELECT l.user_id,
+				COALESCE(l.username, '') as username,
+				COUNT(*) as request_count,
+				COALESCE(SUM(l.quota), 0) as quota_used
+			FROM logs l
+			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?
+			GROUP BY l.user_id, l.username
+			ORDER BY request_count DESC
+			LIMIT ?`)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -102,18 +122,36 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 		return cached, nil
 	}
 
-	query := s.db.RebindQuery(`
-		SELECT l.user_id,
-			COALESCE(l.username, '') as username,
-			COUNT(*) as request_count,
-			COALESCE(SUM(l.quota), 0) as quota_used
-		FROM logs l
-		WHERE l.type IN (2, 5) AND l.user_id > 0
-		GROUP BY l.user_id, l.username
-		ORDER BY quota_used DESC
-		LIMIT ?`)
+	var rows []map[string]interface{}
+	var err error
 
-	rows, err := s.db.Query(query, limit)
+	if IsQuotaDataAvailable() {
+		query := s.db.RebindQuery(`
+			SELECT q.user_id,
+				COALESCE(u.username, '') as username,
+				COALESCE(SUM(q.count), 0) as request_count,
+				COALESCE(SUM(q.quota), 0) as quota_used
+			FROM quota_data q
+			LEFT JOIN users u ON q.user_id = u.id
+			WHERE q.user_id > 0
+			GROUP BY q.user_id, u.username
+			ORDER BY quota_used DESC
+			LIMIT ?`)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, limit)
+	} else {
+		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
+		query := s.db.RebindQuery(`
+			SELECT l.user_id,
+				COALESCE(l.username, '') as username,
+				COUNT(*) as request_count,
+				COALESCE(SUM(l.quota), 0) as quota_used
+			FROM logs l
+			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?
+			GROUP BY l.user_id, l.username
+			ORDER BY quota_used DESC
+			LIMIT ?`)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +172,7 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 		return cached, nil
 	}
 
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
 	query := s.db.RebindQuery(`
 		SELECT model_name,
 			COUNT(*) as total_requests,
@@ -141,12 +180,12 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_count,
 			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
-		WHERE type IN (2, 5) AND model_name != ''
+		WHERE type IN (2, 5) AND model_name != '' AND created_at >= ?
 		GROUP BY model_name
 		ORDER BY total_requests DESC
 		LIMIT ?`)
 
-	rows, err := s.db.Query(query, limit)
+	rows, err := s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select } from './ui/select'
 import { Input } from './ui/input'
 import { StatCard } from './StatCard'
+import { UserAnalysisDialog } from './UserAnalysisDialog'
 import { cn } from '../lib/utils'
 
 interface RedemptionCode {
@@ -66,6 +67,8 @@ export function Redemptions() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: 'single' | 'batch'; id?: number }>({ open: false, type: 'single' })
   const [deleting, setDeleting] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
   const getAuthHeaders = useCallback(() => ({
@@ -384,8 +387,26 @@ export function Redemptions() {
                           {code.status === 'unused' ? '未使用' : code.status === 'used' ? '已使用' : '已过期'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {code.used_username || (code.used_user_id > 0 ? `ID: ${code.used_user_id}` : '-')}
+                      <TableCell>
+                        {code.used_user_id > 0 ? (
+                          <div
+                            className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
+                            onClick={() => {
+                              setSelectedUser({ id: code.used_user_id, username: code.used_username || `用户 #${code.used_user_id}` })
+                              setAnalysisDialogOpen(true)
+                            }}
+                            title="查看用户分析"
+                          >
+                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
+                              {(code.used_username || '#')[0]?.toUpperCase()}
+                            </div>
+                            <span className="font-medium text-sm whitespace-nowrap">
+                              {code.used_username || `用户 #${code.used_user_id}`}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{formatTimestamp(code.created_time)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
@@ -448,6 +469,17 @@ export function Redemptions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* User Analysis Dialog */}
+      {selectedUser && (
+        <UserAnalysisDialog
+          open={analysisDialogOpen}
+          onOpenChange={setAnalysisDialogOpen}
+          userId={selectedUser.id}
+          username={selectedUser.username}
+          source="user_management"
+        />
+      )}
     </div>
   )
 }

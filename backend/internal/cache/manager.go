@@ -92,13 +92,22 @@ func (m *Manager) cleanupExpiredEntries() {
 	}
 }
 
-// Get returns the global cache manager
+// Available returns true if the cache manager has been initialized
+func Available() bool {
+	return mgr != nil
+}
+
+// Get returns the global cache manager, or a no-op manager if not initialized
 func Get() *Manager {
 	if mgr == nil {
-		panic("cache not initialized, call cache.Init() first")
+		return &noop
 	}
 	return mgr
 }
+
+// noop is a zero-value Manager used when Redis is unavailable.
+// All operations on it are safe no-ops (rdb is nil, methods check for it).
+var noop = Manager{}
 
 // Close closes the Redis connection
 func Close() error {
@@ -130,7 +139,10 @@ func (m *Manager) Set(key string, value interface{}, ttl time.Duration) error {
 	}
 	m.localCache.Store(key, entry)
 
-	// Store in Redis
+	// Store in Redis (skip if not connected)
+	if m.rdb == nil {
+		return nil
+	}
 	return m.rdb.Set(m.ctx, key, data, ttl).Err()
 }
 
@@ -148,6 +160,12 @@ func (m *Manager) GetJSON(key string, dest interface{}) (bool, error) {
 		}
 	}
 
+	// Skip Redis if not connected
+	if m.rdb == nil {
+		atomic.AddInt64(&m.misses, 1)
+		return false, nil
+	}
+
 	// Try Redis
 	data, err := m.rdb.Get(m.ctx, key).Bytes()
 	if err == redis.Nil {
@@ -158,11 +176,10 @@ func (m *Manager) GetJSON(key string, dest interface{}) (bool, error) {
 		return false, err
 	}
 
-	// Get TTL from Redis to set local cache expiry
-	ttl, _ := m.rdb.TTL(m.ctx, key).Result()
-	entry := &localEntry{data: data}
-	if ttl > 0 {
-		entry.expiresAt = time.Now().Add(ttl)
+	// Use fixed 30s local cache instead of extra TTL round trip
+	entry := &localEntry{
+		data:      data,
+		expiresAt: time.Now().Add(30 * time.Second),
 	}
 	m.localCache.Store(key, entry)
 
@@ -173,6 +190,9 @@ func (m *Manager) GetJSON(key string, dest interface{}) (bool, error) {
 
 // GetString retrieves a string value from cache
 func (m *Manager) GetString(key string) (string, bool, error) {
+	if m.rdb == nil {
+		return "", false, nil
+	}
 	val, err := m.rdb.Get(m.ctx, key).Result()
 	if err == redis.Nil {
 		return "", false, nil
@@ -186,6 +206,9 @@ func (m *Manager) GetString(key string) (string, bool, error) {
 // Delete removes a key from both caches
 func (m *Manager) Delete(key string) error {
 	m.localCache.Delete(key)
+	if m.rdb == nil {
+		return nil
+	}
 	return m.rdb.Del(m.ctx, key).Err()
 }
 
@@ -198,6 +221,11 @@ func (m *Manager) DeleteByPrefix(prefix string) (int64, error) {
 		}
 		return true
 	})
+
+	// Skip Redis if not connected
+	if m.rdb == nil {
+		return 0, nil
+	}
 
 	// Clear Redis keys with this prefix
 	var cursor uint64
@@ -233,6 +261,9 @@ func (m *Manager) DeleteByPrefix(prefix string) (int64, error) {
 
 // Exists checks if a key exists in cache
 func (m *Manager) Exists(key string) (bool, error) {
+	if m.rdb == nil {
+		return false, nil
+	}
 	n, err := m.rdb.Exists(m.ctx, key).Result()
 	return n > 0, err
 }
@@ -276,20 +307,22 @@ func (m *Manager) Stats() map[string]interface{} {
 		"local_count": localCount,
 	}
 
-	// Try to get Redis memory info
-	memInfo, err := m.rdb.Info(m.ctx, "memory").Result()
-	if err == nil {
-		for _, line := range strings.Split(memInfo, "\r\n") {
-			if strings.HasPrefix(line, "used_memory_human:") {
-				info["redis_memory"] = strings.TrimPrefix(line, "used_memory_human:")
+	// Try to get Redis memory info (skip if not connected)
+	if m.rdb != nil {
+		memInfo, err := m.rdb.Info(m.ctx, "memory").Result()
+		if err == nil {
+			for _, line := range strings.Split(memInfo, "\r\n") {
+				if strings.HasPrefix(line, "used_memory_human:") {
+					info["redis_memory"] = strings.TrimPrefix(line, "used_memory_human:")
+				}
 			}
 		}
-	}
 
-	// Get key count
-	dbSize, err := m.rdb.DBSize(m.ctx).Result()
-	if err == nil {
-		info["redis_keys"] = dbSize
+		// Get key count
+		dbSize, err := m.rdb.DBSize(m.ctx).Result()
+		if err == nil {
+			info["redis_keys"] = dbSize
+		}
 	}
 
 	return info
@@ -299,6 +332,9 @@ func (m *Manager) Stats() map[string]interface{} {
 
 // HSet sets a field in a Redis hash
 func (m *Manager) HSet(key, field string, value interface{}) error {
+	if m.rdb == nil {
+		return nil
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -308,6 +344,9 @@ func (m *Manager) HSet(key, field string, value interface{}) error {
 
 // HGet retrieves a field from a Redis hash
 func (m *Manager) HGet(key, field string, dest interface{}) (bool, error) {
+	if m.rdb == nil {
+		return false, nil
+	}
 	data, err := m.rdb.HGet(m.ctx, key, field).Bytes()
 	if err == redis.Nil {
 		return false, nil
@@ -320,6 +359,9 @@ func (m *Manager) HGet(key, field string, dest interface{}) (bool, error) {
 
 // HGetString retrieves a string field from a Redis hash
 func (m *Manager) HGetString(key, field string) (string, bool, error) {
+	if m.rdb == nil {
+		return "", false, nil
+	}
 	val, err := m.rdb.HGet(m.ctx, key, field).Result()
 	if err == redis.Nil {
 		return "", false, nil
@@ -332,11 +374,17 @@ func (m *Manager) HGetString(key, field string) (string, bool, error) {
 
 // HDel removes a field from a Redis hash
 func (m *Manager) HDel(key string, fields ...string) error {
+	if m.rdb == nil {
+		return nil
+	}
 	return m.rdb.HDel(m.ctx, key, fields...).Err()
 }
 
 // HGetAll retrieves all fields from a Redis hash
 func (m *Manager) HGetAll(key string) (map[string]string, error) {
+	if m.rdb == nil {
+		return map[string]string{}, nil
+	}
 	return m.rdb.HGetAll(m.ctx, key).Result()
 }
 
@@ -371,6 +419,9 @@ func (m *Manager) HashSet(key, field string, value interface{}) error {
 
 // HashDelete deletes a hash field, returns true if field existed
 func (m *Manager) HashDelete(key, field string) (bool, error) {
+	if m.rdb == nil {
+		return false, nil
+	}
 	n, err := m.rdb.HDel(m.ctx, key, field).Result()
 	return n > 0, err
 }
