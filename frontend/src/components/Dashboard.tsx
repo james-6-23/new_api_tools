@@ -106,7 +106,7 @@ export function Dashboard() {
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Ref to always call the latest handleRefresh from timer
-  const handleRefreshRef = useRef<() => void>(() => {})
+  const handleRefreshRef = useRef<() => void>(() => { })
 
   // 大型系统刷新提示相关状态
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
@@ -115,7 +115,7 @@ export function Dashboard() {
   const [refreshProgress, setRefreshProgress] = useState<string | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
-  const requestTimeoutMs = 20_000
+  const requestTimeoutMs = 30_000
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
@@ -232,12 +232,13 @@ export function Dashboard() {
   }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
 
   const refreshAll = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
-    const results: boolean[] = []
-    results.push(await fetchOverview(true, signal))
-    results.push(await fetchUsage(true, signal))
-    results.push(await fetchModels(true, signal))
-    results.push(await fetchTrends(true, signal))
-    results.push(await fetchAnalyticsSummary(true, signal))
+    const results = await Promise.all([
+      fetchOverview(true, signal),
+      fetchUsage(true, signal),
+      fetchModels(true, signal),
+      fetchTrends(true, signal),
+      fetchAnalyticsSummary(true, signal),
+    ])
     return results.every(Boolean)
   }, [fetchOverview, fetchUsage, fetchModels, fetchTrends, fetchAnalyticsSummary])
 

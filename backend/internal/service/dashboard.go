@@ -49,51 +49,44 @@ func parsePeriodToTimestamps(period string) (int64, int64) {
 }
 
 // GetSystemOverview returns system overview statistics
-func (s *DashboardService) GetSystemOverview(period string) (map[string]interface{}, error) {
+func (s *DashboardService) GetSystemOverview(period string, noCache bool) (map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:overview:%s", period)
+	if !noCache {
+		var cached map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
+	}
+
 	startTime, _ := parsePeriodToTimestamps(period)
 	result := map[string]interface{}{}
 
-	// Total users (not deleted)
-	row, err := s.db.QueryOne(
-		"SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL")
+	// Combined query 1: users + tokens counts (reduces 4 queries → 1)
+	userTokenQuery := s.db.RebindQuery(`
+		SELECT
+			(SELECT COUNT(*) FROM users WHERE deleted_at IS NULL) as total_users,
+			(SELECT COUNT(DISTINCT user_id) FROM logs WHERE created_at >= ? AND type IN (2, 5)) as active_users,
+			(SELECT COUNT(*) FROM tokens WHERE deleted_at IS NULL) as total_tokens,
+			(SELECT COUNT(*) FROM tokens WHERE deleted_at IS NULL AND status = 1) as active_tokens`)
+	row, err := s.db.QueryOneWithTimeout(15*time.Second, userTokenQuery, startTime)
 	if err == nil && row != nil {
-		result["total_users"] = row["count"]
+		result["total_users"] = row["total_users"]
+		result["active_users"] = row["active_users"]
+		result["total_tokens"] = row["total_tokens"]
+		result["active_tokens"] = row["active_tokens"]
 	}
 
-	// Active users (with requests in period)
-	row, err = s.db.QueryOne(s.db.RebindQuery(
-		"SELECT COUNT(DISTINCT user_id) as count FROM logs WHERE created_at >= ? AND type IN (2, 5)"),
-		startTime)
-	if err == nil && row != nil {
-		result["active_users"] = row["count"]
-	}
-
-	// Total tokens
-	row, err = s.db.QueryOne(
-		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL")
-	if err == nil && row != nil {
-		result["total_tokens"] = row["count"]
-	}
-
-	// Active tokens (status=1)
-	row, err = s.db.QueryOne(
-		"SELECT COUNT(*) as count FROM tokens WHERE deleted_at IS NULL AND status = 1")
-	if err == nil && row != nil {
-		result["active_tokens"] = row["count"]
-	}
-
-	// Total channels (channels table has no deleted_at column)
-	row, err = s.db.QueryOne(
-		`SELECT COUNT(*) as total,
-		 SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active
-		 FROM channels`)
+	// Combined query 2: channels
+	channelQuery := `SELECT COUNT(*) as total, SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active FROM channels`
+	row, err = s.db.QueryOneWithTimeout(10*time.Second, channelQuery)
 	if err == nil && row != nil {
 		result["total_channels"] = row["total"]
 		result["active_channels"] = row["active"]
 	}
 
-	// Total models (from abilities table — count distinct enabled models on active channels)
-	row, err = s.db.QueryOne(
+	// Models count
+	row, err = s.db.QueryOneWithTimeout(10*time.Second,
 		`SELECT COUNT(DISTINCT a.model) as count
 		 FROM abilities a
 		 INNER JOIN channels c ON c.id = a.channel_id
@@ -101,33 +94,38 @@ func (s *DashboardService) GetSystemOverview(period string) (map[string]interfac
 	if err == nil && row != nil {
 		result["total_models"] = row["count"]
 	} else {
-		// Fallback: try models table
-		row, err = s.db.QueryOne(
+		row, err = s.db.QueryOneWithTimeout(10*time.Second,
 			"SELECT COUNT(*) as count FROM models WHERE deleted_at IS NULL")
 		if err == nil && row != nil {
 			result["total_models"] = row["count"]
 		}
 	}
 
-	// Redemption count
-	row, err = s.db.QueryOne(
-		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL")
+	// Redemption counts
+	row, err = s.db.QueryOneWithTimeout(10*time.Second,
+		`SELECT COUNT(*) as total,
+		 SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as unused
+		 FROM redemptions WHERE deleted_at IS NULL`)
 	if err == nil && row != nil {
-		result["total_redemptions"] = row["count"]
+		result["total_redemptions"] = row["total"]
+		result["unused_redemptions"] = row["unused"]
 	}
 
-	// Unused redemptions
-	row, err = s.db.QueryOne(
-		"SELECT COUNT(*) as count FROM redemptions WHERE deleted_at IS NULL AND status = 1")
-	if err == nil && row != nil {
-		result["unused_redemptions"] = row["count"]
-	}
-
+	cm.Set(cacheKey, result, 3*time.Minute)
 	return result, nil
 }
 
 // GetUsageStatistics returns usage statistics for a time period
-func (s *DashboardService) GetUsageStatistics(period string) (map[string]interface{}, error) {
+func (s *DashboardService) GetUsageStatistics(period string, noCache bool) (map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:usage:%s", period)
+	if !noCache {
+		var cached map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
+	}
+
 	startTime, endTime := parsePeriodToTimestamps(period)
 
 	// Only type=2 (success) for usage stats, matching Python backend
@@ -141,7 +139,7 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 		FROM logs
 		WHERE created_at >= ? AND created_at <= ? AND type = 2`)
 
-	row, err := s.db.QueryOne(query, startTime, endTime)
+	row, err := s.db.QueryOneWithTimeout(15*time.Second, query, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
@@ -166,16 +164,19 @@ func (s *DashboardService) GetUsageStatistics(period string) (map[string]interfa
 		}
 	}
 
+	cm.Set(cacheKey, result, 3*time.Minute)
 	return result, nil
 }
 
 // GetModelUsage returns model usage distribution
-func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string]interface{}, error) {
+func (s *DashboardService) GetModelUsage(period string, limit int, noCache bool) ([]map[string]interface{}, error) {
 	cm := cache.Get()
 	cacheKey := fmt.Sprintf("dashboard:models:%s:%d", period, limit)
-	var cached []map[string]interface{}
-	if found, _ := cm.GetJSON(cacheKey, &cached); found {
-		return cached, nil
+	if !noCache {
+		var cached []map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
 	}
 
 	startTime, endTime := parsePeriodToTimestamps(period)
@@ -192,7 +193,7 @@ func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string
 		ORDER BY request_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.Query(query, startTime, endTime, limit)
+	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -201,12 +202,14 @@ func (s *DashboardService) GetModelUsage(period string, limit int) ([]map[string
 }
 
 // GetDailyTrends returns daily usage trends
-func (s *DashboardService) GetDailyTrends(days int) ([]map[string]interface{}, error) {
+func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]interface{}, error) {
 	cm := cache.Get()
 	cacheKey := fmt.Sprintf("dashboard:daily:%d", days)
-	var cached []map[string]interface{}
-	if found, _ := cm.GetJSON(cacheKey, &cached); found {
-		return cached, nil
+	if !noCache {
+		var cached []map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
 	}
 
 	now := time.Now()
@@ -262,12 +265,14 @@ func (s *DashboardService) GetDailyTrends(days int) ([]map[string]interface{}, e
 }
 
 // GetHourlyTrends returns hourly usage trends
-func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{}, error) {
+func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[string]interface{}, error) {
 	cm := cache.Get()
 	cacheKey := fmt.Sprintf("dashboard:hourly:%d", hours)
-	var cached []map[string]interface{}
-	if found, _ := cm.GetJSON(cacheKey, &cached); found {
-		return cached, nil
+	if !noCache {
+		var cached []map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
 	}
 
 	startTime := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
@@ -289,7 +294,7 @@ func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{},
 		ORDER BY hour ASC`,
 		hourExpr, hourExpr))
 
-	rows, err := s.db.Query(query, startTime)
+	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -298,12 +303,14 @@ func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{},
 }
 
 // GetTopUsers returns top users by quota usage (subquery-first optimization)
-func (s *DashboardService) GetTopUsers(period string, limit int) ([]map[string]interface{}, error) {
+func (s *DashboardService) GetTopUsers(period string, limit int, noCache bool) ([]map[string]interface{}, error) {
 	cm := cache.Get()
 	cacheKey := fmt.Sprintf("dashboard:topusers:%s:%d", period, limit)
-	var cached []map[string]interface{}
-	if found, _ := cm.GetJSON(cacheKey, &cached); found {
-		return cached, nil
+	if !noCache {
+		var cached []map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
 	}
 
 	startTime, endTime := parsePeriodToTimestamps(period)
@@ -332,7 +339,7 @@ func (s *DashboardService) GetTopUsers(period string, limit int) ([]map[string]i
 		LEFT JOIN users u ON sub.user_id = u.id
 		ORDER BY sub.quota_used DESC`, castExpr))
 
-	rows, err := s.db.Query(query, startTime, endTime, limit)
+	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
 	if err != nil {
 		return nil, err
 	}

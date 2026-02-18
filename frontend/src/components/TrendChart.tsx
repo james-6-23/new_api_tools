@@ -22,36 +22,48 @@ interface TrendChartProps {
 export function TrendChart({ data, period, loading, totalRequests }: TrendChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 
+  // Use period to determine hourly vs daily mode
+  const isHourlyMode = period === '24h'
+
   // 1. Data Processing
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return []
     const maxRequests = Math.max(...data.map(d => d.request_count), 1)
     return data.map((d, i) => {
-      // Format date/hour for display using local time if timestamp exists
       let displayDate = ''
       if (d.timestamp) {
         const date = new Date(d.timestamp * 1000)
-        if (d.hour) {
-          // Hourly trend: Format as HH:MM
+        if (isHourlyMode) {
           displayDate = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
         } else {
-          // Daily trend: Format as MM-DD
           displayDate = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
         }
       } else {
-        // Fallback to server string
-        displayDate = d.hour || (d.date ? d.date.slice(5) : '')
+        // Fallback to server string with proper formatting
+        if (isHourlyMode && d.hour) {
+          // Extract "HH:00" from "2026-02-17 16:00"
+          const timePart = d.hour.split(' ')[1]
+          displayDate = timePart || d.hour.slice(-5)
+        } else if (d.date) {
+          // Extract "MM-DD" from "2026-02-17"
+          displayDate = d.date.slice(5)
+        } else if (d.hour) {
+          // Fallback for hourly data in daily mode (shouldn't happen normally)
+          const timePart = d.hour.split(' ')[1]
+          displayDate = timePart || d.hour.slice(-5)
+        } else {
+          displayDate = ''
+        }
       }
 
       return {
         ...d,
-        // Calculate normalized height (0-100)
         height: (d.request_count / maxRequests) * 100,
         displayDate,
-        x: i // original index
+        x: i
       }
     })
-  }, [data])
+  }, [data, isHourlyMode])
 
   const maxVal = useMemo(() => Math.max(...data.map(d => d.request_count), 5), [data])
 
@@ -78,7 +90,7 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
               <div className="p-2 bg-primary/10 rounded-lg text-primary">
                 <TrendingUp className="w-5 h-5" />
               </div>
-              每日请求趋势
+              {isHourlyMode ? '每小时请求趋势' : '每日请求趋势'}
             </CardTitle>
             <CardDescription>
               {period === '24h' ? '24小时' : period === '3d' ? '近3天' : period === '7d' ? '近7天' : '近14天'}数据概览
@@ -108,10 +120,19 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
             {/* Chart Area */}
             <div className="absolute inset-0 ml-0 flex items-end justify-between gap-1.5 sm:gap-2 pl-2 z-10">
               {processedData.map((item, index) => {
-                 // Determine if we should show the label
                  const total = processedData.length;
-                 const isHourly = !!item.hour;
-                 const showLabel = isHourly || (total <= 12) || (index % 2 === 0) || (index === total - 1);
+                 // Label visibility: show fewer labels when there are many bars
+                 let showLabel: boolean
+                 if (isHourlyMode) {
+                   // Hourly: show every 3rd label to avoid overlap (24 bars)
+                   showLabel = index % 3 === 0 || index === total - 1
+                 } else if (total <= 7) {
+                   showLabel = true
+                 } else if (total <= 14) {
+                   showLabel = index % 2 === 0 || index === total - 1
+                 } else {
+                   showLabel = index % 3 === 0 || index === total - 1
+                 }
 
                  return (
                   <div
@@ -124,19 +145,19 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                     <div className="absolute inset-x-0 bottom-0 top-0 bg-muted/20 rounded-t-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
                     {/* Active Bar */}
-                    <div 
+                    <div
                       className="relative w-full flex items-end transition-all duration-500 ease-out z-10"
                       style={{ height: '100%' }}
                     >
-                       <div 
+                       <div
                           className={cn(
                             "w-full rounded-t-sm transition-all duration-300 relative border-t border-x border-white/10",
                             "bg-gradient-to-b from-primary to-primary/80 dark:from-primary/90 dark:to-primary/60",
-                            hoveredIndex === index 
-                              ? "opacity-100 shadow-[0_0_15px_rgba(var(--primary),0.3)] brightness-110" 
+                            hoveredIndex === index
+                              ? "opacity-100 shadow-[0_0_15px_rgba(var(--primary),0.3)] brightness-110"
                               : "opacity-85 hover:opacity-100"
                           )}
-                          style={{ 
+                          style={{
                             height: `${Math.max(item.height, 1.5)}%`,
                           }}
                        >
@@ -144,12 +165,12 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                     </div>
 
                     {/* Tooltip */}
-                    <div 
+                    <div
                       className={cn(
                         "absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50",
                         "transition-all duration-200 ease-out transform",
-                        hoveredIndex === index 
-                          ? "opacity-100 translate-y-0 scale-100" 
+                        hoveredIndex === index
+                          ? "opacity-100 translate-y-0 scale-100"
                           : "opacity-0 translate-y-2 scale-95 pointer-events-none"
                       )}
                     >
@@ -157,23 +178,25 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                          <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
                             <Calendar className="w-3 h-3 text-muted-foreground" />
                             {item.timestamp ? (
-                              item.hour 
+                              isHourlyMode
                                 ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                                 : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                            ) : (item.hour || item.date)}
+                            ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
                          </div>
                          <div className="space-y-1 mt-2">
                             <div className="flex justify-between items-center gap-4">
                                <span className="text-muted-foreground">请求数:</span>
-                               <span className="font-mono font-bold">{item.request_count}</span>
+                               <span className="font-mono font-bold">{Number(item.request_count).toLocaleString()}</span>
                             </div>
-                            <div className="flex justify-between items-center gap-4">
-                               <span className="text-muted-foreground">用户数:</span>
-                               <span className="font-mono">{item.unique_users}</span>
-                            </div>
+                            {item.unique_users !== undefined && (
+                              <div className="flex justify-between items-center gap-4">
+                                 <span className="text-muted-foreground">用户数:</span>
+                                 <span className="font-mono">{item.unique_users}</span>
+                              </div>
+                            )}
                             <div className="flex justify-between items-center gap-4">
                                <span className="text-muted-foreground">消耗:</span>
-                               <span className="font-mono">${(item.quota_used / 500000).toFixed(4)}</span>
+                               <span className="font-mono">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
                             </div>
                          </div>
                       </div>
@@ -183,8 +206,7 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
 
                     {/* X-Axis Label */}
                     <div className={cn(
-                      "absolute top-full mt-2 left-1/2 text-[9px] text-muted-foreground font-medium transition-all duration-200",
-                      isHourly ? "rotate-[45deg] origin-top-left ml-1 whitespace-nowrap" : "-translate-x-1/2",
+                      "absolute top-full mt-2 left-1/2 text-[9px] text-muted-foreground font-medium transition-all duration-200 -translate-x-1/2 whitespace-nowrap",
                       showLabel ? "opacity-70" : "opacity-0"
                     )}>
                       {item.displayDate}

@@ -150,6 +150,18 @@ func (m *Manager) QueryOne(query string, args ...interface{}) (map[string]interf
 	return rows[0], nil
 }
 
+// QueryOneWithTimeout executes a query with a context timeout that returns a single row
+func (m *Manager) QueryOneWithTimeout(timeout time.Duration, query string, args ...interface{}) (map[string]interface{}, error) {
+	rows, err := m.QueryWithTimeout(timeout, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
 // Execute runs a query that doesn't return rows (INSERT, UPDATE, DELETE)
 func (m *Manager) Execute(query string, args ...interface{}) (int64, error) {
 	result, err := m.DB.Exec(query, args...)

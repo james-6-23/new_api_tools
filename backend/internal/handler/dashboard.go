@@ -29,9 +29,10 @@ func RegisterDashboardRoutes(r *gin.RouterGroup) {
 // GET /api/dashboard/overview
 func GetSystemOverview(c *gin.Context) {
 	period := c.DefaultQuery("period", "7d")
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetSystemOverview(period)
+	data, err := svc.GetSystemOverview(period, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -42,9 +43,10 @@ func GetSystemOverview(c *gin.Context) {
 // GET /api/dashboard/usage
 func GetUsageStatistics(c *gin.Context) {
 	period := c.DefaultQuery("period", "24h")
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetUsageStatistics(period)
+	data, err := svc.GetUsageStatistics(period, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -56,9 +58,10 @@ func GetUsageStatistics(c *gin.Context) {
 func GetModelUsage(c *gin.Context) {
 	period := c.DefaultQuery("period", "7d")
 	limit := parseLimit(c, 10, 200)
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetModelUsage(period, limit)
+	data, err := svc.GetModelUsage(period, limit, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -70,9 +73,10 @@ func GetModelUsage(c *gin.Context) {
 func GetDailyTrends(c *gin.Context) {
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
 	days = clampInt(days, 1, 90)
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetDailyTrends(days)
+	data, err := svc.GetDailyTrends(days, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -84,9 +88,10 @@ func GetDailyTrends(c *gin.Context) {
 func GetHourlyTrends(c *gin.Context) {
 	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
 	hours = clampInt(hours, 1, 168)
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetHourlyTrends(hours)
+	data, err := svc.GetHourlyTrends(hours, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
@@ -98,9 +103,10 @@ func GetHourlyTrends(c *gin.Context) {
 func GetTopUsers(c *gin.Context) {
 	period := c.DefaultQuery("period", "7d")
 	limit := parseLimit(c, 10, 200)
+	noCache := c.Query("no_cache") == "true"
 	svc := service.NewDashboardService()
 
-	data, err := svc.GetTopUsers(period, limit)
+	data, err := svc.GetTopUsers(period, limit, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return
