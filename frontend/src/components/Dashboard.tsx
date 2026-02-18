@@ -701,24 +701,24 @@ export function Dashboard() {
           />
           <StatCard
             title="总 Token"
-            value={formatNumber((usage?.total_prompt_tokens || 0) + (usage?.total_completion_tokens || 0))}
-            rawValue={(usage?.total_prompt_tokens || 0) + (usage?.total_completion_tokens || 0)}
+            value={formatNumber(Number(usage?.total_prompt_tokens || 0) + Number(usage?.total_completion_tokens || 0))}
+            rawValue={Number(usage?.total_prompt_tokens || 0) + Number(usage?.total_completion_tokens || 0)}
             icon={Hash}
             color="purple"
             variant="compact"
           />
           <StatCard
             title="输入 Token"
-            value={formatNumber(usage?.total_prompt_tokens || 0)}
-            rawValue={usage?.total_prompt_tokens || 0}
+            value={formatNumber(Number(usage?.total_prompt_tokens || 0))}
+            rawValue={Number(usage?.total_prompt_tokens || 0)}
             icon={ArrowDownToLine}
             color="cyan"
             variant="compact"
           />
           <StatCard
             title="输出 Token"
-            value={formatNumber(usage?.total_completion_tokens || 0)}
-            rawValue={usage?.total_completion_tokens || 0}
+            value={formatNumber(Number(usage?.total_completion_tokens || 0))}
+            rawValue={Number(usage?.total_completion_tokens || 0)}
             icon={ArrowUpFromLine}
             color="teal"
             variant="compact"
