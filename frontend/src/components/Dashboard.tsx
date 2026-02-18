@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { TrendChart } from './TrendChart'
-import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database, Timer, ChevronDown } from 'lucide-react'
+import { Users, Key, Server, Box, Ticket, Zap, Crown, Loader2, RefreshCw, Activity, BarChart3, Clock, Database, Timer, ChevronDown, Hash, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { Button } from './ui/button'
 import { cn } from '../lib/utils'
@@ -104,6 +104,9 @@ export function Dashboard() {
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null)
   const [showIntervalDropdown, setShowIntervalDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Ref to always call the latest handleRefresh from timer
+  const handleRefreshRef = useRef<() => void>(() => {})
 
   // 大型系统刷新提示相关状态
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
@@ -366,6 +369,11 @@ export function Dashboard() {
     }
   }
 
+  // Keep ref in sync with latest handleRefresh
+  useEffect(() => {
+    handleRefreshRef.current = handleRefresh
+  })
+
   // 取消刷新确认
   const handleCancelRefresh = () => {
     setShowRefreshConfirm(false)
@@ -383,7 +391,7 @@ export function Dashboard() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // 自动刷新倒计时
+  // 自动刷新倒计时 - 使用 ref 避免过期闭包
   useEffect(() => {
     if (refreshInterval === 0) {
       setCountdown(0)
@@ -393,8 +401,8 @@ export function Dashboard() {
     const timer = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          // 触发刷新
-          handleRefresh()
+          // 通过 ref 调用最新的 handleRefresh，确保使用当前 period
+          handleRefreshRef.current()
           return refreshInterval
         }
         return prev - 1
@@ -674,7 +682,7 @@ export function Dashboard() {
           <Activity className="w-5 h-5 text-primary" />
           流量分析 ({getPeriodLabel()})
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <StatCard
             title="请求总数"
             value={formatNumber(usage?.total_requests || 0)}
@@ -692,22 +700,28 @@ export function Dashboard() {
             variant="compact"
           />
           <StatCard
-            title="输入Token"
-            value={formatNumber(usage?.total_prompt_tokens || 0)}
-            rawValue={usage?.total_prompt_tokens || 0}
-            icon={Users} // Reusing Users icon for visual consistency or change to another
-            color="cyan"
+            title="总 Token"
+            value={formatNumber((usage?.total_prompt_tokens || 0) + (usage?.total_completion_tokens || 0))}
+            rawValue={(usage?.total_prompt_tokens || 0) + (usage?.total_completion_tokens || 0)}
+            icon={Hash}
+            color="purple"
             variant="compact"
-            customLabel="输入"
           />
           <StatCard
-            title="输出Token"
+            title="输入 Token"
+            value={formatNumber(usage?.total_prompt_tokens || 0)}
+            rawValue={usage?.total_prompt_tokens || 0}
+            icon={ArrowDownToLine}
+            color="cyan"
+            variant="compact"
+          />
+          <StatCard
+            title="输出 Token"
             value={formatNumber(usage?.total_completion_tokens || 0)}
             rawValue={usage?.total_completion_tokens || 0}
-            icon={Users}
+            icon={ArrowUpFromLine}
             color="teal"
             variant="compact"
-            customLabel="输出"
           />
           <StatCard
             title="平均响应"

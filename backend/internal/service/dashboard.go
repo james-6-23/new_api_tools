@@ -247,7 +247,7 @@ func (s *DashboardService) GetDailyTrends(days int) ([]map[string]interface{}, e
 				COALESCE(SUM(quota), 0) as quota_used,
 				COUNT(DISTINCT user_id) as unique_users
 			FROM logs
-			WHERE created_at >= ? AND type IN (2, 5)
+			WHERE created_at >= ? AND type = 2
 			GROUP BY %s
 			ORDER BY date ASC`,
 			dateExpr, dateExpr))
@@ -284,7 +284,7 @@ func (s *DashboardService) GetHourlyTrends(hours int) ([]map[string]interface{},
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
-		WHERE created_at >= ? AND type IN (2, 5)
+		WHERE created_at >= ? AND type = 2
 		GROUP BY %s
 		ORDER BY hour ASC`,
 		hourExpr, hourExpr))
