@@ -16,9 +16,10 @@ interface TrendChartProps {
   data: DailyTrend[]
   period: string
   loading?: boolean
+  totalRequests?: number
 }
 
-export function TrendChart({ data, period, loading }: TrendChartProps) {
+export function TrendChart({ data, period, loading, totalRequests }: TrendChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 
   // 1. Data Processing
@@ -85,7 +86,7 @@ export function TrendChart({ data, period, loading }: TrendChartProps) {
           </div>
           <div className="text-right hidden sm:block">
              <div className="text-2xl font-bold text-primary">
-               {data.reduce((acc, curr) => acc + curr.request_count, 0).toLocaleString()}
+               {(totalRequests ?? data.reduce((acc, curr) => acc + Number(curr.request_count), 0)).toLocaleString()}
              </div>
              <div className="text-xs text-muted-foreground font-medium">请求总数</div>
           </div>

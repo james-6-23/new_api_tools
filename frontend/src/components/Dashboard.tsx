@@ -738,7 +738,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Daily Trends Chart */}
         <div className="flex flex-col h-full">
-          <TrendChart data={dailyTrends} period={period} loading={loading} />
+          <TrendChart data={dailyTrends} period={period} loading={loading} totalRequests={Number(usage?.total_requests || 0)} />
         </div>
 
         {/* Model Usage List */}
