@@ -1151,7 +1151,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
             items={sortedModelStatuses.map(m => m.model_name)}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div key={statusFilter} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {sortedModelStatuses.map(model => (
                 <SortableModelCard key={model.model_name} model={model} />
               ))}
