@@ -19,20 +19,21 @@ type RedemptionCode struct {
 	CreatedTime  int64  `json:"created_time" db:"created_time"`
 	RedeemedTime int64  `json:"redeemed_time" db:"redeemed_time"`
 	UsedUserID   int64  `json:"used_user_id" db:"used_user_id"`
+	UsedUsername string `json:"used_username" db:"used_username"`
 	ExpiredTime  int64  `json:"expired_time" db:"expired_time"`
 	Status       string `json:"status"` // "unused", "used", "expired"
 }
 
 // RedemptionStatistics holds aggregate statistics
 type RedemptionStatistics struct {
-	TotalCount   int64 `json:"total_count"`
-	UnusedCount  int64 `json:"unused_count"`
-	UsedCount    int64 `json:"used_count"`
-	ExpiredCount int64 `json:"expired_count"`
-	TotalQuota   int64 `json:"total_quota"`
-	UnusedQuota  int64 `json:"unused_quota"`
-	UsedQuota    int64 `json:"used_quota"`
-	ExpiredQuota int64 `json:"expired_quota"`
+	TotalCount   int64 `json:"total_count" db:"total_count"`
+	UnusedCount  int64 `json:"unused_count" db:"unused_count"`
+	UsedCount    int64 `json:"used_count" db:"used_count"`
+	ExpiredCount int64 `json:"expired_count" db:"expired_count"`
+	TotalQuota   int64 `json:"total_quota" db:"total_quota"`
+	UnusedQuota  int64 `json:"unused_quota" db:"unused_quota"`
+	UsedQuota    int64 `json:"used_quota" db:"used_quota"`
+	ExpiredQuota int64 `json:"expired_quota" db:"expired_quota"`
 }
 
 // GenerateParams holds parameters for code generation
@@ -201,13 +202,13 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	kc := keyCol(db.IsPG)
 	currentTime := time.Now().Unix()
 
-	// Build WHERE clause
-	where := []string{"deleted_at IS NULL"}
+	// Build WHERE clause (use r. prefix for JOIN query)
+	where := []string{"r.deleted_at IS NULL"}
 	args := []interface{}{}
 	argIdx := 1
 
 	if params.Name != "" {
-		where = append(where, fmt.Sprintf("name LIKE %s", db.Placeholder(argIdx)))
+		where = append(where, fmt.Sprintf("r.name LIKE %s", db.Placeholder(argIdx)))
 		args = append(args, "%"+params.Name+"%")
 		argIdx++
 	}
@@ -215,17 +216,17 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	if params.Status != "" {
 		switch params.Status {
 		case "used":
-			where = append(where, "(redeemed_time IS NOT NULL AND redeemed_time > 0)")
+			where = append(where, "(r.redeemed_time IS NOT NULL AND r.redeemed_time > 0)")
 		case "expired":
-			where = append(where, "(redeemed_time IS NULL OR redeemed_time = 0)")
-			where = append(where, "expired_time IS NOT NULL")
-			where = append(where, "expired_time > 0")
-			where = append(where, fmt.Sprintf("expired_time < %s", db.Placeholder(argIdx)))
+			where = append(where, "(r.redeemed_time IS NULL OR r.redeemed_time = 0)")
+			where = append(where, "r.expired_time IS NOT NULL")
+			where = append(where, "r.expired_time > 0")
+			where = append(where, fmt.Sprintf("r.expired_time < %s", db.Placeholder(argIdx)))
 			args = append(args, currentTime)
 			argIdx++
 		case "unused":
-			where = append(where, "(redeemed_time IS NULL OR redeemed_time = 0)")
-			where = append(where, fmt.Sprintf("(expired_time IS NULL OR expired_time = 0 OR expired_time >= %s)", db.Placeholder(argIdx)))
+			where = append(where, "(r.redeemed_time IS NULL OR r.redeemed_time = 0)")
+			where = append(where, fmt.Sprintf("(r.expired_time IS NULL OR r.expired_time = 0 OR r.expired_time >= %s)", db.Placeholder(argIdx)))
 			args = append(args, currentTime)
 			argIdx++
 		}
@@ -234,7 +235,7 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	if params.StartDate != "" {
 		ts, err := util.ParseDateToTimestampPublic(params.StartDate, false)
 		if err == nil {
-			where = append(where, fmt.Sprintf("created_time >= %s", db.Placeholder(argIdx)))
+			where = append(where, fmt.Sprintf("r.created_time >= %s", db.Placeholder(argIdx)))
 			args = append(args, ts)
 			argIdx++
 		}
@@ -243,7 +244,7 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	if params.EndDate != "" {
 		ts, err := util.ParseDateToTimestampPublic(params.EndDate, true)
 		if err == nil {
-			where = append(where, fmt.Sprintf("created_time <= %s", db.Placeholder(argIdx)))
+			where = append(where, fmt.Sprintf("r.created_time <= %s", db.Placeholder(argIdx)))
 			args = append(args, ts)
 			argIdx++
 		}
@@ -252,7 +253,7 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	whereSQL := strings.Join(where, " AND ")
 
 	// Count total
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM redemptions WHERE %s", whereSQL)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM redemptions r WHERE %s", whereSQL)
 	var total int64
 	if err := db.DB.Get(&total, countSQL, args...); err != nil {
 		return nil, fmt.Errorf("count query failed: %w", err)
@@ -264,8 +265,8 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	}
 	offset := (params.Page - 1) * params.PageSize
 
-	// Query items
-	selectSQL := fmt.Sprintf(`SELECT id, %s as "key", COALESCE(name,'') as name, COALESCE(quota,0) as quota, COALESCE(created_time,0) as created_time, COALESCE(redeemed_time,0) as redeemed_time, COALESCE(used_user_id,0) as used_user_id, COALESCE(expired_time,0) as expired_time FROM redemptions WHERE %s ORDER BY created_time DESC LIMIT %s OFFSET %s`,
+	// Query items with LEFT JOIN to get used username
+	selectSQL := fmt.Sprintf(`SELECT r.id, r.%s as "key", COALESCE(r.name,'') as name, COALESCE(r.quota,0) as quota, COALESCE(r.created_time,0) as created_time, COALESCE(r.redeemed_time,0) as redeemed_time, COALESCE(r.used_user_id,0) as used_user_id, COALESCE(u.username,'') as used_username, COALESCE(r.expired_time,0) as expired_time FROM redemptions r LEFT JOIN users u ON r.used_user_id = u.id AND r.used_user_id > 0 WHERE %s ORDER BY r.created_time DESC LIMIT %s OFFSET %s`,
 		kc, whereSQL, db.Placeholder(argIdx), db.Placeholder(argIdx+1))
 	args = append(args, params.PageSize, offset)
 

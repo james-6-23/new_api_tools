@@ -20,6 +20,7 @@ interface RedemptionCode {
   created_time: number
   redeemed_time: number
   used_user_id: number
+  used_username: string
   expired_time: number
   status: 'unused' | 'used' | 'expired'
 }
@@ -347,6 +348,7 @@ export function Redemptions() {
                     <TableHead>名称</TableHead>
                     <TableHead>额度 (USD)</TableHead>
                     <TableHead>状态</TableHead>
+                    <TableHead>使用用户</TableHead>
                     <TableHead>创建时间</TableHead>
                     <TableHead>过期时间</TableHead>
                     <TableHead className="w-16 text-right">操作</TableHead>
@@ -381,6 +383,9 @@ export function Redemptions() {
                         <Badge variant={code.status === 'unused' ? 'success' : code.status === 'used' ? 'secondary' : 'destructive'}>
                           {code.status === 'unused' ? '未使用' : code.status === 'used' ? '已使用' : '已过期'}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {code.used_username || (code.used_user_id > 0 ? `ID: ${code.used_user_id}` : '-')}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{formatTimestamp(code.created_time)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">

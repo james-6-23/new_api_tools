@@ -60,6 +60,7 @@ class RedemptionCodeResponse(BaseModel):
     created_time: int
     redeemed_time: int
     used_user_id: int
+    used_username: str = ""
     expired_time: int
     status: str
 
@@ -239,6 +240,7 @@ async def list_redemption_codes(
                         created_time=item.created_time,
                         redeemed_time=item.redeemed_time,
                         used_user_id=item.used_user_id,
+                        used_username=item.used_username,
                         expired_time=item.expired_time,
                         status=item.status.value,
                     )

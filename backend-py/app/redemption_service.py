@@ -34,18 +34,19 @@ class RedemptionCode:
     created_time: int
     redeemed_time: int
     used_user_id: int
+    used_username: str
     expired_time: int
     status: RedemptionStatus
-    
+
     @classmethod
     def from_db_row(cls, row: dict[str, Any]) -> "RedemptionCode":
         """Create RedemptionCode from database row."""
         current_time = int(time.time())
-        
+
         # Handle NULL values from database
         redeemed_time = row.get("redeemed_time") or 0
         expired_time = row.get("expired_time") or 0
-        
+
         # Determine status
         if redeemed_time > 0:
             status = RedemptionStatus.USED
@@ -53,7 +54,7 @@ class RedemptionCode:
             status = RedemptionStatus.EXPIRED
         else:
             status = RedemptionStatus.UNUSED
-        
+
         return cls(
             id=row["id"],
             key=row["key"],
@@ -62,6 +63,7 @@ class RedemptionCode:
             created_time=row.get("created_time") or 0,
             redeemed_time=redeemed_time,
             used_user_id=row.get("used_user_id") or 0,
+            used_username=row.get("used_username") or "",
             expired_time=expired_time,
             status=status,
         )
@@ -343,62 +345,64 @@ class RedemptionService:
         """
         params.validate()
         
-        # Build WHERE clause
-        where_clauses = ["deleted_at IS NULL"]
+        # Build WHERE clause (use r. prefix for JOIN query)
+        where_clauses = ["r.deleted_at IS NULL"]
         query_params: dict[str, Any] = {}
-        
+
         if params.name:
-            where_clauses.append("name LIKE :name")
+            where_clauses.append("r.name LIKE :name")
             query_params["name"] = f"%{params.name}%"
-        
+
         current_time = int(time.time())
-        
+
         if params.status:
             if params.status == RedemptionStatus.USED:
-                where_clauses.append("(redeemed_time IS NOT NULL AND redeemed_time > 0)")
+                where_clauses.append("(r.redeemed_time IS NOT NULL AND r.redeemed_time > 0)")
             elif params.status == RedemptionStatus.EXPIRED:
-                where_clauses.append("(redeemed_time IS NULL OR redeemed_time = 0)")
-                where_clauses.append("expired_time IS NOT NULL")
-                where_clauses.append("expired_time > 0")
-                where_clauses.append("expired_time < :current_time")
+                where_clauses.append("(r.redeemed_time IS NULL OR r.redeemed_time = 0)")
+                where_clauses.append("r.expired_time IS NOT NULL")
+                where_clauses.append("r.expired_time > 0")
+                where_clauses.append("r.expired_time < :current_time")
                 query_params["current_time"] = current_time
             elif params.status == RedemptionStatus.UNUSED:
-                where_clauses.append("(redeemed_time IS NULL OR redeemed_time = 0)")
-                where_clauses.append("(expired_time IS NULL OR expired_time = 0 OR expired_time >= :current_time)")
+                where_clauses.append("(r.redeemed_time IS NULL OR r.redeemed_time = 0)")
+                where_clauses.append("(r.expired_time IS NULL OR r.expired_time = 0 OR r.expired_time >= :current_time)")
                 query_params["current_time"] = current_time
-        
+
         if params.start_date:
             start_ts = self._parse_date_to_timestamp(params.start_date)
-            where_clauses.append("created_time >= :start_time")
+            where_clauses.append("r.created_time >= :start_time")
             query_params["start_time"] = start_ts
-        
+
         if params.end_date:
             end_ts = self._parse_date_to_timestamp(params.end_date, end_of_day=True)
-            where_clauses.append("created_time <= :end_time")
+            where_clauses.append("r.created_time <= :end_time")
             query_params["end_time"] = end_ts
-        
+
         where_sql = " AND ".join(where_clauses)
-        
+
         # Get total count
-        count_sql = f"SELECT COUNT(*) as total FROM redemptions WHERE {where_sql}"
+        count_sql = f"SELECT COUNT(*) as total FROM redemptions r WHERE {where_sql}"
         count_result = self.db.execute(count_sql, query_params)
         total = count_result[0]["total"] if count_result else 0
-        
+
         # Calculate pagination
         total_pages = max(1, (total + params.page_size - 1) // params.page_size)
         offset = (params.page - 1) * params.page_size
-        
-        # Get items
+
+        # Get items with LEFT JOIN to get used username
         select_sql = f"""
-            SELECT id, {self._key_col_alias}, name, quota, created_time, redeemed_time, used_user_id, expired_time
-            FROM redemptions
+            SELECT r.id, r.{self._key_col} as "key", r.name, r.quota, r.created_time,
+                   r.redeemed_time, r.used_user_id, COALESCE(u.username, '') as used_username, r.expired_time
+            FROM redemptions r
+            LEFT JOIN users u ON r.used_user_id = u.id AND r.used_user_id > 0
             WHERE {where_sql}
-            ORDER BY created_time DESC
+            ORDER BY r.created_time DESC
             LIMIT :limit OFFSET :offset
         """
         query_params["limit"] = params.page_size
         query_params["offset"] = offset
-        
+
         rows = self.db.execute(select_sql, query_params)
         items = [RedemptionCode.from_db_row(row) for row in rows]
         
