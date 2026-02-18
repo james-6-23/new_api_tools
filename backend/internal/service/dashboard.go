@@ -230,7 +230,8 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 			SELECT %s as date,
 				COALESCE(SUM(count), 0) as request_count,
 				COALESCE(SUM(quota), 0) as quota_used,
-				COUNT(DISTINCT user_id) as unique_users
+				COUNT(DISTINCT user_id) as unique_users,
+				MIN(created_at) as min_ts
 			FROM quota_data
 			WHERE created_at >= ?
 			GROUP BY %s
@@ -248,7 +249,8 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 			SELECT %s as date,
 				COUNT(*) as request_count,
 				COALESCE(SUM(quota), 0) as quota_used,
-				COUNT(DISTINCT user_id) as unique_users
+				COUNT(DISTINCT user_id) as unique_users,
+				MIN(created_at) as min_ts
 			FROM logs
 			WHERE created_at >= ? AND type = 2
 			GROUP BY %s
@@ -291,7 +293,8 @@ func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[strin
 	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT %s as hour,
 			COUNT(*) as request_count,
-			COALESCE(SUM(quota), 0) as quota_used
+			COALESCE(SUM(quota), 0) as quota_used,
+			MIN(created_at) as min_ts
 		FROM logs
 		WHERE created_at >= ? AND type = 2
 		GROUP BY %s
@@ -590,33 +593,39 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	}, nil
 }
 
-// fillDailyGaps ensures every day in the range has a row, adding timestamp field
+// fillDailyGaps ensures every day in the range has a row, using min_ts for
+// timezone-safe bucket matching instead of comparing formatted date strings.
 func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interface{} {
-	// Build lookup from date string -> row
-	lookup := make(map[string]map[string]interface{}, len(rows))
+	now := time.Now()
+	loc := now.Location()
+
+	// Build lookup keyed by local-date bucket (start-of-day unix timestamp)
+	lookup := make(map[int64]map[string]interface{}, len(rows))
 	for _, row := range rows {
-		if dateStr, ok := row["date"].(string); ok {
-			lookup[dateStr] = row
+		ts := toInt64(row["min_ts"])
+		if ts > 0 {
+			t := time.Unix(ts, 0).In(loc)
+			dayStart := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+			lookup[dayStart.Unix()] = row
 		}
 	}
 
-	now := time.Now()
-	loc := now.Location()
 	result := make([]map[string]interface{}, 0, days)
-
 	for i := days - 1; i >= 0; i-- {
 		day := now.AddDate(0, 0, -i)
-		dateStr := day.Format("2006-01-02")
-		// Timestamp at start of day
 		dayStart := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+		key := dayStart.Unix()
+		dateStr := dayStart.Format("2006-01-02")
 
-		if existing, ok := lookup[dateStr]; ok {
-			existing["timestamp"] = dayStart.Unix()
+		if existing, ok := lookup[key]; ok {
+			existing["timestamp"] = key
+			existing["date"] = dateStr // normalize to local timezone
+			delete(existing, "min_ts")
 			result = append(result, existing)
 		} else {
 			result = append(result, map[string]interface{}{
 				"date":          dateStr,
-				"timestamp":     dayStart.Unix(),
+				"timestamp":     key,
 				"request_count": int64(0),
 				"quota_used":    int64(0),
 				"unique_users":  int64(0),
@@ -626,32 +635,39 @@ func fillDailyGaps(rows []map[string]interface{}, days int) []map[string]interfa
 	return result
 }
 
-// fillHourlyGaps ensures every hour in the range has a row, adding timestamp field
+// fillHourlyGaps ensures every hour in the range has a row, using min_ts for
+// timezone-safe bucket matching instead of comparing formatted hour strings.
 func fillHourlyGaps(rows []map[string]interface{}, hours int) []map[string]interface{} {
-	// Build lookup from hour string -> row
-	lookup := make(map[string]map[string]interface{}, len(rows))
+	now := time.Now()
+	loc := now.Location()
+
+	// Build lookup keyed by local-hour bucket (start-of-hour unix timestamp)
+	lookup := make(map[int64]map[string]interface{}, len(rows))
 	for _, row := range rows {
-		if hourStr, ok := row["hour"].(string); ok {
-			lookup[hourStr] = row
+		ts := toInt64(row["min_ts"])
+		if ts > 0 {
+			t := time.Unix(ts, 0).In(loc)
+			hourStart := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
+			lookup[hourStart.Unix()] = row
 		}
 	}
 
-	now := time.Now()
-	loc := now.Location()
 	result := make([]map[string]interface{}, 0, hours)
-
 	for i := hours - 1; i >= 0; i-- {
 		t := now.Add(-time.Duration(i) * time.Hour)
 		hourStart := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
+		key := hourStart.Unix()
 		hourStr := hourStart.Format("2006-01-02 15:00")
 
-		if existing, ok := lookup[hourStr]; ok {
-			existing["timestamp"] = hourStart.Unix()
+		if existing, ok := lookup[key]; ok {
+			existing["timestamp"] = key
+			existing["hour"] = hourStr // normalize to local timezone
+			delete(existing, "min_ts")
 			result = append(result, existing)
 		} else {
 			result = append(result, map[string]interface{}{
 				"hour":          hourStr,
-				"timestamp":     hourStart.Unix(),
+				"timestamp":     key,
 				"request_count": int64(0),
 				"quota_used":    int64(0),
 			})
