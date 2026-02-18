@@ -259,6 +259,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([])
   const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const [timeWindow, setTimeWindow] = useState(() => {
@@ -505,6 +506,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     if (selectedModels.length === 0) {
       setModelStatuses([])
       setLoading(false)
+      // Only clear initialLoading when we know models have been loaded
+      if (availableModels.length > 0) {
+        setInitialLoading(false)
+      }
       return
     }
 
@@ -523,6 +528,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       const data = await response.json()
       if (data.success) {
         setModelStatuses(data.data)
+        setInitialLoading(false)
       }
     } catch (error) {
       console.error('Failed to fetch model statuses:', error)
@@ -653,6 +659,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       default:
         result = modelStatuses
     }
+
+    // Hide models with 0 requests
+    result = result.filter(m => m.total_requests > 0)
 
     // Apply status filter
     if (statusFilter !== 'all') {
@@ -1149,6 +1158,43 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
             </div>
           </SortableContext>
         </DndContext>
+      ) : initialLoading ? (
+        /* Skeleton cards during initial loading transition */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {[0, 1, 2, 3].map(i => (
+            <Card key={i} className="overflow-hidden">
+              <div className="px-4 pt-3 pb-3 animate-in fade-in-0 duration-500" style={{ animationDelay: `${i * 150}ms` }}>
+                <div className="flex items-center gap-2 mb-2.5">
+                  <div className="w-6 h-6 rounded-md bg-muted animate-pulse" />
+                  <div className="h-4 bg-muted animate-pulse rounded-md" style={{ width: `${120 + i * 30}px` }} />
+                  <div className="h-5 w-12 bg-muted animate-pulse rounded-full" />
+                  <div className="ml-auto flex items-center gap-1">
+                    <div className="h-4 w-10 bg-muted animate-pulse rounded-md" />
+                    <div className="h-4 w-14 bg-muted animate-pulse rounded-md" />
+                  </div>
+                </div>
+                <div className="flex gap-[3px]">
+                  {Array.from({ length: 24 }).map((_, j) => (
+                    <div
+                      key={j}
+                      className={cn(
+                        "flex-1 h-5 bg-muted animate-pulse",
+                        j === 0 ? "rounded-l-md rounded-r-sm" :
+                          j === 23 ? "rounded-r-md rounded-l-sm" : "rounded-sm"
+                      )}
+                      style={{ animationDelay: `${(i * 150) + (j * 20)}ms` }}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between mt-1.5">
+                  <div className="h-3 w-10 bg-muted animate-pulse rounded" />
+                  <div className="h-3 w-10 bg-muted animate-pulse rounded" />
+                  <div className="h-3 w-8 bg-muted animate-pulse rounded" />
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
       ) : (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
