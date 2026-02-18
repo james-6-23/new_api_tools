@@ -131,8 +131,8 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
 
         {/* Modern Navigation Tabs */}
         <div className="w-full border-t border-border/40">
-          <div className="w-full px-0">
-            <nav className="relative flex items-center w-full overflow-x-auto custom-scrollbar px-4 sm:px-6 lg:px-8 h-12" aria-label="Tabs">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <nav className="relative flex items-center w-full overflow-x-auto custom-scrollbar h-12" aria-label="Tabs">
               {/* Sliding Background Indicator */}
               <div
                 className="absolute inset-y-2 bg-secondary rounded-md transition-all duration-300 ease-out"
