@@ -34,10 +34,12 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 
 	windowsData := map[string]interface{}{}
 
-	// Validate sortBy to prevent SQL injection via column name
-	orderCol := "request_count"
+	// Validate sortBy to prevent SQL injection via ORDER BY expression
+	orderBy := "request_count DESC"
 	if sortBy == "quota" {
-		orderCol = "quota_used"
+		orderBy = "quota_used DESC"
+	} else if sortBy == "failure_rate" {
+		orderBy = "failure_rate DESC, request_count DESC"
 	}
 
 	for _, window := range windows {
@@ -45,35 +47,37 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 		if !ok {
 			continue
 		}
-		startTime := time.Now().Unix() - seconds
+		now := time.Now().Unix()
+		startTime := now - seconds
 
 		query := s.db.RebindQuery(fmt.Sprintf(`
-			SELECT l.user_id, COALESCE(u.username, '') as username,
+			SELECT l.user_id as user_id,
+				COALESCE(
+					NULLIF(MAX(u.display_name), ''),
+					NULLIF(MAX(u.username), ''),
+					NULLIF(MAX(l.username), '')
+				) as username,
+				COALESCE(MAX(u.status), 0) as user_status,
 				COUNT(*) as request_count,
+				SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_requests,
+				(SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) * 1.0) / NULLIF(COUNT(*), 0) as failure_rate,
 				COALESCE(SUM(l.quota), 0) as quota_used,
-				SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_count
+				COALESCE(SUM(l.prompt_tokens), 0) as prompt_tokens,
+				COALESCE(SUM(l.completion_tokens), 0) as completion_tokens,
+				COALESCE(COUNT(DISTINCT NULLIF(l.ip, '')), 0) as unique_ips
 			FROM logs l
-			LEFT JOIN users u ON l.user_id = u.id
-			WHERE l.created_at >= ? AND l.type IN (2, 5)
-			GROUP BY l.user_id, u.username
-			ORDER BY %s DESC
-			LIMIT ?`, orderCol))
+			LEFT JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
+			WHERE l.created_at >= ? AND l.created_at <= ?
+				AND l.type IN (2, 5)
+				AND l.user_id IS NOT NULL
+			GROUP BY l.user_id
+			ORDER BY %s
+			LIMIT ?`, orderBy))
 
-		rows, err := s.db.Query(query, startTime, limit)
+		rows, err := s.db.Query(query, startTime, now, limit)
 		if err != nil {
 			windowsData[window] = []map[string]interface{}{}
 			continue
-		}
-
-		// Calculate failure rate
-		for _, row := range rows {
-			total := toInt64(row["request_count"])
-			failures := toInt64(row["failure_count"])
-			if total > 0 {
-				row["failure_rate"] = float64(failures) / float64(total) * 100
-			} else {
-				row["failure_rate"] = 0.0
-			}
 		}
 
 		windowsData[window] = rows
@@ -272,8 +276,8 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		checkin.RequestsPerCheckin = math.Round(requestsPerCheckin*10) / 10
 
 		checkinAnalysisMap = map[string]interface{}{
-			"checkin_count":       checkin.CheckinCount,
-			"total_quota_awarded": checkin.TotalQuotaAwarded,
+			"checkin_count":        checkin.CheckinCount,
+			"total_quota_awarded":  checkin.TotalQuotaAwarded,
 			"requests_per_checkin": checkin.RequestsPerCheckin,
 		}
 
@@ -534,8 +538,8 @@ var (
 
 // checkinAnalysis holds checkin anomaly detection results
 type checkinAnalysis struct {
-	CheckinCount      int64   `json:"checkin_count"`
-	TotalQuotaAwarded int64   `json:"total_quota_awarded"`
+	CheckinCount       int64   `json:"checkin_count"`
+	TotalQuotaAwarded  int64   `json:"total_quota_awarded"`
 	RequestsPerCheckin float64 `json:"requests_per_checkin"`
 }
 
