@@ -151,7 +151,7 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 	selectQuery := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT t.id, t.%s as token_key, t.name, t.user_id,
 			COALESCE(u.username, '') as username,
-			t.status, t.quota, t.used_quota, t.remain_quota, t.unlimited_quota,
+			t.status, COALESCE(u.quota, 0) as quota, COALESCE(u.used_quota, 0) as used_quota, t.remain_quota, t.unlimited_quota,
 			COALESCE(t.models, '') as models,
 			COALESCE(t.subnet, '') as subnet,
 			t.%s as token_group,

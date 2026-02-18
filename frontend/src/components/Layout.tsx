@@ -131,11 +131,11 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
 
         {/* Modern Navigation Tabs */}
         <div className="w-full border-t border-border/40">
-          <div className="max-w-7xl mx-auto">
-            <nav className="relative flex items-center w-full overflow-x-auto no-scrollbar px-4 sm:px-6 lg:px-8 h-14" aria-label="Tabs">
+          <div className="w-full px-0">
+            <nav className="relative flex items-center w-full overflow-x-auto custom-scrollbar px-4 sm:px-6 lg:px-8 h-12" aria-label="Tabs">
               {/* Sliding Background Indicator */}
               <div
-                className="absolute inset-y-2.5 bg-secondary rounded-md transition-all duration-300 ease-out"
+                className="absolute inset-y-2 bg-secondary rounded-md transition-all duration-300 ease-out"
                 style={{
                   left: indicatorStyle.left,
                   width: indicatorStyle.width,
@@ -149,14 +149,14 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
                   ref={el => { tabsRef.current[index] = el }}
                   onClick={() => onTabChange(id)}
                   className={cn(
-                    "relative h-9 flex items-center justify-center gap-2 px-3 sm:px-4 text-sm font-medium rounded-md whitespace-nowrap transition-colors duration-200 z-10 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                    "relative h-8 flex items-center justify-center gap-1.5 px-2 sm:px-3 text-xs sm:text-sm font-medium rounded-md whitespace-nowrap transition-colors duration-200 z-10 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 shrink-0",
                     activeTab === id
                       ? "text-foreground"
                       : "text-muted-foreground hover:text-foreground/80"
                   )}
                 >
-                  <Icon className={cn("h-4 w-4 transition-transform duration-300", activeTab === id ? "scale-110" : "scale-100")} />
-                  <span className="hidden sm:inline">{label}</span>
+                  <Icon className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform duration-300 shrink-0", activeTab === id ? "scale-110" : "scale-100")} />
+                  <span>{label}</span>
                 </button>
               ))}
             </nav>
