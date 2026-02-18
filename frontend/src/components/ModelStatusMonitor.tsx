@@ -4,9 +4,9 @@ import { useToast } from './Toast'
 import { cn } from '../lib/utils'
 import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
-import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import {
@@ -974,9 +974,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
         >
           <SortableContext
             items={sortedModelStatuses.map(m => m.model_name)}
-            strategy={verticalListSortingStrategy}
+            strategy={rectSortingStrategy}
           >
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               {sortedModelStatuses.map(model => (
                 <SortableModelCard key={model.model_name} model={model} />
               ))}
@@ -1274,58 +1274,56 @@ function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
 
   const getTimeLabels = () => {
     switch (model.time_window) {
-      case '1h': return ['60分钟前', '30分钟前', '现在']
-      case '6h': return ['6小时前', '3小时前', '现在']
-      case '12h': return ['12小时前', '6小时前', '现在']
-      default: return ['24小时前', '12小时前', '现在']
+      case '1h': return ['60m前', '30m前', '现在']
+      case '6h': return ['6h前', '3h前', '现在']
+      case '12h': return ['12h前', '6h前', '现在']
+      default: return ['24h前', '12h前', '现在']
     }
   }
 
   const timeLabels = getTimeLabels()
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Drag Handle */}
-            {dragHandleProps && (
-              <div
-                {...dragHandleProps}
-                className="flex items-center justify-center w-6 h-6 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors"
-                title="拖拽排序"
-              >
-                <GripVertical className="h-4 w-4" />
-              </div>
-            )}
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-muted/50 flex-shrink-0">
-              <ModelLogo modelName={model.model_name} size={20} />
-            </div>
-            <CardTitle className="text-base font-medium truncate max-w-md" title={model.model_name}>
-              {model.model_name}
-            </CardTitle>
-            <Badge
-              variant={model.current_status === 'green' ? 'success' : model.current_status === 'yellow' ? 'warning' : 'destructive'}
+    <Card className="overflow-hidden">
+      <div className="px-4 pt-3 pb-3">
+        {/* Header row: drag handle + logo + name + badge + stats */}
+        <div className="flex items-center gap-2 mb-2.5">
+          {dragHandleProps && (
+            <div
+              {...dragHandleProps}
+              className="flex items-center justify-center w-5 h-5 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground transition-colors flex-shrink-0"
+              title="拖拽排序"
             >
-              {STATUS_LABELS[model.current_status]}
-            </Badge>
+              <GripVertical className="h-3.5 w-3.5" />
+            </div>
+          )}
+          <div className="flex items-center justify-center w-6 h-6 rounded-md bg-muted/50 flex-shrink-0">
+            <ModelLogo modelName={model.model_name} size={16} />
           </div>
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{model.success_rate}%</span> 成功率
-            <span className="mx-2">·</span>
-            <span>{model.total_requests.toLocaleString()}</span> 请求
+          <span className="text-sm font-medium truncate" title={model.model_name}>
+            {model.model_name}
+          </span>
+          <Badge
+            variant={model.current_status === 'green' ? 'success' : model.current_status === 'yellow' ? 'warning' : 'destructive'}
+            className="text-[10px] px-1.5 py-0 h-5 flex-shrink-0"
+          >
+            {STATUS_LABELS[model.current_status]}
+          </Badge>
+          <div className="ml-auto text-xs text-muted-foreground flex-shrink-0 tabular-nums">
+            <span className="font-medium text-foreground">{model.success_rate}%</span>
+            <span className="mx-1 text-muted-foreground/40">·</span>
+            <span>{model.total_requests.toLocaleString()}</span>
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        {/* Status grid */}
+
+        {/* Status grid - compact */}
         <div className="relative">
-          <div className="flex gap-1">
+          <div className="flex gap-[3px]">
             {model.slot_data.map((slot, index) => (
               <div
                 key={index}
                 className={cn(
-                  "flex-1 h-8 rounded cursor-pointer transition-all hover:ring-2 hover:ring-primary hover:ring-offset-1",
+                  "flex-1 h-5 rounded-sm cursor-pointer transition-all hover:ring-1.5 hover:ring-primary hover:ring-offset-1 hover:scale-y-110",
                   slot.total_requests === 0 ? STATUS_COLORS.empty : STATUS_COLORS[slot.status]
                 )}
                 onMouseEnter={(e) => handleMouseEnter(slot, e)}
@@ -1335,7 +1333,7 @@ function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
           </div>
 
           {/* Time labels */}
-          <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+          <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground/60">
             <span>{timeLabels[0]}</span>
             <span>{timeLabels[1]}</span>
             <span>{timeLabels[2]}</span>
@@ -1344,23 +1342,23 @@ function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
           {/* Tooltip */}
           {hoveredSlot && (
             <div
-              className="fixed z-[9999] bg-popover border rounded-lg shadow-lg p-3 text-sm pointer-events-none"
+              className="fixed z-[9999] bg-popover border rounded-lg shadow-lg p-2.5 text-xs pointer-events-none"
               style={{
                 left: tooltipPosition.x,
                 top: tooltipPosition.y,
                 transform: 'translate(-50%, -100%)',
               }}
             >
-              <div className="font-medium mb-2">
+              <div className="font-medium mb-1.5">
                 {formatDateTime(hoveredSlot.start_time)} - {formatTime(hoveredSlot.end_time)}
               </div>
-              <div className="space-y-1 text-muted-foreground">
+              <div className="space-y-0.5 text-muted-foreground">
                 <div className="flex justify-between gap-4">
-                  <span>总请求:</span>
+                  <span>请求:</span>
                   <span className="font-medium text-foreground">{hoveredSlot.total_requests}</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span>成功数:</span>
+                  <span>成功:</span>
                   <span className="font-medium text-green-600">{hoveredSlot.success_count}</span>
                 </div>
                 <div className="flex justify-between gap-4">
@@ -1377,7 +1375,7 @@ function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
             </div>
           )}
         </div>
-      </CardContent>
+      </div>
     </Card>
   )
 }

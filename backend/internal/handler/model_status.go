@@ -40,22 +40,12 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.PUT("/config/custom-order", SetCustomOrderConfig)
 	}
 
-	// Embed routes (also under /api/model-status/embed for frontend compatibility)
-	e := r.Group("/model-status/embed")
-	{
-		e.GET("/time-windows", GetTimeWindows)
-		e.GET("/models", GetAvailableModels)
-		e.GET("/status/:model_name", GetSingleModelStatus)
-		e.POST("/status/multiple", GetMultipleModelsStatusHandler)
-		e.POST("/status/batch", GetMultipleModelsStatusHandler)
-		e.GET("/status/all", GetAllModelsStatusHandler)
-		e.GET("/config", GetEmbedConfig)
-		e.GET("/config/selected", GetSelectedModels)
-	}
 }
 
-// RegisterModelStatusEmbedRoutes registers /api/embed/model-status endpoints (no auth)
+// RegisterModelStatusEmbedRoutes registers public embed endpoints (no auth)
+// Supports both /api/embed/model-status/... and /api/model-status/embed/... paths
 func RegisterModelStatusEmbedRoutes(r *gin.Engine) {
+	// Original embed path: /api/embed/model-status/...
 	g := r.Group("/api/embed/model-status")
 	{
 		g.GET("/time-windows", GetTimeWindows)
@@ -66,6 +56,19 @@ func RegisterModelStatusEmbedRoutes(r *gin.Engine) {
 		g.GET("/status/all", GetAllModelsStatusHandler)
 		g.GET("/config", GetEmbedConfig)
 		g.GET("/config/selected", GetSelectedModels)
+	}
+
+	// Compat embed path: /api/model-status/embed/... (used by embed.html frontend)
+	e := r.Group("/api/model-status/embed")
+	{
+		e.GET("/time-windows", GetTimeWindows)
+		e.GET("/models", GetAvailableModels)
+		e.GET("/status/:model_name", GetSingleModelStatus)
+		e.POST("/status/multiple", GetMultipleModelsStatusHandler)
+		e.POST("/status/batch", GetMultipleModelsStatusHandler)
+		e.GET("/status/all", GetAllModelsStatusHandler)
+		e.GET("/config", GetEmbedConfig)
+		e.GET("/config/selected", GetSelectedModels)
 	}
 }
 
