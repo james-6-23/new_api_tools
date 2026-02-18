@@ -17,6 +17,7 @@ import (
 	"github.com/new-api-tools/backend/internal/handler"
 	"github.com/new-api-tools/backend/internal/logger"
 	"github.com/new-api-tools/backend/internal/middleware"
+	"github.com/new-api-tools/backend/internal/service"
 )
 
 func main() {
@@ -109,7 +110,13 @@ func main() {
 	// Public embed routes (no auth)
 	handler.RegisterModelStatusEmbedRoutes(r)
 
-	// ========== 7. Start server with graceful shutdown ==========
+	// ========== 7. Background tasks ==========
+
+	// IP recording enforcement: check every 10 minutes, enable if any user disabled it
+	stopIPEnforce := make(chan struct{})
+	go backgroundEnforceIPRecording(stopIPEnforce)
+
+	// ========== 8. Start server with graceful shutdown ==========
 	srv := &http.Server{
 		Addr:         cfg.ServerAddr(),
 		Handler:      r,
@@ -126,12 +133,15 @@ func main() {
 		}
 	}()
 
-	// ========== 8. Wait for interrupt signal ==========
+	// ========== 9. Wait for interrupt signal ==========
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.L.System("正在优雅关闭服务...")
+
+	// Stop background tasks
+	close(stopIPEnforce)
 
 	// Give the server 10 seconds to finish processing requests
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -142,4 +152,87 @@ func main() {
 	}
 
 	logger.L.Success("服务已关闭")
+}
+
+// backgroundEnforceIPRecording periodically checks and enforces IP recording for all users.
+func backgroundEnforceIPRecording(stop <-chan struct{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.L.Error(fmt.Sprintf("[IP记录] 后台任务 panic: %v", r))
+		}
+	}()
+
+	// Wait 30 seconds after startup before first check
+	select {
+	case <-time.After(30 * time.Second):
+	case <-stop:
+		return
+	}
+
+	logger.L.System("[IP记录] 强制开启定时任务已启动 (间隔: 10分钟)")
+
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	// Run immediately on first tick, then every 10 minutes
+	for {
+		enforceIPRecordingOnce()
+
+		select {
+		case <-ticker.C:
+		case <-stop:
+			logger.L.System("[IP记录] 强制开启定时任务已停止")
+			return
+		}
+	}
+}
+
+func enforceIPRecordingOnce() {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.L.Error(fmt.Sprintf("[IP记录] 检查执行 panic: %v", r))
+		}
+	}()
+
+	svc := service.NewIPMonitoringService()
+
+	stats, err := svc.GetIPStats()
+	if err != nil {
+		logger.L.Warn("[IP记录] 获取状态失败: " + err.Error())
+		return
+	}
+
+	disabledCount := toInt64(stats["disabled_count"])
+	totalUsers := toInt64(stats["total_users"])
+
+	if disabledCount == 0 {
+		logger.L.Debug(fmt.Sprintf("[IP记录] 所有用户 (%d) 已开启 IP 记录，无需操作", totalUsers))
+		return
+	}
+
+	logger.L.System(fmt.Sprintf("[IP记录] 检测到 %d 个用户关闭了 IP 记录，正在强制开启...", disabledCount))
+
+	result, err := svc.EnableAllIPRecording()
+	if err != nil {
+		logger.L.Warn("[IP记录] 强制开启失败: " + err.Error())
+		return
+	}
+
+	logger.L.Success(fmt.Sprintf("[IP记录] %s", result["message"]))
+}
+
+func toInt64(v interface{}) int64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case int64:
+		return val
+	case int:
+		return int64(val)
+	case float64:
+		return int64(val)
+	default:
+		return 0
+	}
 }
