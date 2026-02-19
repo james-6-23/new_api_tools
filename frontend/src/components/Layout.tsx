@@ -96,23 +96,26 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Sticky Header Wrapper */}
-      <div className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
+      <div className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/60 backdrop-blur-xl supports-[backdrop-filter]:bg-background/40 shadow-sm dark:shadow-none transition-colors duration-300">
         <header className="w-full">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center py-3">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center text-primary shadow-inner">
                     <LayoutDashboard className="w-5 h-5" />
                   </div>
-                  <h1 className="text-lg sm:text-xl font-bold tracking-tight">
+                  <h1 className="text-lg sm:text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
                     NewAPI-Tool
                   </h1>
                 </div>
                 {dbStatus && (
-                  <Badge 
-                    variant={dbStatus.connected ? 'success' : 'destructive'} 
-                    className="hidden md:flex items-center gap-1.5 px-2 py-0.5 h-6"
+                  <Badge
+                    variant={dbStatus.connected ? 'success' : 'destructive'}
+                    className={cn(
+                      "hidden md:flex items-center gap-1.5 px-2 py-0.5 h-6 transition-all duration-300",
+                      dbStatus.connected ? "shadow-sm shadow-emerald-500/20" : ""
+                    )}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${dbStatus.connected ? 'bg-white animate-pulse' : 'bg-white/50'}`} />
                     {dbStatus.connected
@@ -121,7 +124,7 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
                   </Badge>
                 )}
               </div>
-              <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="sm" onClick={onLogout} className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
                 <LogOut className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">退出</span>
               </Button>
@@ -130,12 +133,12 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
         </header>
 
         {/* Modern Navigation Tabs */}
-        <div className="w-full border-t border-border/40">
+        <div className="w-full border-t border-border/40 bg-gradient-to-b from-transparent to-muted/10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <nav className="relative flex items-center w-full overflow-x-auto custom-scrollbar h-12" aria-label="Tabs">
               {/* Sliding Background Indicator */}
               <div
-                className="absolute inset-y-2 bg-secondary rounded-md transition-all duration-300 ease-out"
+                className="absolute inset-y-2 bg-secondary rounded-md shadow-sm border border-border/50 transition-all duration-300 ease-out"
                 style={{
                   left: indicatorStyle.left,
                   width: indicatorStyle.width,
@@ -151,11 +154,11 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
                   className={cn(
                     "relative h-8 flex items-center justify-center gap-1.5 px-2 sm:px-3 text-xs sm:text-sm font-medium rounded-md whitespace-nowrap transition-colors duration-200 z-10 select-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 shrink-0",
                     activeTab === id
-                      ? "text-foreground"
+                      ? "text-foreground drop-shadow-sm"
                       : "text-muted-foreground hover:text-foreground/80"
                   )}
                 >
-                  <Icon className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform duration-300 shrink-0", activeTab === id ? "scale-110" : "scale-100")} />
+                  <Icon className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform duration-300 shrink-0", activeTab === id ? "scale-110 text-primary" : "scale-100")} />
                   <span>{label}</span>
                 </button>
               ))}
@@ -165,7 +168,7 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
       </div>
 
       {/* Main Content with Fade In */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-500 slide-in-from-bottom-2">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-fade-in-up">
         {children}
       </main>
     </div>

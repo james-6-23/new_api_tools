@@ -29,7 +29,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [token, setToken] = useState<string | null>(() => {
     const savedToken = localStorage.getItem(TOKEN_KEY)
     const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY)
-    
+
     if (savedToken && expiry) {
       const expiryTime = parseInt(expiry, 10)
       if (Date.now() < expiryTime) {

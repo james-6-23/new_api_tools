@@ -82,8 +82,9 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
   }
 
   return (
-    <Card className="shadow-sm hover:shadow-md transition-all duration-300 border-border/50 flex flex-col h-full relative">
-      <CardHeader className="pb-0 shrink-0">
+    <Card className="glass-card shadow-sm hover:shadow-lg transition-all duration-300 border-border/50 flex flex-col h-full relative overflow-hidden">
+      <div className="absolute -left-20 -top-20 w-64 h-64 rounded-full opacity-10 bg-primary blur-3xl pointer-events-none" />
+      <CardHeader className="pb-0 shrink-0 relative z-10">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -97,10 +98,10 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
             </CardDescription>
           </div>
           <div className="text-right hidden sm:block">
-             <div className="text-2xl font-bold text-primary">
-               {(totalRequests ?? data.reduce((acc, curr) => acc + Number(curr.request_count), 0)).toLocaleString()}
-             </div>
-             <div className="text-xs text-muted-foreground font-medium">请求总数</div>
+            <div className="text-2xl font-bold text-primary">
+              {(totalRequests ?? data.reduce((acc, curr) => acc + Number(curr.request_count), 0)).toLocaleString()}
+            </div>
+            <div className="text-xs text-muted-foreground font-medium">请求总数</div>
           </div>
         </div>
       </CardHeader>
@@ -111,7 +112,7 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
             <div className="absolute inset-0 flex flex-col justify-between text-xs text-muted-foreground/30 pointer-events-none">
               {gridLines.reverse().map((val, i) => (
                 <div key={i} className="flex items-center w-full relative">
-                  <span className="absolute -left-8 w-7 text-right text-[10px]">{val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}</span>
+                  <span className="absolute -left-8 w-7 text-right text-[10px]">{val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val}</span>
                   <div className="w-full h-[1px] bg-border/40 border-dashed border-t border-muted-foreground/20"></div>
                 </div>
               ))}
@@ -120,21 +121,21 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
             {/* Chart Area */}
             <div className="absolute inset-0 ml-0 flex items-end justify-between gap-1.5 sm:gap-2 pl-2 z-10">
               {processedData.map((item, index) => {
-                 const total = processedData.length;
-                 // Label visibility: show fewer labels when there are many bars
-                 let showLabel: boolean
-                 if (isHourlyMode) {
-                   // Hourly: show every 3rd label to avoid overlap (24 bars)
-                   showLabel = index % 3 === 0 || index === total - 1
-                 } else if (total <= 7) {
-                   showLabel = true
-                 } else if (total <= 14) {
-                   showLabel = index % 2 === 0 || index === total - 1
-                 } else {
-                   showLabel = index % 3 === 0 || index === total - 1
-                 }
+                const total = processedData.length;
+                // Label visibility: show fewer labels when there are many bars
+                let showLabel: boolean
+                if (isHourlyMode) {
+                  // Hourly: show every 3rd label to avoid overlap (24 bars)
+                  showLabel = index % 3 === 0 || index === total - 1
+                } else if (total <= 7) {
+                  showLabel = true
+                } else if (total <= 14) {
+                  showLabel = index % 2 === 0 || index === total - 1
+                } else {
+                  showLabel = index % 3 === 0 || index === total - 1
+                }
 
-                 return (
+                return (
                   <div
                     key={index}
                     className="relative flex-1 h-full flex items-end justify-center group"
@@ -149,19 +150,19 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                       className="relative w-full flex items-end transition-all duration-500 ease-out z-10"
                       style={{ height: '100%' }}
                     >
-                       <div
-                          className={cn(
-                            "w-full rounded-t-sm transition-all duration-300 relative border-t border-x border-white/10",
-                            "bg-gradient-to-b from-primary to-primary/80 dark:from-primary/90 dark:to-primary/60",
-                            hoveredIndex === index
-                              ? "opacity-100 shadow-[0_0_15px_rgba(var(--primary),0.3)] brightness-110"
-                              : "opacity-85 hover:opacity-100"
-                          )}
-                          style={{
-                            height: `${Math.max(item.height, 1.5)}%`,
-                          }}
-                       >
-                       </div>
+                      <div
+                        className={cn(
+                          "w-full rounded-t-sm transition-all duration-300 relative border-t border-x border-white/10",
+                          "bg-gradient-to-b from-primary to-primary/80 dark:from-primary/90 dark:to-primary/60",
+                          hoveredIndex === index
+                            ? "opacity-100 shadow-[0_0_15px_rgba(var(--primary),0.3)] brightness-110"
+                            : "opacity-85 hover:opacity-100"
+                        )}
+                        style={{
+                          height: `${Math.max(item.height, 1.5)}%`,
+                        }}
+                      >
+                      </div>
                     </div>
 
                     {/* Tooltip */}
@@ -174,31 +175,31 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                           : "opacity-0 translate-y-2 scale-95 pointer-events-none"
                       )}
                     >
-                      <div className="bg-popover/95 backdrop-blur-sm text-popover-foreground text-xs rounded-lg shadow-xl border border-border p-3 min-w-[140px]">
-                         <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
-                            <Calendar className="w-3 h-3 text-muted-foreground" />
-                            {item.timestamp ? (
-                              isHourlyMode
-                                ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                                : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                            ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
-                         </div>
-                         <div className="space-y-1 mt-2">
+                      <div className="bg-popover/80 backdrop-blur-xl supports-[backdrop-filter]:bg-popover/60 text-popover-foreground text-xs rounded-lg shadow-xl border border-border/50 p-3 min-w-[140px]">
+                        <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
+                          <Calendar className="w-3 h-3 text-muted-foreground" />
+                          {item.timestamp ? (
+                            isHourlyMode
+                              ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                              : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+                          ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
+                        </div>
+                        <div className="space-y-1 mt-2">
+                          <div className="flex justify-between items-center gap-4">
+                            <span className="text-muted-foreground">请求数:</span>
+                            <span className="font-mono font-bold">{Number(item.request_count).toLocaleString()}</span>
+                          </div>
+                          {item.unique_users !== undefined && (
                             <div className="flex justify-between items-center gap-4">
-                               <span className="text-muted-foreground">请求数:</span>
-                               <span className="font-mono font-bold">{Number(item.request_count).toLocaleString()}</span>
+                              <span className="text-muted-foreground">用户数:</span>
+                              <span className="font-mono">{item.unique_users}</span>
                             </div>
-                            {item.unique_users !== undefined && (
-                              <div className="flex justify-between items-center gap-4">
-                                 <span className="text-muted-foreground">用户数:</span>
-                                 <span className="font-mono">{item.unique_users}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between items-center gap-4">
-                               <span className="text-muted-foreground">消耗:</span>
-                               <span className="font-mono">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
-                            </div>
-                         </div>
+                          )}
+                          <div className="flex justify-between items-center gap-4">
+                            <span className="text-muted-foreground">消耗:</span>
+                            <span className="font-mono">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
+                          </div>
+                        </div>
                       </div>
                       {/* Arrow */}
                       <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"></div>

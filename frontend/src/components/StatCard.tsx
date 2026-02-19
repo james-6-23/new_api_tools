@@ -34,23 +34,23 @@ export function StatCard({ title, value, subValue, icon: Icon, color, variant = 
   }
 
   const theme = colorMap[color] || colorMap.blue
-  
+
   // If onClick is provided, we want to treat this card as a button or interactive element
-  // But Card is a div. We can wrap content or just add onClick and cursor-pointer.
   const interactiveClass = onClick ? "cursor-pointer active:scale-95 transition-transform" : ""
 
   if (variant === 'compact') {
     return (
-      <Card 
-        className={cn("overflow-hidden hover:shadow-md transition-all duration-200 group border-l-4", theme.border, interactiveClass, className)} 
+      <Card
+        className={cn("glass-card overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group border-l-4", theme.border, interactiveClass, className)}
         onClick={onClick}
       >
-        <CardContent className="p-4 flex items-center justify-between">
-          <div className="space-y-1">
+        <CardContent className="p-4 flex items-center justify-between relative overflow-hidden">
+          <div className={cn("absolute -right-4 -top-4 w-16 h-16 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-300 blur-xl", theme.bg.split(' ')[0])} />
+          <div className="space-y-1 relative z-10">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{customLabel || title}</p>
-            <div className="text-xl font-bold tracking-tight">{value}</div>
+            <div className="text-xl font-bold tracking-tight text-foreground/90">{value}</div>
           </div>
-          <div className={cn("p-2 rounded-full", theme.bg)}>
+          <div className={cn("p-2 rounded-xl flex-shrink-0 transition-transform duration-300 group-hover:scale-110 shadow-sm relative z-10", theme.bg)}>
             <Icon className="w-4 h-4" />
           </div>
         </CardContent>
@@ -59,23 +59,24 @@ export function StatCard({ title, value, subValue, icon: Icon, color, variant = 
   }
 
   return (
-    <Card 
-      className={cn("overflow-hidden hover:shadow-md transition-all duration-200 group", interactiveClass, className)}
+    <Card
+      className={cn("glass-card overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group", interactiveClass, className)}
       onClick={onClick}
     >
-      <CardContent className="p-5">
-        <div className="flex justify-between items-start">
+      <CardContent className="p-5 relative overflow-hidden">
+        <div className={cn("absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-300 blur-2xl", theme.bg.split(' ')[0])} />
+        <div className="flex justify-between items-start relative z-10">
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="text-2xl font-bold tracking-tight">{value}</div>
+            <div className="text-2xl font-bold tracking-tight text-foreground/90">{value}</div>
           </div>
-          <div className={cn("p-2.5 rounded-xl transition-colors duration-200", theme.bg)}>
+          <div className={cn("p-3 rounded-2xl transition-all duration-300 group-hover:scale-110 shadow-sm", theme.bg)}>
             <Icon className="w-5 h-5" />
           </div>
         </div>
         {subValue && (
-          <div className="mt-4 flex items-center text-xs">
-            <span className={cn("font-medium px-2 py-0.5 rounded-full bg-secondary", theme.text)}>
+          <div className="mt-4 flex items-center text-xs relative z-10">
+            <span className={cn("font-medium px-2.5 py-1 rounded-full bg-secondary/80 backdrop-blur-sm border border-black/5 dark:border-white/5 shadow-sm", theme.text)}>
               {subValue}
             </span>
           </div>

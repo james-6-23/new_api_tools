@@ -848,18 +848,19 @@ function StatCard({ title, value, rawValue, subValue, icon: Icon, color, variant
     const valueStr = String(value)
     const fontSize = valueStr.length > 14 ? 'text-sm' : valueStr.length > 10 ? 'text-base' : valueStr.length > 7 ? 'text-lg' : 'text-xl'
     return (
-      <Card className={cn("overflow-hidden hover:shadow-md transition-all duration-200 group border-l-4", `border-l-${color}-500`)}>
-        <CardContent className="p-4 flex items-center justify-between">
-          <div className="space-y-1 min-w-0 flex-1 mr-2">
+      <Card className={cn("glass-card overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group border-l-4", `border-l-${color}-500`)}>
+        <CardContent className="p-4 flex items-center justify-between relative overflow-hidden">
+          <div className={cn("absolute -right-4 -top-4 w-16 h-16 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-300 blur-xl", theme.bg.split(' ')[0])} />
+          <div className="space-y-1 min-w-0 flex-1 mr-2 relative z-10">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{customLabel || title}</p>
             <div
-              className={cn(fontSize, "font-bold tracking-tight cursor-default tabular-nums")}
+              className={cn(fontSize, "font-bold tracking-tight cursor-default tabular-nums text-foreground/90")}
               title={rawValue !== undefined ? rawValue.toLocaleString('zh-CN') : undefined}
             >
               {value}
             </div>
           </div>
-          <div className={cn("p-2 rounded-full flex-shrink-0", theme.bg)}>
+          <div className={cn("p-2 rounded-xl flex-shrink-0 transition-transform duration-300 group-hover:scale-110 shadow-sm relative z-10", theme.bg)}>
             <Icon className="w-4 h-4" />
           </div>
         </CardContent>
@@ -868,20 +869,21 @@ function StatCard({ title, value, rawValue, subValue, icon: Icon, color, variant
   }
 
   return (
-    <Card className="overflow-hidden hover:shadow-md transition-all duration-200 group">
-      <CardContent className="p-5">
-        <div className="flex justify-between items-start">
+    <Card className="glass-card overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group">
+      <CardContent className="p-5 relative overflow-hidden">
+        <div className={cn("absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-300 blur-2xl", theme.bg.split(' ')[0])} />
+        <div className="flex justify-between items-start relative z-10">
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="text-2xl font-bold tracking-tight">{value.toLocaleString()}</div>
+            <div className="text-2xl font-bold tracking-tight text-foreground/90">{value.toLocaleString()}</div>
           </div>
-          <div className={cn("p-2.5 rounded-xl transition-colors duration-200", theme.bg)}>
+          <div className={cn("p-3 rounded-2xl transition-all duration-300 group-hover:scale-110 shadow-sm", theme.bg)}>
             <Icon className="w-5 h-5" />
           </div>
         </div>
         {subValue && (
-          <div className="mt-4 flex items-center text-xs">
-            <span className={cn("font-medium px-2 py-0.5 rounded-full bg-secondary", theme.text)}>
+          <div className="mt-4 flex items-center text-xs relative z-10">
+            <span className={cn("font-medium px-2.5 py-1 rounded-full bg-secondary/80 backdrop-blur-sm shadow-sm border border-black/5 dark:border-white/5", theme.text)}>
               {subValue}
             </span>
           </div>
@@ -904,9 +906,9 @@ interface KingCardProps {
 
 function KingCard({ title, subtitle, icon: Icon, user, valueLabel, value, gradient, accentColor }: KingCardProps) {
   return (
-    <div className={`bg-gradient-to-br ${gradient} rounded-xl shadow-lg p-6 text-white relative overflow-hidden group hover:shadow-xl transition-all duration-300`}>
+    <div className={`glass-card bg-gradient-to-br ${gradient} rounded-2xl shadow-lg p-6 text-white relative overflow-hidden group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-white/20`}>
       {/* Background Pattern */}
-      <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
+      <div className="absolute top-0 right-0 -mr-4 -mt-4 opacity-10 group-hover:opacity-20 group-hover:scale-110 transition-all duration-500">
         <Icon className="w-32 h-32 rotate-12" />
       </div>
 

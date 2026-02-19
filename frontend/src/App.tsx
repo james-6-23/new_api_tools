@@ -47,16 +47,16 @@ function App() {
             'Authorization': `Bearer ${token}`,
           },
         })
-        
+
         // 处理 401 未授权错误 - token 失效，需要重新登录
         if (response.status === 401) {
           console.warn('Token invalid or expired, logging out...')
           logout()
           return
         }
-        
+
         const data = await response.json()
-        
+
         if (data.success && data.data.status === 'ready') {
           // 后端已预热完成，直接进入
           setWarmupState('ready')

@@ -45,7 +45,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
             'Authorization': `Bearer ${token}`,
           },
         })
-        
+
         // 处理 401 未授权错误 - token 失效，需要重新登录
         if (response.status === 401) {
           console.warn('Token invalid or expired, logging out...')
@@ -54,14 +54,14 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
           }
           return
         }
-        
+
         const data = await response.json()
-        
+
         if (!mounted) return
-        
+
         if (data.success) {
           setStatus(data.data)
-          
+
           if (data.data.status === 'ready') {
             setIsExiting(true)
             setTimeout(() => {
@@ -108,12 +108,12 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
 
   return (
     <div className={cn(
-      "min-h-screen flex items-center justify-center bg-background/50 p-4 transition-opacity duration-500",
-      isExiting ? "opacity-0" : "opacity-100"
+      "min-h-screen flex items-center justify-center bg-background/30 backdrop-blur-md p-4 transition-all duration-500",
+      isExiting ? "opacity-0 scale-95" : "opacity-100 scale-100"
     )}>
-      <Card className="w-full max-w-lg border-border/50 shadow-2xl bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 overflow-hidden">
+      <Card className="w-full max-w-lg border-border/40 shadow-2xl shadow-primary/5 bg-card/80 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/50 overflow-hidden animate-fade-in-up">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20" />
-        
+
         <CardHeader className="text-center pb-6">
           <div className="mx-auto mb-4 p-4 rounded-full bg-primary/5 ring-1 ring-primary/10 w-fit transition-transform duration-700 ease-in-out hover:rotate-12">
             {error ? (
@@ -129,7 +129,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
             {error ? '初始化异常' : '系统初始化'}
           </CardTitle>
           <CardDescription className="text-base mt-1.5 h-6 font-medium text-foreground/80">
-             {error ? error : (status?.message || '正在建立安全连接...')}
+            {error ? error : (status?.message || '正在建立安全连接...')}
           </CardDescription>
         </CardHeader>
 
@@ -139,7 +139,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
               <p className="text-sm text-muted-foreground text-center">
                 初始化过程中遇到问题，这可能是由于网络波动或服务器配置错误导致的。
               </p>
-              <Button 
+              <Button
                 onClick={() => window.location.reload()}
                 className="gap-2"
               >
@@ -162,18 +162,18 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
               {status?.steps && status.steps.length > 0 && (
                 <div className="space-y-3">
                   {status.steps.map((step, index) => {
-                     const isDone = step.status === 'done';
-                     const isError = step.status === 'error';
-                     const isActive = index === activeStepIndex;
-                     const isPending = !isDone && !isError && !isActive;
+                    const isDone = step.status === 'done';
+                    const isError = step.status === 'error';
+                    const isActive = index === activeStepIndex;
+                    const isPending = !isDone && !isError && !isActive;
 
-                     return (
-                      <div 
+                    return (
+                      <div
                         key={index}
                         className={cn(
                           "flex items-center gap-4 p-3.5 rounded-xl border transition-all duration-300",
-                          isActive 
-                            ? "bg-primary/5 border-primary/20 shadow-sm translate-x-1" 
+                          isActive
+                            ? "bg-primary/5 border-primary/20 shadow-sm translate-x-1"
                             : "bg-transparent border-transparent",
                           isPending && "opacity-40"
                         )}
@@ -194,7 +194,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
                             Error
                           </span>
                         )}
-                         {isDone && (
+                        {isDone && (
                           <span className="text-xs font-medium text-green-500/80 flex items-center gap-1">
                             Ready
                           </span>
@@ -205,7 +205,7 @@ export function WarmupScreen({ onReady }: WarmupScreenProps) {
                           </span>
                         )}
                       </div>
-                     );
+                    );
                   })}
                 </div>
               )}
