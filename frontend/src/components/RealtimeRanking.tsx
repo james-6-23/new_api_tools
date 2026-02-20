@@ -1933,46 +1933,44 @@ export function RealtimeRanking() {
                             >
                               {/* 用户列 */}
                               <TableCell className="py-4 pl-6">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 flex items-center justify-center text-sm font-bold text-red-600 border border-red-100 dark:border-red-900/30 shadow-sm shrink-0">
+                                <div
+                                  className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-red-50 dark:hover:bg-red-900/10 transition-all cursor-pointer border border-transparent hover:border-red-200 dark:hover:border-red-800 w-[240px]"
+                                  onClick={() => {
+                                    const mockItem: LeaderboardItem = {
+                                      user_id: user.id,
+                                      username: user.username,
+                                      user_status: 2,
+                                      request_count: 0,
+                                      failure_requests: 0,
+                                      failure_rate: 0,
+                                      quota_used: 0,
+                                      prompt_tokens: 0,
+                                      completion_tokens: 0,
+                                      unique_ips: 0
+                                    }
+                                    // 传入封禁时间，查看封禁时刻的数据
+                                    openUserDialog(mockItem, '24h', user.banned_at || undefined)
+                                  }}
+                                  title={user.display_name && user.display_name !== user.username ? `${user.display_name} (${user.username})` : user.username}
+                                >
+                                  <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center border border-red-200 dark:border-red-800/50 text-sm font-bold text-red-600 dark:text-red-400 shrink-0">
                                     {(user.display_name || user.username)[0]?.toUpperCase()}
                                   </div>
-                                  <div className="flex flex-col min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span
-                                        className="text-sm font-bold text-foreground truncate max-w-[150px] cursor-pointer hover:underline decoration-primary/50 underline-offset-4 decoration-2 transition-all"
-                                        onClick={() => {
-                                          const mockItem: LeaderboardItem = {
-                                            user_id: user.id,
-                                            username: user.username,
-                                            user_status: 2,
-                                            request_count: 0,
-                                            failure_requests: 0,
-                                            failure_rate: 0,
-                                            quota_used: 0,
-                                            prompt_tokens: 0,
-                                            completion_tokens: 0,
-                                            unique_ips: 0
-                                          }
-                                          // 传入封禁时间，查看封禁时刻的数据
-                                          openUserDialog(mockItem, '24h', user.banned_at || undefined)
-                                        }}
-                                        title={user.display_name && user.display_name !== user.username ? `${user.display_name} (${user.username})` : user.username}
-                                      >
-                                        {user.display_name || user.username}
-                                      </span>
-                                      <Badge variant="secondary" className="text-[10px] h-4 px-1 font-mono text-muted-foreground bg-muted hover:bg-muted">
+                                  <div className="flex flex-col min-w-0 w-full">
+                                    <div className="flex items-center gap-1.5 w-full">
+                                      <span className="font-bold text-sm truncate">{user.display_name || user.username}</span>
+                                      <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[9px] font-mono text-muted-foreground bg-muted shrink-0 ml-auto appearance-none">
                                         #{user.id}
                                       </Badge>
                                     </div>
-                                    {user.display_name && user.display_name !== user.username && (
-                                      <span className="text-xs text-muted-foreground/70 truncate max-w-[180px]">
-                                        @{user.username}
+                                    <div className="flex items-center gap-1.5 mt-0.5 w-full">
+                                      {user.display_name && user.display_name !== user.username && (
+                                        <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">@{user.username}</span>
+                                      )}
+                                      <span className="text-[10px] text-muted-foreground truncate w-full">
+                                        {user.email || '无邮箱'}
                                       </span>
-                                    )}
-                                    <span className="text-xs text-muted-foreground truncate max-w-[180px]">
-                                      {user.email || '无邮箱'}
-                                    </span>
+                                    </div>
                                   </div>
                                 </div>
                               </TableCell>
@@ -2247,36 +2245,41 @@ export function RealtimeRanking() {
                               {/* 用户列 */}
                               <TableCell className="py-4">
                                 <div className="flex flex-col gap-2">
-                                  <div className="flex items-center gap-3">
+                                  <div
+                                    className={cn(
+                                      "flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 transition-all cursor-pointer border border-transparent w-[190px]",
+                                      r.action === 'ban' ? "hover:bg-red-50 hover:border-red-200 dark:hover:bg-red-900/10 dark:hover:border-red-800" : "hover:bg-green-50 hover:border-green-200 dark:hover:bg-green-900/10 dark:hover:border-green-800"
+                                    )}
+                                    onClick={() => {
+                                      const mockItem: LeaderboardItem = {
+                                        user_id: r.user_id,
+                                        username: r.username,
+                                        user_status: r.action === 'ban' ? 2 : 1,
+                                        request_count: 0,
+                                        failure_requests: 0,
+                                        failure_rate: 0,
+                                        quota_used: 0,
+                                        prompt_tokens: 0,
+                                        completion_tokens: 0,
+                                        unique_ips: 0
+                                      }
+                                      openUserDialog(mockItem, '24h')
+                                    }}
+                                  >
                                     <div className={cn(
-                                      "w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold border shadow-sm shrink-0",
-                                      r.action === 'ban' ? "bg-red-50 text-red-600 border-red-100" : "bg-green-50 text-green-600 border-green-100"
+                                      "w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border shrink-0",
+                                      r.action === 'ban' ? "bg-red-100 text-red-600 border-red-200 dark:bg-red-900/30 dark:border-red-800/50 dark:text-red-400" : "bg-green-100 text-green-600 border-green-200 dark:bg-green-900/30 dark:border-green-800/50 dark:text-green-400"
                                     )}>
                                       {(r.username || `U`)[0]?.toUpperCase()}
                                     </div>
-                                    <div className="flex flex-col min-w-0">
-                                      <span
-                                        className="text-sm font-bold text-foreground truncate max-w-[140px] hover:text-primary cursor-pointer transition-colors leading-tight"
-                                        onClick={() => {
-                                          const mockItem: LeaderboardItem = {
-                                            user_id: r.user_id,
-                                            username: r.username,
-                                            user_status: r.action === 'ban' ? 2 : 1,
-                                            request_count: 0,
-                                            failure_requests: 0,
-                                            failure_rate: 0,
-                                            quota_used: 0,
-                                            prompt_tokens: 0,
-                                            completion_tokens: 0,
-                                            unique_ips: 0
-                                          }
-                                          openUserDialog(mockItem, '24h')
-                                        }}
-                                      >
+                                    <div className="flex flex-col min-w-0 w-full">
+                                      <span className="font-bold text-sm truncate w-full hover:text-primary transition-colors leading-tight">
                                         {r.username || `User#${r.user_id}`}
                                       </span>
                                       <div className="flex items-center gap-1.5 mt-0.5">
-                                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono font-bold">ID: {r.user_id}</span>
+                                        <Badge variant="outline" className="px-1.5 py-0 h-4 text-[9px] font-medium leading-none shrink-0 border-muted-foreground/20">
+                                          ID: {r.user_id}
+                                        </Badge>
                                       </div>
                                     </div>
                                   </div>

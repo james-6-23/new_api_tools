@@ -622,46 +622,49 @@ export function UserManagement() {
   }
 
   const getActivityBadge = (level: string) => {
+    const baseClass = "w-[92px] justify-center"
     switch (level) {
       case 'active':
-        return <Badge variant="success">活跃</Badge>
+        return <Badge variant="success" className={baseClass}>活跃</Badge>
       case 'inactive':
-        return <Badge variant="warning">不活跃</Badge>
+        return <Badge variant="warning" className={baseClass}>不活跃</Badge>
       case 'very_inactive':
-        return <Badge variant="destructive">非常不活跃</Badge>
+        return <Badge variant="destructive" className={baseClass}>非常不活跃</Badge>
       case 'never':
-        return <Badge variant="secondary">从未请求</Badge>
+        return <Badge variant="secondary" className={baseClass}>从未请求</Badge>
       default:
-        return <Badge variant="outline">{level}</Badge>
+        return <Badge variant="outline" className={baseClass}>{level}</Badge>
     }
   }
 
   const getRoleBadge = (role: number) => {
+    const baseClass = "w-[92px] justify-center"
     switch (role) {
       case 1:
-        return <Badge variant="outline" className="text-muted-foreground font-normal border-muted-foreground/20">普通用户</Badge>
+        return <Badge variant="outline" className={cn(baseClass, "text-muted-foreground font-normal border-muted-foreground/20")}>普通用户</Badge>
       case 10:
-        return <Badge className="bg-blue-500 hover:bg-blue-600 border-none">管理员</Badge>
+        return <Badge className={cn(baseClass, "bg-blue-500 hover:bg-blue-600 border-none")}>管理员</Badge>
       case 100:
         return (
-          <Badge className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white border-none shadow-sm">
-            <ShieldCheck className="w-3 h-3 mr-1" />
+          <Badge className={cn(baseClass, "bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white border-none shadow-sm")}>
+            <ShieldCheck className="w-3 h-3 mr-1 shrink-0" />
             超级管理员
           </Badge>
         )
       default:
-        return <Badge variant="secondary">角色{role}</Badge>
+        return <Badge variant="secondary" className={baseClass}>角色{role}</Badge>
     }
   }
 
   const getStatusBadge = (status: number) => {
+    const baseClass = "w-[64px] justify-center"
     switch (status) {
       case 1:
-        return <Badge variant="success">正常</Badge>
+        return <Badge variant="success" className={baseClass}>正常</Badge>
       case 2:
-        return <Badge variant="destructive">禁用</Badge>
+        return <Badge variant="destructive" className={baseClass}>禁用</Badge>
       default:
-        return <Badge variant="outline">未知</Badge>
+        return <Badge variant="outline" className={baseClass}>未知</Badge>
     }
   }
 
@@ -985,18 +988,20 @@ export function UserManagement() {
                       <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{user.id}</TableCell>
                       <TableCell>
                         <div
-                          className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
+                          className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-primary/5 transition-all cursor-pointer border border-transparent hover:border-primary/20 w-[180px]"
                           onClick={() => openUserAnalysis(user.id, user.username)}
                           title="查看用户分析"
                         >
-                          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-sm text-primary font-bold shrink-0">
                             {user.username[0]?.toUpperCase()}
                           </div>
-                          <div className="flex flex-col leading-tight">
-                            <span className="font-bold text-sm whitespace-nowrap">{user.username}</span>
-                            {user.display_name && <span className="text-[10px] text-muted-foreground opacity-70">{user.display_name}</span>}
-                            <div className="mt-0.5">
-                              <Badge variant="outline" className="px-2 py-0 text-[10px] font-medium">
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-sm truncate w-full">{user.username}</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {user.display_name && (
+                                <span className="text-[10px] text-muted-foreground truncate max-w-[60px]">{user.display_name}</span>
+                              )}
+                              <Badge variant="outline" className="px-1.5 py-0 h-4 text-[9px] font-medium leading-none shrink-0 border-muted-foreground/20">
                                 {user.group || 'default'}
                               </Badge>
                             </div>
