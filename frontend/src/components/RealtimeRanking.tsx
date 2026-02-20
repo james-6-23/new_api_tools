@@ -1958,16 +1958,16 @@ export function RealtimeRanking() {
                                   </div>
                                   <div className="flex flex-col min-w-0 w-full">
                                     <div className="flex items-center gap-1.5 w-full">
-                                      <span className="font-bold text-sm truncate">{user.display_name || user.username}</span>
+                                      <span className="font-bold text-sm tracking-tight">{user.display_name || user.username}</span>
                                       <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[9px] font-mono text-muted-foreground bg-muted shrink-0 ml-auto appearance-none">
                                         #{user.id}
                                       </Badge>
                                     </div>
                                     <div className="flex items-center gap-1.5 mt-0.5 w-full">
                                       {user.display_name && user.display_name !== user.username && (
-                                        <span className="text-[10px] text-muted-foreground truncate max-w-[80px]">@{user.username}</span>
+                                        <span className="text-[10px] text-muted-foreground">@{user.username}</span>
                                       )}
-                                      <span className="text-[10px] text-muted-foreground truncate w-full">
+                                      <span className="text-[10px] text-muted-foreground w-full">
                                         {user.email || '无邮箱'}
                                       </span>
                                     </div>
@@ -2273,7 +2273,7 @@ export function RealtimeRanking() {
                                       {(r.username || `U`)[0]?.toUpperCase()}
                                     </div>
                                     <div className="flex flex-col min-w-0 w-full">
-                                      <span className="font-bold text-sm truncate w-full hover:text-primary transition-colors leading-tight">
+                                      <span className="font-bold text-sm w-full hover:text-primary transition-colors leading-tight tracking-tight">
                                         {r.username || `User#${r.user_id}`}
                                       </span>
                                       <div className="flex items-center gap-1.5 mt-0.5">

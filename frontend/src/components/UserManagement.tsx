@@ -638,7 +638,7 @@ export function UserManagement() {
   }
 
   const getRoleBadge = (role: number) => {
-    const baseClass = "w-[92px] justify-center"
+    const baseClass = "w-[92px] justify-center whitespace-nowrap"
     switch (role) {
       case 1:
         return <Badge variant="outline" className={cn(baseClass, "text-muted-foreground font-normal border-muted-foreground/20")}>普通用户</Badge>
@@ -988,7 +988,7 @@ export function UserManagement() {
                       <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{user.id}</TableCell>
                       <TableCell>
                         <div
-                          className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-primary/5 transition-all cursor-pointer border border-transparent hover:border-primary/20 w-[180px]"
+                          className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/30 hover:bg-primary/5 transition-all cursor-pointer border border-transparent hover:border-primary/20 w-max min-w-[180px]"
                           onClick={() => openUserAnalysis(user.id, user.username)}
                           title="查看用户分析"
                         >
@@ -996,10 +996,10 @@ export function UserManagement() {
                             {user.username[0]?.toUpperCase()}
                           </div>
                           <div className="flex flex-col min-w-0">
-                            <span className="font-bold text-sm truncate w-full">{user.username}</span>
+                            <span className="font-bold text-sm tracking-tight">{user.username}</span>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               {user.display_name && (
-                                <span className="text-[10px] text-muted-foreground truncate max-w-[60px]">{user.display_name}</span>
+                                <span className="text-[10px] text-muted-foreground">{user.display_name}</span>
                               )}
                               <Badge variant="outline" className="px-1.5 py-0 h-4 text-[9px] font-medium leading-none shrink-0 border-muted-foreground/20">
                                 {user.group || 'default'}
