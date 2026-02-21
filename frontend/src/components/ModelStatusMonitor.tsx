@@ -837,7 +837,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 </Button>
 
                 {showWindowDropdown && (
-                  <div className="absolute right-0 mt-1 w-36 bg-popover border rounded-md shadow-lg z-50">
+                  <div className="absolute right-0 mt-1 w-36 bg-popover border rounded-md shadow-lg z-40">
                     <div className="p-2 border-b">
                       <p className="text-xs text-muted-foreground">时间窗口</p>
                     </div>
@@ -877,7 +877,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 </Button>
 
                 {showThemeDropdown && (
-                  <div className="absolute right-0 mt-1 w-56 bg-popover border rounded-md shadow-lg z-50">
+                  <div className="absolute right-0 mt-1 w-56 bg-popover border rounded-md shadow-lg z-40">
                     <div className="p-2 border-b">
                       <p className="text-xs text-muted-foreground">嵌入页面主题</p>
                     </div>
@@ -927,7 +927,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 </Button>
 
                 {showModelSelector && (
-                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-50 max-h-96 overflow-hidden">
+                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-40 max-h-96 overflow-hidden">
                     <div className="p-2 border-b flex justify-between items-center">
                       <p className="text-xs text-muted-foreground">选择要监控的模型</p>
                       <div className="flex gap-1">
@@ -1029,7 +1029,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 </Button>
 
                 {showIntervalDropdown && (
-                  <div className="absolute right-0 mt-1 w-36 bg-popover border rounded-md shadow-lg z-50">
+                  <div className="absolute right-0 mt-1 w-36 bg-popover border rounded-md shadow-lg z-40">
                     <div className="p-2 border-b">
                       <p className="text-xs text-muted-foreground">刷新间隔</p>
                     </div>
