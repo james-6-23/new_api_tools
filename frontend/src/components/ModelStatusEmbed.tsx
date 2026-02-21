@@ -833,7 +833,7 @@ export function ModelStatusEmbed({
         }
         // Load theme from backend if not overridden by URL
         const urlParams = new URLSearchParams(window.location.search)
-        if (!urlParams.get('theme') && data.theme) {
+        if (!urlParams.get('theme') && data.theme && data.theme in themeStyles) {
           setTheme(data.theme)
         }
         return data.data || []
