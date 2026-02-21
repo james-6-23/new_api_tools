@@ -223,7 +223,7 @@ func SearchUserForAIWhitelist(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
 
-// POST /api/ai-ban/fetch-models (placeholder)
+// POST /api/ai-ban/models or /api/ai-ban/fetch-models
 func FetchAIModels(c *gin.Context) {
 	var req struct {
 		BaseURL      string `json:"base_url"`
@@ -231,14 +231,12 @@ func FetchAIModels(c *gin.Context) {
 		ForceRefresh bool   `json:"force_refresh"`
 	}
 	c.ShouldBindJSON(&req)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    []string{},
-		"message": "模型列表获取需要在运行时连接外部 API",
-	})
+	svc := service.NewAIAutoBanService()
+	result := svc.FetchModels(req.BaseURL, req.APIKey, req.ForceRefresh)
+	c.JSON(http.StatusOK, result)
 }
 
-// POST /api/ai-ban/test-model (placeholder)
+// POST /api/ai-ban/test-model
 func TestAIModel(c *gin.Context) {
 	var req struct {
 		BaseURL string `json:"base_url"`
@@ -246,8 +244,7 @@ func TestAIModel(c *gin.Context) {
 		Model   string `json:"model"`
 	}
 	c.ShouldBindJSON(&req)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "模型测试需要在运行时连接外部 API",
-	})
+	svc := service.NewAIAutoBanService()
+	result := svc.TestModel(req.BaseURL, req.APIKey, req.Model)
+	c.JSON(http.StatusOK, result)
 }

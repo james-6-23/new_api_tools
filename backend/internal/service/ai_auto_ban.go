@@ -1,8 +1,14 @@
 package service
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/cache"
@@ -234,6 +240,282 @@ func (s *AIAutoBanService) TestConnection() map[string]interface{} {
 	return map[string]interface{}{
 		"success": true,
 		"message": "连接测试需要在运行时执行",
+	}
+}
+
+// getEndpointURL builds the API URL, auto-appending /v1 if needed
+func getEndpointURL(baseURL, endpoint string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(base, "/v1") {
+		return base + endpoint
+	}
+	return base + "/v1" + endpoint
+}
+
+// FetchModels fetches available models from OpenAI-compatible /v1/models API with caching
+func (s *AIAutoBanService) FetchModels(baseURL, apiKey string, forceRefresh bool) map[string]interface{} {
+	config := s.GetConfig()
+
+	if baseURL == "" {
+		baseURL, _ = config["base_url"].(string)
+	}
+	base := strings.TrimRight(baseURL, "/")
+
+	if apiKey == "" {
+		apiKey, _ = config["api_key"].(string)
+	}
+	if apiKey == "" {
+		return map[string]interface{}{
+			"success": false,
+			"message": "API Key 未配置",
+			"models":  []interface{}{},
+		}
+	}
+
+	cm := cache.Get()
+	cacheKey := "ai_ban:models_cache"
+	cacheURLKey := "ai_ban:models_cache_url"
+
+	// Check if API URL changed
+	var cachedURL string
+	if found, _ := cm.GetJSON(cacheURLKey, &cachedURL); found && cachedURL != base {
+		forceRefresh = true
+	}
+
+	// Check cache (permanent, 30 days TTL)
+	if !forceRefresh {
+		var cached []map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found && len(cached) > 0 {
+			return map[string]interface{}{
+				"success": true,
+				"message": fmt.Sprintf("获取到 %d 个模型", len(cached)),
+				"models":  cached,
+			}
+		}
+	}
+
+	// Call external API
+	url := getEndpointURL(base, "/models")
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("创建请求失败: %s", err.Error()),
+			"models":  []interface{}{},
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		msg := "连接失败，请检查 API 地址"
+		if strings.Contains(err.Error(), "timeout") {
+			msg = "请求超时，请检查网络或 API 地址"
+		}
+		return map[string]interface{}{
+			"success": false,
+			"message": msg,
+			"models":  []interface{}{},
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("请求失败: %d", resp.StatusCode),
+			"models":  []interface{}{},
+		}
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("读取响应失败: %s", err.Error()),
+			"models":  []interface{}{},
+		}
+	}
+
+	var data struct {
+		Data []struct {
+			ID      string `json:"id"`
+			OwnedBy string `json:"owned_by"`
+			Created int64  `json:"created"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("解析响应失败: %s", err.Error()),
+			"models":  []interface{}{},
+		}
+	}
+
+	// Build model list
+	models := make([]map[string]interface{}, 0, len(data.Data))
+	for _, m := range data.Data {
+		if m.ID != "" {
+			models = append(models, map[string]interface{}{
+				"id":       m.ID,
+				"owned_by": m.OwnedBy,
+				"created":  m.Created,
+			})
+		}
+	}
+
+	// Sort by model ID
+	sort.Slice(models, func(i, j int) bool {
+		return models[i]["id"].(string) < models[j]["id"].(string)
+	})
+
+	// Cache permanently (30 days TTL)
+	cacheTTL := 30 * 24 * time.Hour
+	cm.Set(cacheKey, models, cacheTTL)
+	cm.Set(cacheURLKey, base, cacheTTL)
+
+	return map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("获取到 %d 个模型", len(models)),
+		"models":  models,
+	}
+}
+
+// TestModel tests if a specific model is available by sending a chat completion request
+func (s *AIAutoBanService) TestModel(baseURL, apiKey, model string) map[string]interface{} {
+	config := s.GetConfig()
+
+	if baseURL == "" {
+		baseURL, _ = config["base_url"].(string)
+	}
+	base := strings.TrimRight(baseURL, "/")
+
+	if apiKey == "" {
+		apiKey, _ = config["api_key"].(string)
+	}
+	if apiKey == "" {
+		return map[string]interface{}{
+			"success": false,
+			"message": "API Key 未配置",
+		}
+	}
+
+	testMessage := "你好，这是一条 API 连接测试消息，请简短回复确认连接正常。"
+
+	payload := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": testMessage},
+		},
+		"max_tokens": 100,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("序列化请求失败: %s", err.Error()),
+		}
+	}
+
+	url := getEndpointURL(base, "/chat/completions")
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("创建请求失败: %s", err.Error()),
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	startTime := time.Now()
+	resp, err := client.Do(req)
+	elapsed := time.Since(startTime)
+
+	if err != nil {
+		msg := "连接失败，请检查 API 地址"
+		if strings.Contains(err.Error(), "timeout") {
+			msg = "请求超时"
+		}
+		return map[string]interface{}{
+			"success": false,
+			"message": msg,
+		}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("读取响应失败: %s", err.Error()),
+		}
+	}
+
+	if resp.StatusCode != 200 {
+		// Try to extract error detail
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		errorDetail := string(body)
+		if len(errorDetail) > 200 {
+			errorDetail = errorDetail[:200]
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error.Message != "" {
+			errorDetail = errResp.Error.Message
+		}
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("请求失败 (%d): %s", resp.StatusCode, errorDetail),
+		}
+	}
+
+	var chatResp struct {
+		Model   string `json:"model"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"message": fmt.Sprintf("解析响应失败: %s", err.Error()),
+		}
+	}
+
+	content := ""
+	if len(chatResp.Choices) > 0 {
+		content = chatResp.Choices[0].Message.Content
+	}
+	actualModel := chatResp.Model
+	if actualModel == "" {
+		actualModel = model
+	}
+
+	return map[string]interface{}{
+		"success":      true,
+		"message":      "连接成功",
+		"model":        actualModel,
+		"test_message": testMessage,
+		"response":     content,
+		"latency_ms":   elapsed.Milliseconds(),
+		"usage": map[string]int{
+			"prompt_tokens":     chatResp.Usage.PromptTokens,
+			"completion_tokens": chatResp.Usage.CompletionTokens,
+		},
 	}
 }
 
