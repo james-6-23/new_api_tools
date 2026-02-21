@@ -40,24 +40,57 @@ var defaultAIBanConfig = map[string]interface{}{
 	"excluded_groups":       []string{},
 }
 
-// GetConfig returns AI auto ban configuration
+// GetConfig returns AI auto ban configuration with computed fields
 func (s *AIAutoBanService) GetConfig() map[string]interface{} {
 	cm := cache.Get()
 	var config map[string]interface{}
 	found, _ := cm.GetJSON("ai_ban:config", &config)
-	if found {
-		return config
+	if !found {
+		config = make(map[string]interface{})
+		for k, v := range defaultAIBanConfig {
+			config[k] = v
+		}
 	}
-	return defaultAIBanConfig
+
+	// Compute has_api_key and masked_api_key (matching Python backend behavior)
+	apiKey, _ := config["api_key"].(string)
+	config["has_api_key"] = apiKey != ""
+
+	maskedKey := ""
+	if apiKey != "" {
+		if len(apiKey) > 8 {
+			maskedKey = apiKey[:4] + strings.Repeat("*", len(apiKey)-8) + apiKey[len(apiKey)-4:]
+		} else {
+			maskedKey = strings.Repeat("*", len(apiKey))
+		}
+	}
+	config["masked_api_key"] = maskedKey
+
+	return config
 }
 
 // SaveConfig saves AI auto ban configuration
 func (s *AIAutoBanService) SaveConfig(updates map[string]interface{}) error {
-	config := s.GetConfig()
+	cm := cache.Get()
+	// Read raw config from Redis (not via GetConfig which adds computed fields)
+	var config map[string]interface{}
+	found, _ := cm.GetJSON("ai_ban:config", &config)
+	if !found {
+		config = make(map[string]interface{})
+		for k, v := range defaultAIBanConfig {
+			config[k] = v
+		}
+	}
+
+	// Apply updates
 	for k, v := range updates {
 		config[k] = v
 	}
-	cm := cache.Get()
+
+	// Strip computed fields before saving (they are re-computed in GetConfig)
+	delete(config, "has_api_key")
+	delete(config, "masked_api_key")
+
 	cm.Set("ai_ban:config", config, 0)
 	return nil
 }
