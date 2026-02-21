@@ -32,7 +32,8 @@ func RegisterAIAutoBanRoutes(r *gin.RouterGroup) {
 		g.POST("/whitelist/remove", RemoveFromAIBanWhitelist)
 		g.GET("/whitelist/search", SearchUserForAIWhitelist)
 		// Model fetching / testing
-		g.POST("/fetch-models", FetchAIModels)
+		g.POST("/models", FetchAIModels)       // 前端实际调用的路径
+		g.POST("/fetch-models", FetchAIModels) // 保持向后兼容
 		g.POST("/test-model", TestAIModel)
 	}
 }

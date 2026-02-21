@@ -803,7 +803,7 @@ export function ModelStatusEmbed({
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 })
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
-  const styles = themeStyles[theme]
+  const styles = themeStyles[theme] || themeStyles.daylight
 
   // Parse URL params for theme override
   useEffect(() => {
@@ -834,7 +834,9 @@ export function ModelStatusEmbed({
         // Load theme from backend if not overridden by URL
         const urlParams = new URLSearchParams(window.location.search)
         if (!urlParams.get('theme') && data.theme) {
-          setTheme(data.theme)
+          // Validate theme exists in themeStyles, fallback to daylight for legacy values
+          const validTheme = THEMES.find(t => t.id === data.theme) ? data.theme : 'daylight'
+          setTheme(validTheme as ThemeId)
         }
         return data.data || []
       }

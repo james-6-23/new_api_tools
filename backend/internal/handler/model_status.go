@@ -240,9 +240,14 @@ func SetThemeConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid request", err.Error()))
 		return
 	}
+	// Map legacy theme names to valid ones
+	theme := req.Theme
+	if mapped, ok := service.LegacyThemeMap[theme]; ok {
+		theme = mapped
+	}
 	valid := false
 	for _, t := range service.AvailableThemes {
-		if t == req.Theme {
+		if t == theme {
 			valid = true
 			break
 		}
@@ -252,10 +257,10 @@ func SetThemeConfig(c *gin.Context) {
 		return
 	}
 	svc := service.NewModelStatusService()
-	svc.SetTheme(req.Theme)
+	svc.SetTheme(theme)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"theme":   req.Theme,
+		"theme":   theme,
 		"message": "Theme updated",
 	})
 }

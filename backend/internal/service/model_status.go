@@ -13,12 +13,17 @@ import (
 var (
 	AvailableTimeWindows = []string{"1h", "6h", "12h", "24h"}
 	DefaultTimeWindow    = "24h"
-	AvailableThemes      = []string{
+	AvailableThemes = []string{
 		"daylight", "obsidian", "minimal", "neon", "forest", "ocean", "terminal",
 		"cupertino", "material", "openai", "anthropic", "vercel", "linear",
 		"stripe", "github", "discord", "tesla",
-		// Legacy compatibility
-		"light", "dark", "system",
+	}
+	DefaultTheme = "daylight"
+	// LegacyThemeMap maps old theme names to valid ones
+	LegacyThemeMap = map[string]string{
+		"light":  "daylight",
+		"dark":   "obsidian",
+		"system": "daylight",
 	}
 	AvailableRefreshIntervals = []int{0, 30, 60, 120, 300}
 	AvailableSortModes        = []string{"default", "availability", "custom"}
@@ -270,7 +275,11 @@ func (s *ModelStatusService) GetConfig() map[string]interface{} {
 	var theme string
 	found, _ = cm.GetJSON("model_status:theme", &theme)
 	if !found {
-		theme = "system"
+		theme = DefaultTheme
+	}
+	// Map legacy theme names to valid ones
+	if mapped, ok := LegacyThemeMap[theme]; ok {
+		theme = mapped
 	}
 
 	var refreshInterval int

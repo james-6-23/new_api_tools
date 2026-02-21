@@ -269,7 +269,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
 
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem(THEME_KEY)
-    return saved || 'daylight'
+    // Validate saved theme exists, fallback for legacy values (light/dark/system)
+    if (saved && THEMES.find(t => t.id === saved)) return saved
+    return 'daylight'
   })
 
   const [refreshInterval, setRefreshInterval] = useState(() => {
@@ -432,8 +434,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           localStorage.setItem(TIME_WINDOW_KEY, data.time_window)
         }
         if (data.theme) {
-          setTheme(data.theme)
-          localStorage.setItem(THEME_KEY, data.theme)
+          // Validate theme exists, fallback to daylight for legacy values (light/dark/system)
+          const validTheme = THEMES.find(t => t.id === data.theme) ? data.theme : 'daylight'
+          setTheme(validTheme)
+          localStorage.setItem(THEME_KEY, validTheme)
         }
         if (data.refresh_interval !== undefined && data.refresh_interval !== null) {
           setRefreshInterval(data.refresh_interval)

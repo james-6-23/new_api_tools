@@ -24,6 +24,8 @@ CUSTOM_ORDER_CACHE_KEY = "model_status:custom_order"
 # Available themes
 AVAILABLE_THEMES = ["daylight", "obsidian", "minimal", "neon", "forest", "ocean", "terminal", "cupertino", "material", "openai", "anthropic", "vercel", "linear", "stripe", "github", "discord", "tesla"]
 DEFAULT_THEME = "daylight"
+# Legacy theme mapping for backwards compatibility
+LEGACY_THEME_MAP = {"light": "daylight", "dark": "obsidian", "system": "daylight"}
 
 # Available refresh intervals (in seconds)
 AVAILABLE_REFRESH_INTERVALS = [0, 30, 60, 120, 300]  # 0 = disabled
@@ -447,31 +449,37 @@ def _get_theme_from_cache() -> str:
     from .cache_manager import get_cache_manager
 
     cache = get_cache_manager()
+    theme = None
 
     # Try Redis first
     if cache._redis_available and cache._redis:
         try:
             data = cache._redis.get(THEME_CACHE_KEY)
             if data:
-                return data.decode() if isinstance(data, bytes) else data
+                theme = data.decode() if isinstance(data, bytes) else data
         except Exception as e:
             logger.warn(f"Failed to get theme from Redis: {e}")
 
     # Fallback to SQLite
-    try:
-        with cache._get_sqlite() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT data FROM generic_cache WHERE key = ?",
-                (THEME_CACHE_KEY,)
-            )
-            row = cursor.fetchone()
-            if row:
-                return row[0]
-    except Exception as e:
-        logger.warn(f"Failed to get theme from SQLite: {e}")
+    if theme is None:
+        try:
+            with cache._get_sqlite() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT data FROM generic_cache WHERE key = ?",
+                    (THEME_CACHE_KEY,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    theme = row[0]
+        except Exception as e:
+            logger.warn(f"Failed to get theme from SQLite: {e}")
 
-    return DEFAULT_THEME
+    if theme is None:
+        return DEFAULT_THEME
+
+    # Map legacy theme names to valid ones
+    return LEGACY_THEME_MAP.get(theme, theme)
 
 
 def _set_theme_to_cache(theme: str) -> bool:
@@ -899,25 +907,27 @@ async def set_theme_config(
     """
     Update the theme setting for embed page.
     """
-    if request.theme not in AVAILABLE_THEMES:
+    # Map legacy theme names to valid ones
+    theme = LEGACY_THEME_MAP.get(request.theme, request.theme)
+    if theme not in AVAILABLE_THEMES:
         return ThemeResponse(
             success=False,
             theme=_get_theme_from_cache(),
             message=f"无效的主题: {request.theme}",
         )
 
-    success = _set_theme_to_cache(request.theme)
+    success = _set_theme_to_cache(theme)
 
     if success:
         return ThemeResponse(
             success=True,
-            theme=request.theme,
-            message=f"已保存主题: {request.theme}",
+            theme=theme,
+            message=f"已保存主题: {theme}",
         )
     else:
         return ThemeResponse(
             success=False,
-            theme=request.theme,
+            theme=theme,
             message="保存配置失败",
         )
 
