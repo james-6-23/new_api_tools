@@ -81,7 +81,11 @@ export function TopUps() {
       try {
         const response = await fetch(`${apiUrl}/api/top-ups/payment-methods`, { headers: getAuthHeaders() })
         const data = await response.json()
-        if (data.success) setPaymentMethods(data.data)
+        if (data.success) {
+          setPaymentMethods(Array.isArray(data.data) ? data.data : [])
+        } else {
+          setPaymentMethods([])
+        }
       } catch (error) { console.error('Failed to fetch payment methods:', error) }
     }
     fetchPaymentMethods()
@@ -115,9 +119,9 @@ export function TopUps() {
       const data = await response.json()
       if (data.success) {
         const result: PaginatedResponse = data.data
-        setRecords(result.items)
-        setTotal(result.total)
-        setTotalPages(result.total_pages)
+        setRecords(Array.isArray(result?.items) ? result.items : [])
+        setTotal(typeof result?.total === 'number' ? result.total : 0)
+        setTotalPages(typeof result?.total_pages === 'number' ? result.total_pages : 1)
       } else { showToast('error', data.error?.message || '获取充值记录失败') }
     } catch (error) {
       showToast('error', '网络错误，请重试')

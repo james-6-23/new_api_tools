@@ -256,6 +256,9 @@ func GetPaymentMethods() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if methods == nil {
+		methods = []string{}
+	}
 	return methods, nil
 }
 
