@@ -165,6 +165,8 @@ func GetSelectedModels(c *gin.Context) {
 		"refresh_interval": config["refresh_interval"],
 		"sort_mode":        config["sort_mode"],
 		"custom_order":     config["custom_order"],
+		"custom_groups":    config["custom_groups"],
+		"site_title":       config["site_title"],
 	})
 }
 

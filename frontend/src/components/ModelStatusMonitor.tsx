@@ -925,7 +925,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                       <Layers className="h-4.5 w-4.5 text-primary" />
                     </div>
-                    <h2 className="text-xl font-semibold tracking-tight">模型状态监控</h2>
+                    <h2 className="text-xl font-semibold tracking-tight whitespace-nowrap">模型状态监控</h2>
                   </div>
                   <Badge variant="outline" className="font-normal">{TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'} 滑动窗口</Badge>
                 </div>
@@ -1269,11 +1269,11 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                   站点标题
                 </Button>
                 {showSiteTitleInput && (
-                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-40 p-3">
+                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-50 p-3">
                     <p className="text-xs text-muted-foreground mb-2">嵌入页面显示的标题（留空使用默认）</p>
                     <input
                       type="text"
-                      placeholder="例如：星辰AI-模型状态监控"
+                      placeholder="例如：OpenAI-模型状态监控"
                       value={siteTitle}
                       onChange={(e) => setSiteTitle(e.target.value)}
                       onBlur={() => saveSiteTitleToBackend(siteTitle)}
