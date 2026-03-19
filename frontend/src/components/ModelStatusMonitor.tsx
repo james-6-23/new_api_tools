@@ -336,6 +336,8 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   })
   const [customGroups, setCustomGroups] = useState<CustomModelGroup[]>([])
   const [showGroupManager, setShowGroupManager] = useState(false)
+  const [siteTitle, setSiteTitle] = useState('')
+  const [showSiteTitleInput, setShowSiteTitleInput] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const modelSelectorRef = useRef<HTMLDivElement>(null)
   const intervalDropdownRef = useRef<HTMLDivElement>(null)
@@ -494,6 +496,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
         // Load custom groups from backend
         if (data.custom_groups && Array.isArray(data.custom_groups)) {
           setCustomGroups(data.custom_groups as CustomModelGroup[])
+        }
+        // Load site title
+        if (data.site_title !== undefined) {
+          setSiteTitle(data.site_title || '')
         }
         return data.data || []
       }
@@ -720,6 +726,27 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       console.error('Failed to save custom groups:', error)
     }
   }, [apiUrl, getAuthHeaders])
+
+  // Save site title to backend
+  const saveSiteTitleToBackend = useCallback(async (title: string) => {
+    setSiteTitle(title)
+    try {
+      await fetch(`${apiUrl}/api/model-status/config/site-title`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ site_title: title }),
+      })
+    } catch (error) {
+      console.error('Failed to save site title:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
+  // Select all models in a group
+  const selectGroupModels = useCallback((group: CustomModelGroup) => {
+    const newModels = [...new Set([...selectedModels, ...group.models.filter(m => availableModels.some(a => a.model_name === m))])]
+    setSelectedModels(newModels)
+    saveSelectedModelsToBackend(newModels)
+  }, [selectedModels, availableModels, saveSelectedModelsToBackend])
 
   // Sorted model statuses based on sort mode
   const sortedModelStatuses = useMemo(() => {
@@ -1046,6 +1073,45 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                         </Button>
                       </div>
                     </div>
+                    {/* Group Quick Select */}
+                    {customGroups.length > 0 && (
+                      <div className="p-2 border-b">
+                        <p className="text-xs text-muted-foreground mb-1.5">按分组选择</p>
+                        <div className="flex flex-wrap gap-1">
+                          {customGroups.map((group) => {
+                            const groupModelCount = group.models.filter(m => availableModels.some(a => a.model_name === m)).length
+                            const selectedInGroup = group.models.filter(m => selectedModels.includes(m)).length
+                            const allSelected = selectedInGroup === groupModelCount && groupModelCount > 0
+                            return (
+                              <button
+                                key={group.id}
+                                onClick={() => {
+                                  if (allSelected) {
+                                    const newModels = selectedModels.filter(m => !group.models.includes(m))
+                                    setSelectedModels(newModels)
+                                    saveSelectedModelsToBackend(newModels)
+                                  } else {
+                                    selectGroupModels(group)
+                                  }
+                                }}
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors",
+                                  allSelected
+                                    ? "bg-primary/10 border-primary/30 text-primary font-medium"
+                                    : selectedInGroup > 0
+                                    ? "bg-accent/50 border-border text-foreground"
+                                    : "bg-background border-border text-muted-foreground hover:bg-accent"
+                                )}
+                              >
+                                <Layers className="h-3 w-3" />
+                                {group.name}
+                                <span className="opacity-60">{selectedInGroup}/{groupModelCount}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
                     {/* Search input */}
                     <div className="px-2 py-1.5 border-b">
                       <div className="relative">
@@ -1189,6 +1255,43 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                   <Maximize2 className="h-4 w-4" />
                 )}
               </Button>
+
+              {/* Site Title Setting */}
+              <div className="relative">
+                <Button
+                  variant={showSiteTitleInput ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setShowSiteTitleInput(!showSiteTitleInput)}
+                  title="设置站点标题"
+                  className="h-9"
+                >
+                  <Pencil className="h-4 w-4 mr-2" />
+                  站点标题
+                </Button>
+                {showSiteTitleInput && (
+                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-40 p-3">
+                    <p className="text-xs text-muted-foreground mb-2">嵌入页面显示的标题（留空使用默认）</p>
+                    <input
+                      type="text"
+                      placeholder="例如：星辰AI-模型状态监控"
+                      value={siteTitle}
+                      onChange={(e) => setSiteTitle(e.target.value)}
+                      onBlur={() => saveSiteTitleToBackend(siteTitle)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          saveSiteTitleToBackend(siteTitle)
+                          setShowSiteTitleInput(false)
+                        }
+                      }}
+                      className="w-full h-8 px-3 text-sm bg-muted/50 border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                      autoFocus
+                    />
+                    {siteTitle && (
+                      <p className="text-xs text-muted-foreground mt-2">预览: <span className="font-medium text-foreground">{siteTitle}</span></p>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Embed Help Button */}
               <Button

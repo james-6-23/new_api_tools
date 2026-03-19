@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag } from 'lucide-react'
 import {
   OpenAI, Gemini, DeepSeek, SiliconCloud, Groq, Ollama, Claude, Mistral,
   Minimax, Baichuan, Moonshot, Spark, Qwen, Yi, Hunyuan, Stepfun, ZeroOne,
@@ -34,6 +34,25 @@ interface ModelStatus {
 }
 
 type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean' | 'terminal' | 'cupertino' | 'material' | 'openai' | 'anthropic' | 'vercel' | 'linear' | 'stripe' | 'github' | 'discord' | 'tesla'
+
+// Custom model group (loaded from backend)
+interface EmbedCustomGroup {
+  id: string
+  name: string
+  models: string[]
+}
+
+// Color styles for group filter tabs (theme-aware)
+const EMBED_GROUP_COLORS = [
+  'bg-emerald-500/20 border-emerald-500/40 text-emerald-400',
+  'bg-amber-500/20 border-amber-500/40 text-amber-400',
+  'bg-blue-500/20 border-blue-500/40 text-blue-400',
+  'bg-cyan-500/20 border-cyan-500/40 text-cyan-400',
+  'bg-violet-500/20 border-violet-500/40 text-violet-400',
+  'bg-rose-500/20 border-rose-500/40 text-rose-400',
+  'bg-orange-500/20 border-orange-500/40 text-orange-400',
+  'bg-lime-500/20 border-lime-500/40 text-lime-400',
+]
 
 interface ThemeConfig {
   id: ThemeId
@@ -797,6 +816,9 @@ export function ModelStatusEmbed({
   const [countdown, setCountdown] = useState(defaultRefreshInterval)
   const [timeWindow, setTimeWindow] = useState('24h')
   const [theme, setTheme] = useState<ThemeId>(defaultTheme || 'daylight')
+  const [customGroups, setCustomGroups] = useState<EmbedCustomGroup[]>([])
+  const [groupFilter, setGroupFilter] = useState('all')
+  const [siteTitle, setSiteTitle] = useState('')
 
   // Tooltip state - lifted to parent to avoid z-index/transform issues
   const [hoveredSlot, setHoveredSlot] = useState<SlotStatus | null>(null)
@@ -837,6 +859,14 @@ export function ModelStatusEmbed({
           // Validate theme exists in themeStyles, fallback to daylight for legacy values
           const validTheme = THEMES.find(t => t.id === data.theme) ? data.theme : 'daylight'
           setTheme(validTheme as ThemeId)
+        }
+        // Load custom groups
+        if (data.custom_groups && Array.isArray(data.custom_groups)) {
+          setCustomGroups(data.custom_groups as EmbedCustomGroup[])
+        }
+        // Load site title
+        if (data.site_title) {
+          setSiteTitle(data.site_title)
         }
         return data.data || []
       }
@@ -966,7 +996,7 @@ export function ModelStatusEmbed({
             <div className="flex items-center gap-3">
               {theme !== 'minimal' && <Activity className="h-5 w-5 opacity-60" />}
               <h1 className={styles.headerTitle}>
-                {theme === 'minimal' ? 'Status' : '模型状态监控'}
+                {theme === 'minimal' ? (siteTitle || 'Status') : (siteTitle || '模型状态监控')}
                 {theme !== 'minimal' && (
                   <span className="ml-3 text-sm font-normal opacity-60">
                     {THEMES.find(t => t.id === theme)?.name}
@@ -1050,12 +1080,90 @@ export function ModelStatusEmbed({
           )
         })()}
 
+        {/* Group Filter Tabs */}
+        {customGroups.length > 0 && modelStatuses.length > 0 && theme !== 'minimal' && (() => {
+          // Count models per group
+          const activeModels = modelStatuses.filter(m => m.total_requests > 0)
+          const groupCountMap: Record<string, number> = { all: activeModels.length }
+          customGroups.forEach(g => {
+            groupCountMap[g.id] = activeModels.filter(m => g.models.includes(m.model_name)).length
+          })
+
+          return (
+            <div className={cn(
+              "flex items-center gap-2 overflow-x-auto pb-1 mb-5 scrollbar-hide",
+            )}>
+              <Tag className="h-4 w-4 opacity-50 flex-shrink-0" />
+              <button
+                onClick={() => setGroupFilter('all')}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                  groupFilter === 'all'
+                    ? cn(
+                        "font-semibold shadow-sm",
+                        theme === 'obsidian' && 'bg-blue-500/20 border-blue-500/40 text-blue-300',
+                        theme === 'daylight' && 'bg-blue-500/10 border-blue-500/30 text-blue-700',
+                        theme === 'neon' && 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]',
+                        theme === 'forest' && 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300',
+                        theme === 'ocean' && 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300',
+                        theme === 'terminal' && 'bg-green-500/20 border-green-500/50 text-green-500',
+                        theme === 'cupertino' && 'bg-blue-500/10 border-blue-300/50 text-blue-600',
+                        theme === 'material' && 'bg-[#d3e3fd] border-[#aecbfa] text-[#1967d2]',
+                        theme === 'openai' && 'bg-[#10a37f]/20 border-[#10a37f]/40 text-[#10a37f]',
+                        theme === 'anthropic' && 'bg-[#d97757]/10 border-[#d97757]/30 text-[#d97757]',
+                        theme === 'vercel' && 'bg-white/10 border-white/30 text-white',
+                        theme === 'linear' && 'bg-[#5e6ad2]/20 border-[#5e6ad2]/40 text-[#7c86e0]',
+                        theme === 'stripe' && 'bg-[#635bff]/10 border-[#635bff]/30 text-[#635bff]',
+                        theme === 'github' && 'bg-[#58a6ff]/15 border-[#58a6ff]/40 text-[#58a6ff]',
+                        theme === 'discord' && 'bg-[#5865F2]/20 border-[#5865F2]/40 text-[#5865F2]',
+                        theme === 'tesla' && 'bg-[#e82127]/15 border-[#e82127]/40 text-[#e82127]',
+                      )
+                    : cn(
+                        "border-transparent opacity-60 hover:opacity-100",
+                        styles.statsText,
+                      )
+                )}
+              >
+                全部
+                <span className="opacity-70 tabular-nums">{groupCountMap.all}</span>
+              </button>
+              {customGroups.map((group, index) => {
+                const colors = EMBED_GROUP_COLORS[index % EMBED_GROUP_COLORS.length]
+                const isActive = groupFilter === group.id
+                const count = groupCountMap[group.id] || 0
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => setGroupFilter(group.id)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                      isActive
+                        ? cn("font-semibold shadow-sm", colors)
+                        : cn("border-transparent opacity-60 hover:opacity-100", styles.statsText)
+                    )}
+                  >
+                    <Layers size={11} className="flex-shrink-0" />
+                    {group.name}
+                    <span className="opacity-70 tabular-nums">{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })()}
+
         {/* Model Status Cards */}
         {modelStatuses.length > 0 ? (
           <div className={cn(
             theme === 'minimal' ? 'divide-y divide-gray-100' : 'grid grid-cols-1 lg:grid-cols-2 gap-4'
           )}>
-            {modelStatuses.map(model => (
+            {modelStatuses
+              .filter(model => {
+                if (groupFilter === 'all') return true
+                const group = customGroups.find(g => g.id === groupFilter)
+                return group ? group.models.includes(model.model_name) : true
+              })
+              .map(model => (
               <EmbedModelCard
                 key={model.model_name}
                 model={model}

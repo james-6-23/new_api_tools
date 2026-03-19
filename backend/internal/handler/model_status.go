@@ -41,6 +41,9 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.GET("/config/groups", GetCustomGroupsConfig)
 		g.PUT("/config/groups", SetCustomGroupsConfig)
 		g.POST("/config/groups", SetCustomGroupsConfig)
+		g.GET("/config/site-title", GetSiteTitleConfig)
+		g.PUT("/config/site-title", SetSiteTitleConfig)
+		g.POST("/config/site-title", SetSiteTitleConfig)
 	}
 
 }
@@ -398,5 +401,32 @@ func SetCustomGroupsConfig(c *gin.Context) {
 		"success": true,
 		"data":    req.Groups,
 		"message": "Custom groups updated",
+	})
+}
+
+// GET /config/site-title
+func GetSiteTitleConfig(c *gin.Context) {
+	svc := service.NewModelStatusService()
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"site_title": svc.GetSiteTitle(),
+	})
+}
+
+// PUT /config/site-title
+func SetSiteTitleConfig(c *gin.Context) {
+	var req struct {
+		SiteTitle string `json:"site_title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid request", err.Error()))
+		return
+	}
+	svc := service.NewModelStatusService()
+	svc.SetSiteTitle(req.SiteTitle)
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"site_title": req.SiteTitle,
+		"message":    "Site title updated",
 	})
 }
