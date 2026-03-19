@@ -915,7 +915,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   return (
     <div className={cn("space-y-5", isEmbed && "p-4")}>
       {/* Header */}
-      <Card className="overflow-hidden border-0 shadow-md">
+      <Card className="overflow-visible border-0 shadow-md">
         <div className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent">
           <CardContent className="p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1052,7 +1052,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                 </Button>
 
                 {showModelSelector && (
-                  <div className="absolute right-0 mt-1 w-72 bg-popover border rounded-md shadow-lg z-40 max-h-96 overflow-hidden">
+                  <div className="absolute right-0 mt-1 w-80 bg-popover border rounded-md shadow-lg z-40 max-h-[520px] flex flex-col overflow-hidden">
                     <div className="p-2 border-b flex justify-between items-center">
                       <p className="text-xs text-muted-foreground">选择要监控的模型</p>
                       <div className="flex gap-1">
@@ -1126,7 +1126,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                         />
                       </div>
                     </div>
-                    <div className="p-1 max-h-64 overflow-y-auto">
+                    <div className="p-1 flex-1 min-h-0 overflow-y-auto">
                       {availableModels
                         .filter(model => !modelSearchQuery || model.model_name.toLowerCase().includes(modelSearchQuery.toLowerCase()))
                         .map(model => (
@@ -1280,6 +1280,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           saveSiteTitleToBackend(siteTitle)
+                          setShowSiteTitleInput(false)
+                        }
+                        if (e.key === 'Escape') {
                           setShowSiteTitleInput(false)
                         }
                       }}
