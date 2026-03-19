@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Maximize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical, Search, Filter } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Maximize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical, Search, Filter, Layers, Plus, Pencil, Trash2, FolderPlus, Tag } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -134,6 +134,38 @@ const MODEL_LOGO_MAP: Record<string, IconComponent> = {
   'zai': ZAI,
 }
 
+// Custom user-defined model group
+interface CustomModelGroup {
+  id: string
+  name: string
+  models: string[] // exact model names in this group
+}
+
+// Preset group templates for quick creation
+const GROUP_PRESETS: { name: string; keywords: string[] }[] = [
+  { name: 'OpenAI', keywords: ['gpt', 'o1', 'o3', 'o4', 'chatgpt', 'openai', 'codex', 'dall-e', 'whisper', 'tts'] },
+  { name: 'Claude', keywords: ['claude', 'anthropic'] },
+  { name: 'Gemini', keywords: ['gemini', 'gemma'] },
+  { name: 'DeepSeek', keywords: ['deepseek'] },
+  { name: 'Meta/Llama', keywords: ['llama', 'meta'] },
+  { name: 'Mistral', keywords: ['mistral', 'mixtral', 'codestral', 'pixtral'] },
+  { name: '国产模型', keywords: ['qwen', 'tongyi', 'yi', 'baichuan', 'glm', 'chatglm', 'zhipu', 'moonshot', 'kimi', 'spark', 'xunfei', 'hunyuan', 'tencent', 'doubao', 'bytedance', 'wenxin', 'ernie', 'baidu', 'minimax', 'abab', 'stepfun', 'step', 'zeroone', '360', 'modelscope'] },
+]
+
+// Color palette for groups
+const GROUP_COLORS = [
+  'from-emerald-500/20 to-teal-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-400',
+  'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-700 dark:text-amber-400',
+  'from-blue-500/20 to-indigo-500/20 border-blue-500/30 text-blue-700 dark:text-blue-400',
+  'from-cyan-500/20 to-sky-500/20 border-cyan-500/30 text-cyan-700 dark:text-cyan-400',
+  'from-violet-500/20 to-purple-500/20 border-violet-500/30 text-violet-700 dark:text-violet-400',
+  'from-rose-500/20 to-pink-500/20 border-rose-500/30 text-rose-700 dark:text-rose-400',
+  'from-orange-500/20 to-red-500/20 border-orange-500/30 text-orange-700 dark:text-orange-400',
+  'from-lime-500/20 to-green-500/20 border-lime-500/30 text-lime-700 dark:text-lime-400',
+]
+
+const MODEL_GROUP_KEY = 'model_status_group_filter'
+
 // Get model logo component based on model name
 function getModelLogo(modelName: string): IconComponent | null {
   const lowerName = modelName.toLowerCase()
@@ -244,6 +276,7 @@ const TIME_WINDOW_KEY = 'model_status_time_window'
 const THEME_KEY = 'model_status_theme'
 const SORT_MODE_KEY = 'model_status_sort_mode'
 const CUSTOM_ORDER_KEY = 'model_status_custom_order'
+// Note: MODEL_GROUP_KEY is defined alongside MODEL_GROUPS above
 
 // Sort mode type
 type SortMode = 'default' | 'availability' | 'custom'
@@ -297,6 +330,12 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const [showEmbedHelp, setShowEmbedHelp] = useState(false)
   const [modelSearchQuery, setModelSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [groupFilter, setGroupFilter] = useState(() => {
+    const saved = localStorage.getItem(MODEL_GROUP_KEY)
+    return saved || 'all'
+  })
+  const [customGroups, setCustomGroups] = useState<CustomModelGroup[]>([])
+  const [showGroupManager, setShowGroupManager] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const modelSelectorRef = useRef<HTMLDivElement>(null)
   const intervalDropdownRef = useRef<HTMLDivElement>(null)
@@ -451,6 +490,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
         if (data.custom_order && data.custom_order.length > 0) {
           setCustomOrder(data.custom_order)
           localStorage.setItem(CUSTOM_ORDER_KEY, JSON.stringify(data.custom_order))
+        }
+        // Load custom groups from backend
+        if (data.custom_groups && Array.isArray(data.custom_groups)) {
+          setCustomGroups(data.custom_groups as CustomModelGroup[])
         }
         return data.data || []
       }
@@ -634,6 +677,50 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     return counts
   }, [modelStatuses])
 
+  // Group counts for custom group filter tabs
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: 0 }
+    customGroups.forEach(g => { counts[g.id] = 0 })
+    // Only count models with requests
+    const activeModels = modelStatuses.filter(m => m.total_requests > 0)
+    counts.all = activeModels.length
+    activeModels.forEach(m => {
+      customGroups.forEach(g => {
+        if (g.models.includes(m.model_name)) {
+          counts[g.id] = (counts[g.id] || 0) + 1
+        }
+      })
+    })
+    return counts
+  }, [modelStatuses, customGroups])
+
+  // Average success rate
+  const avgSuccessRate = useMemo(() => {
+    const active = modelStatuses.filter(m => m.total_requests > 0)
+    if (active.length === 0) return 0
+    return +(active.reduce((sum, m) => sum + m.success_rate, 0) / active.length).toFixed(1)
+  }, [modelStatuses])
+
+  // Handle group filter change
+  const handleGroupFilterChange = useCallback((gid: string) => {
+    setGroupFilter(gid)
+    localStorage.setItem(MODEL_GROUP_KEY, gid)
+  }, [])
+
+  // Save custom groups to backend
+  const saveCustomGroups = useCallback(async (groups: CustomModelGroup[]) => {
+    setCustomGroups(groups)
+    try {
+      await fetch(`${apiUrl}/api/model-status/config/groups`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ groups }),
+      })
+    } catch (error) {
+      console.error('Failed to save custom groups:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
   // Sorted model statuses based on sort mode
   const sortedModelStatuses = useMemo(() => {
     if (modelStatuses.length === 0) return []
@@ -667,13 +754,21 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     // Hide models with 0 requests
     result = result.filter(m => m.total_requests > 0)
 
+    // Apply group filter
+    if (groupFilter !== 'all') {
+      const group = customGroups.find(g => g.id === groupFilter)
+      if (group) {
+        result = result.filter(m => group.models.includes(m.model_name))
+      }
+    }
+
     // Apply status filter
     if (statusFilter !== 'all') {
       result = result.filter(m => m.current_status === statusFilter)
     }
 
     return result
-  }, [modelStatuses, sortMode, customOrder, statusFilter])
+  }, [modelStatuses, sortMode, customOrder, statusFilter, groupFilter, customGroups])
 
   // Handle drag end for reordering
   const handleDragEnd = (event: DragEndEvent) => {
@@ -791,37 +886,40 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   }
 
   return (
-    <div className={cn("space-y-6", isEmbed && "p-4")}>
+    <div className={cn("space-y-5", isEmbed && "p-4")}>
       {/* Header */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-lg font-medium">模型状态监控</h2>
-                <Badge variant="outline">{TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'}</Badge>
+      <Card className="overflow-hidden border-0 shadow-md">
+        <div className="bg-gradient-to-r from-primary/5 via-primary/3 to-transparent">
+          <CardContent className="p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Layers className="h-4.5 w-4.5 text-primary" />
+                    </div>
+                    <h2 className="text-xl font-semibold tracking-tight">模型状态监控</h2>
+                  </div>
+                  <Badge variant="outline" className="font-normal">{TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'} 滑动窗口</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground mt-2 flex items-center flex-wrap gap-x-3 gap-y-1">
+                  <span>监控 <span className="font-semibold text-foreground">{selectedModels.length}</span> 个模型</span>
+                  {modelStatuses.length > 0 && (
+                    <>
+                      <span className="text-muted-foreground/40">·</span>
+                      <span>总请求 <span className="font-semibold text-foreground tabular-nums">{modelStatuses.reduce((sum, m) => sum + m.total_requests, 0).toLocaleString()}</span></span>
+                      <span className="text-muted-foreground/40">·</span>
+                      <span>平均成功率 <span className={cn("font-semibold tabular-nums", avgSuccessRate >= 95 ? 'text-green-600' : avgSuccessRate >= 80 ? 'text-yellow-600' : 'text-red-600')}>{avgSuccessRate}%</span></span>
+                      <span className="text-muted-foreground/40">·</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /><span className="font-medium text-green-600 tabular-nums">{statusCounts.green}</span></span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500" /><span className="font-medium text-yellow-600 tabular-nums">{statusCounts.yellow}</span></span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /><span className="font-medium text-red-600 tabular-nums">{statusCounts.red}</span></span>
+                      </span>
+                    </>
+                  )}
+                </p>
               </div>
-              <p className="text-sm text-muted-foreground mt-1 flex items-center flex-wrap gap-x-2 gap-y-1">
-                监控 <span className="font-medium text-primary">{selectedModels.length}</span> 个模型
-                {modelStatuses.length > 0 && (
-                  <>
-                    <span>· 总请求: {modelStatuses.reduce((sum, m) => sum + m.total_requests, 0).toLocaleString()}</span>
-                    <span className="flex items-center gap-1">
-                      · <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-                      <span className="text-green-600 font-medium">{statusCounts.green}</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block w-2 h-2 rounded-full bg-yellow-500" />
-                      <span className="text-yellow-600 font-medium">{statusCounts.yellow}</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-                      <span className="text-red-600 font-medium">{statusCounts.red}</span>
-                    </span>
-                  </>
-                )}
-              </p>
-            </div>
             <div className="flex items-center gap-3">
               {/* Time Window Selector */}
               <div className="relative" ref={windowDropdownRef}>
@@ -1105,6 +1203,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
             </div>
           </div>
         </CardContent>
+        </div>
       </Card>
 
       {/* Embed Help Modal */}
@@ -1112,36 +1211,105 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
         <EmbedHelpModal onClose={() => setShowEmbedHelp(false)} />
       )}
 
-      {/* Status Filter Tabs */}
+      {/* Group Filter + Status Filter */}
       {modelStatuses.length > 0 && (
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          {[
-            { value: 'all' as StatusFilter, label: '全部', count: modelStatuses.length },
-            { value: 'green' as StatusFilter, label: '正常', count: statusCounts.green, color: 'text-green-600' },
-            { value: 'yellow' as StatusFilter, label: '警告', count: statusCounts.yellow, color: 'text-yellow-600' },
-            { value: 'red' as StatusFilter, label: '异常', count: statusCounts.red, color: 'text-red-600' },
-          ].map(tab => (
+        <div className="space-y-3">
+          {/* Model Group Filter */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <Tag className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <button
-              key={tab.value}
-              onClick={() => setStatusFilter(tab.value)}
+              onClick={() => handleGroupFilterChange('all')}
               className={cn(
-                "px-3 py-1.5 text-sm rounded-md transition-all",
-                statusFilter === tab.value
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                groupFilter === 'all'
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-background hover:bg-muted border-border text-muted-foreground hover:text-foreground"
               )}
             >
-              {tab.label}
-              <span className={cn(
-                "ml-1.5 text-xs tabular-nums",
-                statusFilter === tab.value ? "opacity-80" : (tab.color || "")
-              )}>
-                {tab.count}
+              全部
+              <span className={cn("text-xs tabular-nums", groupFilter === 'all' ? "opacity-80" : "text-muted-foreground")}>
+                {groupCounts.all}
               </span>
             </button>
-          ))}
+            {customGroups.map((group, index) => {
+              const color = GROUP_COLORS[index % GROUP_COLORS.length]
+              const isActive = groupFilter === group.id
+              const count = groupCounts[group.id] || 0
+              return (
+                <button
+                  key={group.id}
+                  onClick={() => handleGroupFilterChange(group.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                    isActive
+                      ? cn("bg-gradient-to-r shadow-sm border", color)
+                      : "bg-background hover:bg-muted border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Layers size={13} className="flex-shrink-0" />
+                  {group.name}
+                  <span className={cn("text-xs tabular-nums", isActive ? "opacity-80" : "text-muted-foreground")}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+            {/* Add Group Button */}
+            <button
+              onClick={() => setShowGroupManager(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-primary/50 hover:bg-muted transition-all whitespace-nowrap flex-shrink-0"
+            >
+              <Settings2 size={13} />
+              管理分组
+            </button>
+          </div>
+
+          {/* Status Filter Tabs */}
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            {[
+              { value: 'all' as StatusFilter, label: '全部', count: modelStatuses.length },
+              { value: 'green' as StatusFilter, label: '正常', count: statusCounts.green, color: 'text-green-600' },
+              { value: 'yellow' as StatusFilter, label: '警告', count: statusCounts.yellow, color: 'text-yellow-600' },
+              { value: 'red' as StatusFilter, label: '异常', count: statusCounts.red, color: 'text-red-600' },
+            ].map(tab => (
+              <button
+                key={tab.value}
+                onClick={() => setStatusFilter(tab.value)}
+                className={cn(
+                  "px-3 py-1.5 text-sm rounded-md transition-all",
+                  statusFilter === tab.value
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab.label}
+                <span className={cn(
+                  "ml-1.5 text-xs tabular-nums",
+                  statusFilter === tab.value ? "opacity-80" : (tab.color || "")
+                )}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
+      )}
+
+      {/* Group Manager Modal */}
+      {showGroupManager && (
+        <GroupManagerModal
+          groups={customGroups}
+          allModels={modelStatuses.filter(m => m.total_requests > 0).map(m => m.model_name)}
+          onSave={(groups) => {
+            saveCustomGroups(groups)
+            // Reset filter if the active group was deleted
+            if (groupFilter !== 'all' && !groups.find(g => g.id === groupFilter)) {
+              handleGroupFilterChange('all')
+            }
+          }}
+          onClose={() => setShowGroupManager(false)}
+        />
       )}
 
       {/* Model Status Cards */}
@@ -1212,28 +1380,340 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       )}
 
       {/* Legend */}
-      <Card className="bg-muted/50">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap gap-6 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-green-500" />
+      <Card className="bg-muted/30 border-dashed">
+        <CardContent className="px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/70">图例</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-green-500" />
               <span>成功率 ≥ 95%</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-yellow-500" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-yellow-500" />
               <span>成功率 80-95%</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-red-500" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-red-500" />
               <span>成功率 &lt; 80%</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-gray-200 dark:bg-gray-700" />
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-gray-200 dark:bg-gray-700" />
               <span>无请求</span>
+            </div>
+            <div className="ml-auto text-[10px] text-muted-foreground/50">
+              更新于 {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </div>
           </div>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+// Group Manager Modal Component
+interface GroupManagerModalProps {
+  groups: CustomModelGroup[]
+  allModels: string[]
+  onSave: (groups: CustomModelGroup[]) => void
+  onClose: () => void
+}
+
+function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerModalProps) {
+  const [localGroups, setLocalGroups] = useState<CustomModelGroup[]>([...groups])
+  const [editingGroup, setEditingGroup] = useState<CustomModelGroup | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [editingModels, setEditingModels] = useState<string[]>([])
+  const [editingSearch, setEditingSearch] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+
+  const handleCreateNew = () => {
+    setEditingGroup(null)
+    setEditingName('')
+    setEditingModels([])
+    setEditingSearch('')
+    setIsCreating(true)
+  }
+
+  const handleEditGroup = (group: CustomModelGroup) => {
+    setEditingGroup(group)
+    setEditingName(group.name)
+    setEditingModels([...group.models])
+    setEditingSearch('')
+    setIsCreating(true)
+  }
+
+  const handleDeleteGroup = (groupId: string) => {
+    const newGroups = localGroups.filter(g => g.id !== groupId)
+    setLocalGroups(newGroups)
+    onSave(newGroups)
+  }
+
+  const handleSaveEdit = () => {
+    if (!editingName.trim()) return
+
+    let newGroups: CustomModelGroup[]
+    if (editingGroup) {
+      // Update existing
+      newGroups = localGroups.map(g =>
+        g.id === editingGroup.id
+          ? { ...g, name: editingName.trim(), models: editingModels }
+          : g
+      )
+    } else {
+      // Create new
+      const newGroup: CustomModelGroup = {
+        id: `group_${Date.now()}`,
+        name: editingName.trim(),
+        models: editingModels,
+      }
+      newGroups = [...localGroups, newGroup]
+    }
+
+    setLocalGroups(newGroups)
+    onSave(newGroups)
+    setIsCreating(false)
+    setEditingGroup(null)
+  }
+
+  const handlePresetCreate = (preset: { name: string; keywords: string[] }) => {
+    // Match models by keywords
+    const matchedModels = allModels.filter(m => {
+      const lower = m.toLowerCase()
+      return preset.keywords.some(k => lower.includes(k))
+    })
+
+    // Check if group name already exists
+    const existingGroup = localGroups.find(g => g.name === preset.name)
+    if (existingGroup) {
+      // Update existing group with matched models
+      handleEditGroup({ ...existingGroup, models: matchedModels })
+      return
+    }
+
+    setEditingGroup(null)
+    setEditingName(preset.name)
+    setEditingModels(matchedModels)
+    setEditingSearch('')
+    setIsCreating(true)
+  }
+
+  const toggleModelInEdit = (modelName: string) => {
+    setEditingModels(prev =>
+      prev.includes(modelName)
+        ? prev.filter(m => m !== modelName)
+        : [...prev, modelName]
+    )
+  }
+
+  const filteredModels = allModels.filter(m =>
+    !editingSearch || m.toLowerCase().includes(editingSearch.toLowerCase())
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-background border rounded-xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b bg-muted/30">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <FolderPlus className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold">管理模型分组</h2>
+              <p className="text-xs text-muted-foreground">创建自定义分组，快速筛选模型</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {isCreating ? (
+            /* Edit/Create Form */
+            <div className="p-5 space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  onClick={() => setIsCreating(false)}
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  ← 返回
+                </button>
+                <span className="text-sm font-medium">{editingGroup ? '编辑分组' : '创建分组'}</span>
+              </div>
+
+              {/* Group Name */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">分组名称</label>
+                <input
+                  type="text"
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  placeholder="例如: Claude 模型"
+                  className="w-full h-9 px-3 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  autoFocus
+                />
+              </div>
+
+              {/* Model Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium">选择模型 <span className="font-normal text-muted-foreground">({editingModels.length} 个已选)</span></label>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingModels([...allModels])}>全选</Button>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setEditingModels([])}>清空</Button>
+                  </div>
+                </div>
+                {/* Search */}
+                <div className="relative mb-2">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="搜索模型..."
+                    value={editingSearch}
+                    onChange={(e) => setEditingSearch(e.target.value)}
+                    className="w-full h-8 pl-8 pr-3 text-sm bg-muted/50 border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                {/* Model List */}
+                <div className="border rounded-lg max-h-60 overflow-y-auto">
+                  {filteredModels.map(model => (
+                    <button
+                      key={model}
+                      onClick={() => toggleModelInEdit(model)}
+                      className={cn(
+                        "w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-muted/50 transition-colors border-b last:border-b-0",
+                        editingModels.includes(model) && "bg-primary/5"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                          <ModelLogo modelName={model} size={14} />
+                        </div>
+                        <span className="truncate">{model}</span>
+                      </div>
+                      {editingModels.includes(model) && (
+                        <Check className="h-4 w-4 text-primary flex-shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                  {filteredModels.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">未找到匹配的模型</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setIsCreating(false)}>取消</Button>
+                <Button size="sm" onClick={handleSaveEdit} disabled={!editingName.trim()}>
+                  {editingGroup ? '保存修改' : '创建分组'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* Groups List */
+            <div className="p-5 space-y-5">
+              {/* Existing Groups */}
+              {localGroups.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">已创建的分组</h3>
+                  <div className="space-y-2">
+                    {localGroups.map((group, index) => {
+                      const color = GROUP_COLORS[index % GROUP_COLORS.length]
+                      return (
+                        <div
+                          key={group.id}
+                          className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={cn("w-8 h-8 rounded-lg bg-gradient-to-br flex items-center justify-center flex-shrink-0", color)}>
+                              <Layers size={14} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm">{group.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {group.models.length} 个模型
+                                {group.models.length > 0 && (
+                                  <span className="ml-1">· {group.models.slice(0, 3).join(', ')}{group.models.length > 3 ? ` 等` : ''}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => handleEditGroup(group)}
+                              title="编辑"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteGroup(group.id)}
+                              title="删除"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Create New */}
+              <div>
+                <button
+                  onClick={handleCreateNew}
+                  className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 hover:bg-muted/30 transition-all"
+                >
+                  <Plus size={16} />
+                  创建新分组
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">快速创建（按模型名称自动匹配）</h3>
+                <div className="flex flex-wrap gap-2">
+                  {GROUP_PRESETS.map((preset) => {
+                    const exists = localGroups.some(g => g.name === preset.name)
+                    return (
+                      <button
+                        key={preset.name}
+                        onClick={() => handlePresetCreate(preset)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border transition-all",
+                          exists
+                            ? "bg-muted text-muted-foreground border-border"
+                            : "bg-background hover:bg-muted border-border hover:border-primary/50 text-foreground"
+                        )}
+                      >
+                        <Tag size={12} />
+                        {preset.name}
+                        {exists && <Check size={12} className="text-green-500" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-end px-5 py-3 border-t bg-muted/20">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

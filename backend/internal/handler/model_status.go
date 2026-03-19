@@ -38,6 +38,9 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.PUT("/config/sort", SetSortModeConfig)
 		g.POST("/config/sort", SetSortModeConfig)
 		g.PUT("/config/custom-order", SetCustomOrderConfig)
+		g.GET("/config/groups", GetCustomGroupsConfig)
+		g.PUT("/config/groups", SetCustomGroupsConfig)
+		g.POST("/config/groups", SetCustomGroupsConfig)
 	}
 
 }
@@ -368,4 +371,32 @@ func GetEmbedConfig(c *gin.Context) {
 	svc := service.NewModelStatusService()
 	config := svc.GetEmbedConfig()
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": config})
+}
+
+// GET /config/groups
+func GetCustomGroupsConfig(c *gin.Context) {
+	svc := service.NewModelStatusService()
+	groups := svc.GetCustomGroups()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    groups,
+	})
+}
+
+// PUT /config/groups
+func SetCustomGroupsConfig(c *gin.Context) {
+	var req struct {
+		Groups []map[string]interface{} `json:"groups"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "Invalid request", err.Error()))
+		return
+	}
+	svc := service.NewModelStatusService()
+	svc.SetCustomGroups(req.Groups)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    req.Groups,
+		"message": "Custom groups updated",
+	})
 }

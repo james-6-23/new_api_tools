@@ -959,7 +959,7 @@ export function ModelStatusEmbed({
         </div>
       )}
 
-      <div className="relative max-w-6xl mx-auto">
+      <div className="relative max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -993,9 +993,68 @@ export function ModelStatusEmbed({
           )}
         </div>
 
+        {/* Stats Overview Bar */}
+        {modelStatuses.length > 0 && theme !== 'minimal' && (() => {
+          const totalRequests = modelStatuses.reduce((sum, m) => sum + m.total_requests, 0)
+          const activeModels = modelStatuses.filter(m => m.total_requests > 0)
+          const avgRate = activeModels.length > 0 ? +(activeModels.reduce((sum, m) => sum + m.success_rate, 0) / activeModels.length).toFixed(1) : 0
+          const greenCount = modelStatuses.filter(m => m.current_status === 'green').length
+          const yellowCount = modelStatuses.filter(m => m.current_status === 'yellow').length
+          const redCount = modelStatuses.filter(m => m.current_status === 'red').length
+          return (
+            <div className={cn(
+              "flex flex-wrap items-center gap-x-6 gap-y-2 mb-6 px-4 py-3 rounded-xl text-sm",
+              theme === 'obsidian' && 'bg-[#161b22] border border-gray-800/60',
+              theme === 'daylight' && 'bg-white border border-slate-200 shadow-sm',
+              theme === 'neon' && 'bg-black/40 border border-purple-500/30',
+              theme === 'forest' && 'bg-[#064e3b]/20 border border-[#065f46]/50',
+              theme === 'ocean' && 'bg-blue-900/10 border border-blue-700/30',
+              theme === 'terminal' && 'bg-black border border-green-900',
+              theme === 'cupertino' && 'bg-white/60 backdrop-blur-md rounded-2xl shadow-sm',
+              theme === 'material' && 'bg-[#fdfcff] rounded-2xl shadow-sm',
+              theme === 'openai' && 'bg-[#40414f] rounded-md',
+              theme === 'anthropic' && 'bg-white border border-[#e6e1d6] rounded-xl shadow-sm',
+              theme === 'vercel' && 'bg-[#111] border border-[#333] rounded-lg',
+              theme === 'linear' && 'bg-[#16171d] border border-[#282930] rounded-xl',
+              theme === 'stripe' && 'bg-white rounded-lg shadow-[0_2px_5px_-1px_rgba(50,50,93,0.15)]',
+              theme === 'github' && 'bg-[#161b22] border border-[#30363d] rounded-md',
+              theme === 'discord' && 'bg-[#2b2d31] rounded-[4px]',
+              theme === 'tesla' && 'bg-[#111] border-t-2 border-[#333]',
+            )}>
+              <div className={cn("flex items-center gap-2", styles.statsText)}>
+                <span>总请求</span>
+                <span className={cn(styles.statsValue, 'tabular-nums')}>{totalRequests.toLocaleString()}</span>
+              </div>
+              <div className={cn("flex items-center gap-2", styles.statsText)}>
+                <span>平均成功率</span>
+                <span className={cn(
+                  'font-semibold tabular-nums',
+                  avgRate >= 95 ? styles.statusGreen.replace('bg-', 'text-') : avgRate >= 80 ? styles.statusYellow.replace('bg-', 'text-') : styles.statusRed.replace('bg-', 'text-')
+                )}>{avgRate}%</span>
+              </div>
+              <div className="flex items-center gap-3 ml-auto">
+                <span className="flex items-center gap-1.5">
+                  <span className={cn('w-2 h-2 rounded-full', styles.statusGreen)} />
+                  <span className={cn(styles.statsText, 'tabular-nums')}>{greenCount}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className={cn('w-2 h-2 rounded-full', styles.statusYellow)} />
+                  <span className={cn(styles.statsText, 'tabular-nums')}>{yellowCount}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className={cn('w-2 h-2 rounded-full', styles.statusRed)} />
+                  <span className={cn(styles.statsText, 'tabular-nums')}>{redCount}</span>
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Model Status Cards */}
         {modelStatuses.length > 0 ? (
-          <div className={theme === 'minimal' ? 'divide-y divide-gray-100' : 'space-y-4'}>
+          <div className={cn(
+            theme === 'minimal' ? 'divide-y divide-gray-100' : 'grid grid-cols-1 lg:grid-cols-2 gap-4'
+          )}>
             {modelStatuses.map(model => (
               <EmbedModelCard
                 key={model.model_name}
