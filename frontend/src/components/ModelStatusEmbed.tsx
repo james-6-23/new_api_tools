@@ -39,7 +39,22 @@ type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean'
 interface EmbedCustomGroup {
   id: string
   name: string
+  icon?: string
   models: string[]
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EmbedIconComponent = React.ComponentType<any>
+
+// Icon map for embed group tabs
+const EMBED_GROUP_ICON_MAP: Record<string, EmbedIconComponent> = {
+  openai: OpenAI, claude: Claude, gemini: Gemini, deepseek: DeepSeek,
+  meta: Meta, mistral: Mistral, qwen: Qwen, zhipu: Zhipu,
+  moonshot: Moonshot, kimi: Kimi, doubao: Doubao, minimax: Minimax,
+  baichuan: Baichuan, yi: Yi, spark: Spark, hunyuan: Hunyuan,
+  stepfun: Stepfun, wenxin: Wenxin, cohere: Cohere, perplexity: Perplexity,
+  groq: Groq, ollama: Ollama, together: Together, openrouter: OpenRouter,
+  siliconcloud: SiliconCloud, coze: Coze, cerebras: Cerebras,
 }
 
 // Color styles for group filter tabs (theme-aware)
@@ -1136,13 +1151,16 @@ export function ModelStatusEmbed({
                     key={group.id}
                     onClick={() => setGroupFilter(group.id)}
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                      "inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-full border transition-all whitespace-nowrap flex-shrink-0",
                       isActive
                         ? cn("font-semibold shadow-sm", colors)
                         : cn("border-transparent opacity-60 hover:opacity-100", styles.statsText)
                     )}
                   >
-                    <Layers size={11} className="flex-shrink-0" />
+                    {group.icon && EMBED_GROUP_ICON_MAP[group.icon]
+                      ? (() => { const IC = EMBED_GROUP_ICON_MAP[group.icon!]; return <IC size={14} className="flex-shrink-0" /> })()
+                      : <Layers size={12} className="flex-shrink-0" />
+                    }
                     {group.name}
                     <span className="opacity-70 tabular-nums">{count}</span>
                   </button>

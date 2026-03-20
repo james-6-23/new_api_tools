@@ -138,18 +138,50 @@ const MODEL_LOGO_MAP: Record<string, IconComponent> = {
 interface CustomModelGroup {
   id: string
   name: string
+  icon?: string // key from GROUP_ICON_OPTIONS
   models: string[] // exact model names in this group
 }
 
+// Available icons for groups (from @lobehub/icons)
+const GROUP_ICON_OPTIONS: { key: string; label: string; component: IconComponent }[] = [
+  { key: 'openai', label: 'OpenAI', component: OpenAI },
+  { key: 'claude', label: 'Claude', component: Claude },
+  { key: 'gemini', label: 'Gemini', component: Gemini },
+  { key: 'deepseek', label: 'DeepSeek', component: DeepSeek },
+  { key: 'meta', label: 'Meta', component: Meta },
+  { key: 'mistral', label: 'Mistral', component: Mistral },
+  { key: 'qwen', label: 'Qwen', component: Qwen },
+  { key: 'zhipu', label: 'Zhipu', component: Zhipu },
+  { key: 'moonshot', label: 'Moonshot', component: Moonshot },
+  { key: 'kimi', label: 'Kimi', component: Kimi },
+  { key: 'doubao', label: 'Doubao', component: Doubao },
+  { key: 'minimax', label: 'Minimax', component: Minimax },
+  { key: 'baichuan', label: 'Baichuan', component: Baichuan },
+  { key: 'yi', label: 'Yi', component: Yi },
+  { key: 'spark', label: 'Spark', component: Spark },
+  { key: 'hunyuan', label: 'Hunyuan', component: Hunyuan },
+  { key: 'stepfun', label: 'Stepfun', component: Stepfun },
+  { key: 'wenxin', label: 'Wenxin', component: Wenxin },
+  { key: 'cohere', label: 'Cohere', component: Cohere },
+  { key: 'perplexity', label: 'Perplexity', component: Perplexity },
+  { key: 'groq', label: 'Groq', component: Groq },
+  { key: 'ollama', label: 'Ollama', component: Ollama },
+  { key: 'together', label: 'Together', component: Together },
+  { key: 'openrouter', label: 'OpenRouter', component: OpenRouter },
+  { key: 'siliconcloud', label: 'SiliconCloud', component: SiliconCloud },
+  { key: 'coze', label: 'Coze', component: Coze },
+  { key: 'cerebras', label: 'Cerebras', component: Cerebras },
+]
+
 // Preset group templates for quick creation
-const GROUP_PRESETS: { name: string; keywords: string[] }[] = [
-  { name: 'OpenAI', keywords: ['gpt', 'o1', 'o3', 'o4', 'chatgpt', 'openai', 'codex', 'dall-e', 'whisper', 'tts'] },
-  { name: 'Claude', keywords: ['claude', 'anthropic'] },
-  { name: 'Gemini', keywords: ['gemini', 'gemma'] },
-  { name: 'DeepSeek', keywords: ['deepseek'] },
-  { name: 'Meta/Llama', keywords: ['llama', 'meta'] },
-  { name: 'Mistral', keywords: ['mistral', 'mixtral', 'codestral', 'pixtral'] },
-  { name: '国产模型', keywords: ['qwen', 'tongyi', 'yi', 'baichuan', 'glm', 'chatglm', 'zhipu', 'moonshot', 'kimi', 'spark', 'xunfei', 'hunyuan', 'tencent', 'doubao', 'bytedance', 'wenxin', 'ernie', 'baidu', 'minimax', 'abab', 'stepfun', 'step', 'zeroone', '360', 'modelscope'] },
+const GROUP_PRESETS: { name: string; icon: string; keywords: string[] }[] = [
+  { name: 'OpenAI', icon: 'openai', keywords: ['gpt', 'o1', 'o3', 'o4', 'chatgpt', 'openai', 'codex', 'dall-e', 'whisper', 'tts'] },
+  { name: 'Claude', icon: 'claude', keywords: ['claude', 'anthropic'] },
+  { name: 'Gemini', icon: 'gemini', keywords: ['gemini', 'gemma'] },
+  { name: 'DeepSeek', icon: 'deepseek', keywords: ['deepseek'] },
+  { name: 'Meta/Llama', icon: 'meta', keywords: ['llama', 'meta'] },
+  { name: 'Mistral', icon: 'mistral', keywords: ['mistral', 'mixtral', 'codestral', 'pixtral'] },
+  { name: '国产模型', icon: 'qwen', keywords: ['qwen', 'tongyi', 'yi', 'baichuan', 'glm', 'chatglm', 'zhipu', 'moonshot', 'kimi', 'spark', 'xunfei', 'hunyuan', 'tencent', 'doubao', 'bytedance', 'wenxin', 'ernie', 'baidu', 'minimax', 'abab', 'stepfun', 'step', 'zeroone', '360', 'modelscope'] },
 ]
 
 // Color palette for groups
@@ -687,10 +719,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const groupCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 }
     customGroups.forEach(g => { counts[g.id] = 0 })
-    // Only count models with requests
-    const activeModels = modelStatuses.filter(m => m.total_requests > 0)
-    counts.all = activeModels.length
-    activeModels.forEach(m => {
+    // Count only models that are actually displayed (with requests > 0)
+    const visibleModels = modelStatuses.filter(m => m.total_requests > 0)
+    counts.all = visibleModels.length
+    visibleModels.forEach(m => {
       customGroups.forEach(g => {
         if (g.models.includes(m.model_name)) {
           counts[g.id] = (counts[g.id] || 0) + 1
@@ -1346,13 +1378,22 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                   key={group.id}
                   onClick={() => handleGroupFilterChange(group.id)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                    "inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex-shrink-0",
                     isActive
                       ? cn("bg-gradient-to-r shadow-sm border", color)
                       : "bg-background hover:bg-muted border-border text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <Layers size={13} className="flex-shrink-0" />
+                  {(() => {
+                    if (group.icon) {
+                      const iconOpt = GROUP_ICON_OPTIONS.find(o => o.key === group.icon)
+                      if (iconOpt) {
+                        const IconComp = iconOpt.component
+                        return <IconComp size={16} className="flex-shrink-0" />
+                      }
+                    }
+                    return <Layers size={14} className="flex-shrink-0" />
+                  })()}
                   {group.name}
                   <span className={cn("text-xs tabular-nums", isActive ? "opacity-80" : "text-muted-foreground")}>
                     {count}
@@ -1530,11 +1571,25 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
   const [editingName, setEditingName] = useState('')
   const [editingModels, setEditingModels] = useState<string[]>([])
   const [editingSearch, setEditingSearch] = useState('')
+  const [editingIcon, setEditingIcon] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+
+  // Helper to render group icon
+  const renderGroupIcon = (iconKey: string | undefined, size: number = 14) => {
+    if (iconKey) {
+      const iconOpt = GROUP_ICON_OPTIONS.find(o => o.key === iconKey)
+      if (iconOpt) {
+        const IconComp = iconOpt.component
+        return <IconComp size={size} />
+      }
+    }
+    return <Layers size={size} />
+  }
 
   const handleCreateNew = () => {
     setEditingGroup(null)
     setEditingName('')
+    setEditingIcon('')
     setEditingModels([])
     setEditingSearch('')
     setIsCreating(true)
@@ -1543,6 +1598,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
   const handleEditGroup = (group: CustomModelGroup) => {
     setEditingGroup(group)
     setEditingName(group.name)
+    setEditingIcon(group.icon || '')
     setEditingModels([...group.models])
     setEditingSearch('')
     setIsCreating(true)
@@ -1562,7 +1618,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
       // Update existing
       newGroups = localGroups.map(g =>
         g.id === editingGroup.id
-          ? { ...g, name: editingName.trim(), models: editingModels }
+          ? { ...g, name: editingName.trim(), icon: editingIcon || undefined, models: editingModels }
           : g
       )
     } else {
@@ -1570,6 +1626,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
       const newGroup: CustomModelGroup = {
         id: `group_${Date.now()}`,
         name: editingName.trim(),
+        icon: editingIcon || undefined,
         models: editingModels,
       }
       newGroups = [...localGroups, newGroup]
@@ -1581,7 +1638,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
     setEditingGroup(null)
   }
 
-  const handlePresetCreate = (preset: { name: string; keywords: string[] }) => {
+  const handlePresetCreate = (preset: { name: string; icon?: string; keywords: string[] }) => {
     // Match models by keywords
     const matchedModels = allModels.filter(m => {
       const lower = m.toLowerCase()
@@ -1598,6 +1655,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
 
     setEditingGroup(null)
     setEditingName(preset.name)
+    setEditingIcon(preset.icon || '')
     setEditingModels(matchedModels)
     setEditingSearch('')
     setIsCreating(true)
@@ -1659,6 +1717,39 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
                   className="w-full h-9 px-3 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50"
                   autoFocus
                 />
+              </div>
+
+              {/* Group Icon */}
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">分组图标 <span className="font-normal text-muted-foreground">(可选)</span></label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setEditingIcon('')}
+                    className={cn(
+                      "w-9 h-9 rounded-lg border-2 flex items-center justify-center transition-all",
+                      !editingIcon ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-muted"
+                    )}
+                    title="默认"
+                  >
+                    <Layers size={16} className="text-muted-foreground" />
+                  </button>
+                  {GROUP_ICON_OPTIONS.map(opt => {
+                    const IconComp = opt.component
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => setEditingIcon(opt.key)}
+                        className={cn(
+                          "w-9 h-9 rounded-lg border-2 flex items-center justify-center transition-all",
+                          editingIcon === opt.key ? "border-primary bg-primary/10" : "border-border hover:border-primary/50 hover:bg-muted"
+                        )}
+                        title={opt.label}
+                      >
+                        <IconComp size={18} />
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
               {/* Model Selection */}
@@ -1734,7 +1825,7 @@ function GroupManagerModal({ groups, allModels, onSave, onClose }: GroupManagerM
                         >
                           <div className="flex items-center gap-3 min-w-0">
                             <div className={cn("w-8 h-8 rounded-lg bg-gradient-to-br flex items-center justify-center flex-shrink-0", color)}>
-                              <Layers size={14} />
+                              {renderGroupIcon(group.icon, 16)}
                             </div>
                             <div className="min-w-0">
                               <div className="font-medium text-sm">{group.name}</div>
