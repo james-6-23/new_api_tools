@@ -436,7 +436,7 @@ func (s *UserManagementService) DeleteUser(userID int64, hardDelete bool) (int64
 	}
 
 	// Soft delete
-	now := time.Now().Unix()
+	now := time.Now()
 	affected, err := s.db.Execute(s.db.RebindQuery(
 		"UPDATE users SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL"), now, userID)
 	if err != nil {
@@ -512,17 +512,18 @@ func (s *UserManagementService) PurgeSoftDeleted(dryRun bool) (int64, error) {
 
 // BatchDeleteInactiveUsers deletes inactive users
 func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, dryRun, hardDelete bool) (map[string]interface{}, error) {
-	now := time.Now().Unix()
+	now := time.Now()
+	nowUnix := now.Unix()
 	var condition string
 
 	switch activityLevel {
 	case ActivityNever:
 		condition = "request_count = 0"
 	case ActivityVeryInactive:
-		threshold := now - InactiveThreshold
+		threshold := nowUnix - InactiveThreshold
 		condition = fmt.Sprintf("request_count > 0 AND id NOT IN (SELECT DISTINCT user_id FROM logs WHERE type IN (2,5) AND created_at >= %d)", threshold)
 	case ActivityInactive:
-		threshold := now - ActiveThreshold
+		threshold := nowUnix - ActiveThreshold
 		condition = fmt.Sprintf("request_count > 0 AND id NOT IN (SELECT DISTINCT user_id FROM logs WHERE type IN (2,5) AND created_at >= %d)", threshold)
 	default:
 		return nil, fmt.Errorf("invalid activity level: %s", activityLevel)
@@ -551,8 +552,11 @@ func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, d
 		s.db.Execute(fmt.Sprintf(
 			"DELETE FROM users WHERE deleted_at IS NULL AND role != 100 AND %s", condition))
 	} else {
-		s.db.Execute(fmt.Sprintf(
-			"UPDATE users SET deleted_at = %d WHERE deleted_at IS NULL AND role != 100 AND %s", now, condition))
+		_, err = s.db.Execute(s.db.RebindQuery(fmt.Sprintf(
+			"UPDATE users SET deleted_at = ? WHERE deleted_at IS NULL AND role != 100 AND %s", condition)), now)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	logger.L.Business(fmt.Sprintf("批量删除 %s 用户: %d 个", activityLevel, affected))
