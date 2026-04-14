@@ -14,6 +14,7 @@ func RegisterTokenRoutes(r *gin.RouterGroup) {
 	{
 		g.GET("", ListTokens)
 		g.GET("/statistics", GetTokenStatistics)
+		g.GET("/groups", GetTokenGroups)
 	}
 }
 
@@ -46,6 +47,24 @@ func ListTokens(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,
+	})
+}
+
+// GET /api/tokens/groups
+func GetTokenGroups(c *gin.Context) {
+	svc := service.NewTokenService()
+	groups, err := svc.GetTokenGroups()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "Failed to get token groups: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    groups,
 	})
 }
 

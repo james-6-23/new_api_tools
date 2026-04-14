@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import { cn } from '../lib/utils'
-import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Maximize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical, Search, Filter, Layers, Plus, Pencil, Trash2, FolderPlus, Tag } from 'lucide-react'
+import { RefreshCw, Loader2, Timer, ChevronDown, Settings2, Check, Clock, Palette, Moon, Sun, Minimize2, Maximize2, Zap, Terminal, Leaf, Droplets, HelpCircle, Copy, X, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, ArrowUpDown, GripVertical, Search, Filter, Layers, Plus, Pencil, Trash2, FolderPlus, Tag, KeyRound } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -132,6 +132,13 @@ const MODEL_LOGO_MAP: Record<string, IconComponent> = {
   'coze': Coze,
   'newapi': NewAPI,
   'zai': ZAI,
+}
+
+// Token group from abilities table (system-defined)
+interface TokenGroup {
+  group_name: string
+  model_count: number
+  models: string[]
 }
 
 // Custom user-defined model group
@@ -367,6 +374,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     return saved || 'all'
   })
   const [customGroups, setCustomGroups] = useState<CustomModelGroup[]>([])
+  const [tokenGroups, setTokenGroups] = useState<TokenGroup[]>([])
   const [showGroupManager, setShowGroupManager] = useState(false)
   const [siteTitle, setSiteTitle] = useState('')
   const [showSiteTitleInput, setShowSiteTitleInput] = useState(false)
@@ -548,6 +556,21 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     return []
   }, [apiUrl, getAuthHeaders])
 
+  // 加载令牌分组列表
+  const fetchTokenGroups = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}${getApiPrefix()}/token-groups`, {
+        headers: getAuthHeaders(),
+      })
+      const data = await response.json()
+      if (data.success && Array.isArray(data.data)) {
+        setTokenGroups(data.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch token groups:', error)
+    }
+  }, [apiUrl, getApiPrefix, getAuthHeaders])
+
   // Update refresh interval ref
   useEffect(() => {
     refreshIntervalRef.current = refreshInterval
@@ -580,10 +603,12 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           saveSelectedModelsToBackend(defaultModels)
         }
       }
+      // 同时加载令牌分组
+      fetchTokenGroups()
     } catch (error) {
       console.error('Failed to fetch available models:', error)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, loadConfigFromBackend, saveSelectedModelsToBackend])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, loadConfigFromBackend, saveSelectedModelsToBackend, fetchTokenGroups])
 
   // Fetch model statuses
   // forceRefresh: bypass cache to get fresh data (used for manual refresh)
@@ -719,6 +744,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const groupCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 }
     customGroups.forEach(g => { counts[g.id] = 0 })
+    tokenGroups.forEach(g => { counts[`token:${g.group_name}`] = 0 })
     // Count only models that are actually displayed (with requests > 0)
     const visibleModels = modelStatuses.filter(m => m.total_requests > 0)
     counts.all = visibleModels.length
@@ -728,9 +754,14 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           counts[g.id] = (counts[g.id] || 0) + 1
         }
       })
+      tokenGroups.forEach(g => {
+        if (g.models.includes(m.model_name)) {
+          counts[`token:${g.group_name}`] = (counts[`token:${g.group_name}`] || 0) + 1
+        }
+      })
     })
     return counts
-  }, [modelStatuses, customGroups])
+  }, [modelStatuses, customGroups, tokenGroups])
 
   // Average success rate
   const avgSuccessRate = useMemo(() => {
@@ -815,9 +846,19 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
 
     // Apply group filter
     if (groupFilter !== 'all') {
-      const group = customGroups.find(g => g.id === groupFilter)
-      if (group) {
-        result = result.filter(m => group.models.includes(m.model_name))
+      if (groupFilter.startsWith('token:')) {
+        // 令牌分组过滤
+        const tokenGroupName = groupFilter.slice(6)
+        const tg = tokenGroups.find(g => g.group_name === tokenGroupName)
+        if (tg) {
+          result = result.filter(m => tg.models.includes(m.model_name))
+        }
+      } else {
+        // 自定义分组过滤
+        const group = customGroups.find(g => g.id === groupFilter)
+        if (group) {
+          result = result.filter(m => group.models.includes(m.model_name))
+        }
       }
     }
 
@@ -827,7 +868,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     }
 
     return result
-  }, [modelStatuses, sortMode, customOrder, statusFilter, groupFilter, customGroups])
+  }, [modelStatuses, sortMode, customOrder, statusFilter, groupFilter, customGroups, tokenGroups])
 
   // Handle drag end for reordering
   const handleDragEnd = (event: DragEndEvent) => {
@@ -1395,6 +1436,33 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                     return <Layers size={14} className="flex-shrink-0" />
                   })()}
                   {group.name}
+                  <span className={cn("text-xs tabular-nums", isActive ? "opacity-80" : "text-muted-foreground")}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+            {/* Token Groups Separator + Tabs */}
+            {tokenGroups.length > 0 && (customGroups.length > 0 ? (
+              <div className="w-px h-5 bg-border flex-shrink-0 mx-1" />
+            ) : null)}
+            {tokenGroups.map((tg) => {
+              const filterId = `token:${tg.group_name}`
+              const isActive = groupFilter === filterId
+              const count = groupCounts[filterId] || 0
+              return (
+                <button
+                  key={filterId}
+                  onClick={() => handleGroupFilterChange(filterId)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                    isActive
+                      ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30 shadow-sm"
+                      : "bg-background hover:bg-muted border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <KeyRound size={13} className="flex-shrink-0" />
+                  {tg.group_name}
                   <span className={cn("text-xs tabular-nums", isActive ? "opacity-80" : "text-muted-foreground")}>
                     {count}
                   </span>

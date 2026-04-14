@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag, KeyRound } from 'lucide-react'
 import {
   OpenAI, Gemini, DeepSeek, SiliconCloud, Groq, Ollama, Claude, Mistral,
   Minimax, Baichuan, Moonshot, Spark, Qwen, Yi, Hunyuan, Stepfun, ZeroOne,
@@ -34,6 +34,13 @@ interface ModelStatus {
 }
 
 type ThemeId = 'obsidian' | 'daylight' | 'minimal' | 'neon' | 'forest' | 'ocean' | 'terminal' | 'cupertino' | 'material' | 'openai' | 'anthropic' | 'vercel' | 'linear' | 'stripe' | 'github' | 'discord' | 'tesla'
+
+// Token group from abilities table (system-defined)
+interface EmbedTokenGroup {
+  group_name: string
+  model_count: number
+  models: string[]
+}
 
 // Custom model group (loaded from backend)
 interface EmbedCustomGroup {
@@ -832,6 +839,7 @@ export function ModelStatusEmbed({
   const [timeWindow, setTimeWindow] = useState('24h')
   const [theme, setTheme] = useState<ThemeId>(defaultTheme || 'daylight')
   const [customGroups, setCustomGroups] = useState<EmbedCustomGroup[]>([])
+  const [tokenGroups, setTokenGroups] = useState<EmbedTokenGroup[]>([])
   const [groupFilter, setGroupFilter] = useState('all')
   const [siteTitle, setSiteTitle] = useState('')
 
@@ -882,6 +890,16 @@ export function ModelStatusEmbed({
         // Load site title
         if (data.site_title) {
           setSiteTitle(data.site_title)
+        }
+        // 加载令牌分组
+        try {
+          const tgResponse = await fetch(`${apiUrl}/api/model-status/embed/token-groups`)
+          const tgData = await tgResponse.json()
+          if (tgData.success && Array.isArray(tgData.data)) {
+            setTokenGroups(tgData.data)
+          }
+        } catch {
+          // 令牌分组加载失败不影响主流程
         }
         return data.data || []
       }
@@ -1096,12 +1114,15 @@ export function ModelStatusEmbed({
         })()}
 
         {/* Group Filter Tabs */}
-        {customGroups.length > 0 && modelStatuses.length > 0 && theme !== 'minimal' && (() => {
+        {(customGroups.length > 0 || tokenGroups.length > 0) && modelStatuses.length > 0 && theme !== 'minimal' && (() => {
           // Count models per group
           const activeModels = modelStatuses.filter(m => m.total_requests > 0)
           const groupCountMap: Record<string, number> = { all: activeModels.length }
           customGroups.forEach(g => {
             groupCountMap[g.id] = activeModels.filter(m => g.models.includes(m.model_name)).length
+          })
+          tokenGroups.forEach(g => {
+            groupCountMap[`token:${g.group_name}`] = activeModels.filter(m => g.models.includes(m.model_name)).length
           })
 
           return (
@@ -1166,6 +1187,31 @@ export function ModelStatusEmbed({
                   </button>
                 )
               })}
+              {/* Token Group Separator + Tabs */}
+              {tokenGroups.length > 0 && customGroups.length > 0 && (
+                <div className="w-px h-4 bg-current opacity-20 flex-shrink-0 mx-0.5" />
+              )}
+              {tokenGroups.map((tg) => {
+                const filterId = `token:${tg.group_name}`
+                const isActive = groupFilter === filterId
+                const count = groupCountMap[filterId] || 0
+                return (
+                  <button
+                    key={filterId}
+                    onClick={() => setGroupFilter(filterId)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border transition-all whitespace-nowrap flex-shrink-0",
+                      isActive
+                        ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-semibold shadow-sm"
+                        : cn("border-transparent opacity-60 hover:opacity-100", styles.statsText)
+                    )}
+                  >
+                    <KeyRound size={12} className="flex-shrink-0" />
+                    {tg.group_name}
+                    <span className="opacity-70 tabular-nums">{count}</span>
+                  </button>
+                )
+              })}
             </div>
           )
         })()}
@@ -1178,6 +1224,11 @@ export function ModelStatusEmbed({
             {modelStatuses
               .filter(model => {
                 if (groupFilter === 'all') return true
+                if (groupFilter.startsWith('token:')) {
+                  const tgName = groupFilter.slice(6)
+                  const tg = tokenGroups.find(g => g.group_name === tgName)
+                  return tg ? tg.models.includes(model.model_name) : true
+                }
                 const group = customGroups.find(g => g.id === groupFilter)
                 return group ? group.models.includes(model.model_name) : true
               })

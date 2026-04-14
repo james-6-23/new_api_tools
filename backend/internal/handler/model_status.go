@@ -44,6 +44,7 @@ func RegisterModelStatusRoutes(r *gin.RouterGroup) {
 		g.GET("/config/site-title", GetSiteTitleConfig)
 		g.PUT("/config/site-title", SetSiteTitleConfig)
 		g.POST("/config/site-title", SetSiteTitleConfig)
+		g.GET("/token-groups", GetTokenGroupsForModelStatus)
 	}
 
 }
@@ -62,6 +63,7 @@ func RegisterModelStatusEmbedRoutes(r *gin.Engine) {
 		g.GET("/status/all", GetAllModelsStatusHandler)
 		g.GET("/config", GetEmbedConfig)
 		g.GET("/config/selected", GetSelectedModels)
+		g.GET("/token-groups", GetTokenGroupsForModelStatus)
 	}
 
 	// Compat embed path: /api/model-status/embed/... (used by embed.html frontend)
@@ -75,6 +77,7 @@ func RegisterModelStatusEmbedRoutes(r *gin.Engine) {
 		e.GET("/status/all", GetAllModelsStatusHandler)
 		e.GET("/config", GetEmbedConfig)
 		e.GET("/config/selected", GetSelectedModels)
+		e.GET("/token-groups", GetTokenGroupsForModelStatus)
 	}
 }
 
@@ -403,6 +406,20 @@ func SetCustomGroupsConfig(c *gin.Context) {
 		"success": true,
 		"data":    req.Groups,
 		"message": "Custom groups updated",
+	})
+}
+
+// GET /token-groups
+func GetTokenGroupsForModelStatus(c *gin.Context) {
+	svc := service.NewModelStatusService()
+	groups, err := svc.GetTokenGroups()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    groups,
 	})
 }
 

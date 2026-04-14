@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { Key, Loader2, RefreshCw, Filter, Search, CheckCircle2, XCircle, AlertCircle, Clock } from 'lucide-react'
+import { Key, Loader2, RefreshCw, Filter, Search, CheckCircle2, XCircle, AlertCircle, Clock, Tag } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -29,6 +29,12 @@ interface TokenRecord {
   created_time: number
   accessed_time: number
   expired_time: number
+}
+
+interface TokenGroup {
+  group_name: string
+  token_count: number
+  active_count: number
 }
 
 interface TokenStatistics {
@@ -62,6 +68,8 @@ export function Tokens() {
   const [totalPages, setTotalPages] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [nameSearch, setNameSearch] = useState('')
+  const [groupFilter, setGroupFilter] = useState('')
+  const [availableGroups, setAvailableGroups] = useState<TokenGroup[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
@@ -83,12 +91,23 @@ export function Tokens() {
     } finally { setStatsLoading(false) }
   }, [apiUrl, getAuthHeaders])
 
+  const fetchGroups = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/tokens/groups`, { headers: getAuthHeaders() })
+      const data = await response.json()
+      if (data.success) setAvailableGroups(data.data || [])
+    } catch (error) {
+      console.error('Failed to fetch token groups:', error)
+    }
+  }, [apiUrl, getAuthHeaders])
+
   const fetchTokens = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() })
       if (statusFilter) params.append('status', statusFilter)
       if (nameSearch) params.append('name', nameSearch)
+      if (groupFilter) params.append('group', groupFilter)
 
       const response = await fetch(`${apiUrl}/api/tokens?${params.toString()}`, { headers: getAuthHeaders() })
       const data = await response.json()
@@ -104,15 +123,16 @@ export function Tokens() {
       showToast('error', '网络错误，请重试')
       console.error('Failed to fetch tokens:', error)
     } finally { setLoading(false) }
-  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, nameSearch, showToast])
+  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, nameSearch, groupFilter, showToast])
 
   useEffect(() => { fetchTokens() }, [fetchTokens])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
-  useEffect(() => { setPage(1) }, [statusFilter, nameSearch])
+  useEffect(() => { fetchGroups() }, [fetchGroups])
+  useEffect(() => { setPage(1) }, [statusFilter, nameSearch, groupFilter])
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await Promise.all([fetchTokens(), fetchStatistics()])
+    await Promise.all([fetchTokens(), fetchStatistics(), fetchGroups()])
     setRefreshing(false)
     showToast('success', '数据已刷新')
   }
@@ -223,8 +243,19 @@ export function Tokens() {
                 <option value="expired">已过期</option>
               </Select>
             </div>
-            <div className="flex items-end lg:col-span-2 justify-end">
-              <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setNameSearch('') }} className="text-muted-foreground hover:text-foreground">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">令牌分组</label>
+              <Select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+                <option value="">全部分组</option>
+                {availableGroups.map((g) => (
+                  <option key={g.group_name} value={g.group_name}>
+                    {g.group_name} ({g.token_count})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex items-end justify-end">
+              <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setNameSearch(''); setGroupFilter('') }} className="text-muted-foreground hover:text-foreground">
                 重置筛选
               </Button>
             </div>
@@ -259,6 +290,7 @@ export function Tokens() {
                     <TableHead>名称</TableHead>
                     <TableHead>所属用户</TableHead>
                     <TableHead>状态</TableHead>
+                    <TableHead>分组</TableHead>
                     <TableHead>额度</TableHead>
                     <TableHead>模型限制</TableHead>
                     <TableHead>创建时间</TableHead>
@@ -296,6 +328,20 @@ export function Tokens() {
                         )}
                       </TableCell>
                       <TableCell>{getStatusBadge(t)}</TableCell>
+                      <TableCell>
+                        {t.group ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary cursor-pointer hover:bg-primary/20 transition-colors"
+                            onClick={() => setGroupFilter(t.group)}
+                            title={`筛选分组: ${t.group}`}
+                          >
+                            <Tag className="w-3 h-3" />
+                            {t.group}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">default</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col text-xs">
                           {t.unlimited_quota ? (

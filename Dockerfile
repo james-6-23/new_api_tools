@@ -54,7 +54,21 @@ RUN apk add --no-cache \
 COPY --from=backend-builder /build/server /app/server
 
 # 创建数据目录
-RUN mkdir -p /app/data && chmod 755 /app/data
+RUN mkdir -p /app/data/geoip && chmod 755 /app/data
+
+# 预下载 GeoIP 数据库（多镜像源，任一成功即可；失败不阻塞构建，运行时会自动重试）
+# 注意: docker-compose 挂载 ./data:/app/data 时，此预下载文件会被覆盖
+#       Go 后端会在运行时自动检测并下载缺失的数据库
+RUN curl -sL --connect-timeout 30 --max-time 120 \
+    -o /app/data/geoip/GeoLite2-City.mmdb \
+    "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb" \
+    || curl -sL --connect-timeout 30 --max-time 120 \
+    -o /app/data/geoip/GeoLite2-City.mmdb \
+    "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb" \
+    || curl -sL --connect-timeout 30 --max-time 120 \
+    -o /app/data/geoip/GeoLite2-City.mmdb \
+    "https://cdn.jsdelivr.net/gh/adysec/IP_database@main/geolite/GeoLite2-City.mmdb" \
+    || echo "[GeoIP] Build-time download failed, will auto-download at runtime"
 
 # 复制前端构建产物
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html

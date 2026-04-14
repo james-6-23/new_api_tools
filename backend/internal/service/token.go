@@ -232,6 +232,28 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 	}, nil
 }
 
+// GetTokenGroups 返回所有不同的令牌分组及其令牌数量
+func (s *TokenService) GetTokenGroups() ([]map[string]interface{}, error) {
+	groupCol := s.groupCol()
+	query := s.db.RebindQuery(fmt.Sprintf(`
+		SELECT COALESCE(NULLIF(%s, ''), 'default') as group_name,
+			COUNT(*) as token_count,
+			SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as active_count
+		FROM tokens
+		WHERE deleted_at IS NULL
+		GROUP BY COALESCE(NULLIF(%s, ''), 'default')
+		ORDER BY token_count DESC`, groupCol, groupCol))
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		return []map[string]interface{}{}, nil
+	}
+	return rows, nil
+}
+
 // GetTokenStatistics returns aggregate token counts
 func (s *TokenService) GetTokenStatistics() (*TokenStatistics, error) {
 	now := time.Now().Unix()

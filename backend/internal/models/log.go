@@ -29,5 +29,5 @@ const (
 	LogTypeConsume  = 2 // 消费
 	LogTypeManage   = 3 // 管理
 	LogTypeSystem   = 4 // 系统
-	LogTypeRecharge = 5 // 充值
+	LogTypeFailure  = 5 // 失败请求 (部分 NewAPI 版本支持)
 )
