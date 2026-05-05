@@ -1446,6 +1446,18 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
   const activeName = isActive ? value.slice(6) : ''
   const activeCount = isActive ? (countMap[value] || 0) : 0
 
+  // 按倍率降序排序：高倍率优先；缺失倍率的分组按名称字母排序后置底
+  const sortedGroups = useMemo(() => {
+    return [...groups].sort((a, b) => {
+      const aHas = a.ratio !== undefined
+      const bHas = b.ratio !== undefined
+      if (aHas && bHas) return (b.ratio as number) - (a.ratio as number)
+      if (aHas) return -1
+      if (bHas) return 1
+      return a.group_name.localeCompare(b.group_name)
+    })
+  }, [groups])
+
   useEffect(() => {
     if (!open) return
     const handleClickOutside = (e: MouseEvent) => {
@@ -1520,7 +1532,7 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
 
           <div className="h-px bg-current/10 my-1 mx-2" />
 
-          {groups.map((g) => {
+          {sortedGroups.map((g) => {
             const filterId = `token:${g.group_name}`
             const selected = value === filterId
             const count = countMap[filterId] || 0
