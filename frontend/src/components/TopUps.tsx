@@ -195,20 +195,20 @@ export function TopUps() {
         />
       </div>
 
-      {/* Total Stats Summary */}
+      {/* Total Stats Summary —— 仅统计成功充值（不含待处理 / 失败） */}
       <Card className="bg-muted/30 border-dashed">
         <CardContent className="p-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">总充值:</span>
-            <span className="font-semibold">{statsLoading ? '-' : statistics?.total_count || 0} 笔</span>
+            <span className="text-muted-foreground">成功充值:</span>
+            <span className="font-semibold">{statsLoading ? '-' : statistics?.success_count || 0} 笔</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">总金额:</span>
-            <span className="font-semibold text-primary">{statsLoading ? '-' : formatMoney(statistics?.total_money || 0)}</span>
+            <span className="text-muted-foreground">实收金额:</span>
+            <span className="font-semibold text-primary">{statsLoading ? '-' : formatMoney(statistics?.success_money || 0)}</span>
           </div>
           <div className="flex items-center gap-2">
-             <span className="text-muted-foreground">总额度:</span>
-             <span className="font-semibold">{statsLoading ? '-' : formatAmount(statistics?.total_amount || 0)} USD</span>
+             <span className="text-muted-foreground">入账额度:</span>
+             <span className="font-semibold">{statsLoading ? '-' : formatAmount(statistics?.success_amount || 0)} USD</span>
           </div>
         </CardContent>
       </Card>
