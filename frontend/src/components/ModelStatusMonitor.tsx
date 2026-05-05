@@ -2275,12 +2275,9 @@ function ModelStatusCard({ model, dragHandleProps }: ModelStatusCardProps) {
     : model.current_status === 'yellow' ? 'text-yellow-600 dark:text-yellow-400'
       : 'text-red-600 dark:text-red-400'
 
-  // Card border/bg classes based on status
-  const cardStatusClass = model.current_status === 'red'
-    ? 'border-l-[3px] border-l-red-500 bg-red-500/[0.03]'
-    : model.current_status === 'yellow'
-      ? 'border-l-[3px] border-l-yellow-500 bg-yellow-500/[0.03]'
-      : ''
+  // 状态颜色仅通过模型名右侧的徽章 + 成功率数字 + 时间槽点显示，
+  // 卡片本身不再加左边色条/背景染色，保持视觉中性。
+  const cardStatusClass = ''
 
   return (
     <Card className={cn(
