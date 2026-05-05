@@ -177,18 +177,22 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 		tokenIDs = append(tokenIDs, toInt64(row["id"]))
 	}
 	if len(tokenIDs) > 0 {
+		// 90-day window so the query can hit idx_logs_created_token_ip instead of
+		// scanning each token's full history via idx_logs_token_id.
+		windowStart := time.Now().Unix() - 90*86400
 		placeholders := make([]string, 0, len(tokenIDs))
-		aggArgs := make([]interface{}, 0, len(tokenIDs))
+		aggArgs := make([]interface{}, 0, len(tokenIDs)+1)
+		aggArgs = append(aggArgs, windowStart)
 		for i, tokenID := range tokenIDs {
-			placeholders = append(placeholders, s.db.Placeholder(i+1))
+			placeholders = append(placeholders, s.db.Placeholder(i+2))
 			aggArgs = append(aggArgs, tokenID)
 		}
 
 		lastUsedQuery := fmt.Sprintf(`
 			SELECT token_id, MAX(created_at) as accessed_time
 			FROM logs
-			WHERE type IN (2, 5) AND token_id IN (%s)
-			GROUP BY token_id`, strings.Join(placeholders, ","))
+			WHERE created_at >= %s AND type IN (2, 5) AND token_id IN (%s)
+			GROUP BY token_id`, s.db.Placeholder(1), strings.Join(placeholders, ","))
 
 		lastUsedRows, err := s.db.Query(lastUsedQuery, aggArgs...)
 		if err != nil {

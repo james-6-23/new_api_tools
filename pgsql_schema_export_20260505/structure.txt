@@ -1,0 +1,330 @@
+            table_name            |        column_name         |        data_type         
+----------------------------------+----------------------------+--------------------------
+ abilities                        | group                      | character varying
+ abilities                        | model                      | character varying
+ abilities                        | channel_id                 | bigint
+ abilities                        | enabled                    | boolean
+ abilities                        | priority                   | bigint
+ abilities                        | weight                     | bigint
+ abilities                        | tag                        | text
+ channels                         | id                         | bigint
+ channels                         | type                       | bigint
+ channels                         | key                        | text
+ channels                         | open_ai_organization       | text
+ channels                         | test_model                 | text
+ channels                         | status                     | bigint
+ channels                         | name                       | text
+ channels                         | weight                     | bigint
+ channels                         | created_time               | bigint
+ channels                         | test_time                  | bigint
+ channels                         | response_time              | bigint
+ channels                         | base_url                   | text
+ channels                         | other                      | text
+ channels                         | balance                    | numeric
+ channels                         | balance_updated_time       | bigint
+ channels                         | models                     | text
+ channels                         | group                      | character varying
+ channels                         | used_quota                 | bigint
+ channels                         | model_mapping              | text
+ channels                         | status_code_mapping        | character varying
+ channels                         | priority                   | bigint
+ channels                         | auto_ban                   | bigint
+ channels                         | other_info                 | text
+ channels                         | tag                        | text
+ channels                         | setting                    | text
+ channels                         | param_override             | text
+ channels                         | header_override            | text
+ channels                         | remark                     | character varying
+ channels                         | channel_info               | json
+ channels                         | settings                   | text
+ checkins                         | id                         | bigint
+ checkins                         | user_id                    | bigint
+ checkins                         | checkin_date               | character varying
+ checkins                         | quota_awarded              | bigint
+ checkins                         | created_at                 | bigint
+ custom_oauth_providers           | id                         | bigint
+ custom_oauth_providers           | name                       | character varying
+ custom_oauth_providers           | slug                       | character varying
+ custom_oauth_providers           | enabled                    | boolean
+ custom_oauth_providers           | client_id                  | character varying
+ custom_oauth_providers           | client_secret              | character varying
+ custom_oauth_providers           | authorization_endpoint     | character varying
+ custom_oauth_providers           | token_endpoint             | character varying
+ custom_oauth_providers           | user_info_endpoint         | character varying
+ custom_oauth_providers           | scopes                     | character varying
+ custom_oauth_providers           | user_id_field              | character varying
+ custom_oauth_providers           | username_field             | character varying
+ custom_oauth_providers           | display_name_field         | character varying
+ custom_oauth_providers           | email_field                | character varying
+ custom_oauth_providers           | well_known                 | character varying
+ custom_oauth_providers           | auth_style                 | bigint
+ custom_oauth_providers           | created_at                 | timestamp with time zone
+ custom_oauth_providers           | updated_at                 | timestamp with time zone
+ custom_oauth_providers           | icon                       | character varying
+ custom_oauth_providers           | access_policy              | text
+ custom_oauth_providers           | access_denied_message      | character varying
+ logs                             | id                         | bigint
+ logs                             | user_id                    | bigint
+ logs                             | created_at                 | bigint
+ logs                             | type                       | bigint
+ logs                             | content                    | text
+ logs                             | username                   | text
+ logs                             | token_name                 | text
+ logs                             | model_name                 | text
+ logs                             | quota                      | bigint
+ logs                             | prompt_tokens              | bigint
+ logs                             | completion_tokens          | bigint
+ logs                             | use_time                   | bigint
+ logs                             | is_stream                  | boolean
+ logs                             | channel_id                 | bigint
+ logs                             | channel_name               | text
+ logs                             | token_id                   | bigint
+ logs                             | group                      | text
+ logs                             | ip                         | text
+ logs                             | other                      | text
+ logs                             | request_id                 | character varying
+ midjourneys                      | id                         | bigint
+ midjourneys                      | code                       | bigint
+ midjourneys                      | user_id                    | bigint
+ midjourneys                      | action                     | character varying
+ midjourneys                      | mj_id                      | text
+ midjourneys                      | prompt                     | text
+ midjourneys                      | prompt_en                  | text
+ midjourneys                      | description                | text
+ midjourneys                      | state                      | text
+ midjourneys                      | submit_time                | bigint
+ midjourneys                      | start_time                 | bigint
+ midjourneys                      | finish_time                | bigint
+ midjourneys                      | image_url                  | text
+ midjourneys                      | video_url                  | text
+ midjourneys                      | video_urls                 | text
+ midjourneys                      | status                     | character varying
+ midjourneys                      | progress                   | character varying
+ midjourneys                      | fail_reason                | text
+ midjourneys                      | channel_id                 | bigint
+ midjourneys                      | quota                      | bigint
+ midjourneys                      | buttons                    | text
+ midjourneys                      | properties                 | text
+ models                           | id                         | bigint
+ models                           | model_name                 | character varying
+ models                           | description                | text
+ models                           | icon                       | character varying
+ models                           | tags                       | character varying
+ models                           | vendor_id                  | bigint
+ models                           | endpoints                  | text
+ models                           | status                     | bigint
+ models                           | sync_official              | bigint
+ models                           | created_time               | bigint
+ models                           | updated_time               | bigint
+ models                           | deleted_at                 | timestamp with time zone
+ models                           | name_rule                  | bigint
+ options                          | key                        | text
+ options                          | value                      | text
+ passkey_credentials              | id                         | bigint
+ passkey_credentials              | user_id                    | bigint
+ passkey_credentials              | credential_id              | character varying
+ passkey_credentials              | public_key                 | text
+ passkey_credentials              | attestation_type           | character varying
+ passkey_credentials              | aa_guid                    | character varying
+ passkey_credentials              | sign_count                 | bigint
+ passkey_credentials              | clone_warning              | boolean
+ passkey_credentials              | user_present               | boolean
+ passkey_credentials              | user_verified              | boolean
+ passkey_credentials              | backup_eligible            | boolean
+ passkey_credentials              | backup_state               | boolean
+ passkey_credentials              | transports                 | text
+ passkey_credentials              | attachment                 | character varying
+ passkey_credentials              | last_used_at               | timestamp with time zone
+ passkey_credentials              | created_at                 | timestamp with time zone
+ passkey_credentials              | updated_at                 | timestamp with time zone
+ passkey_credentials              | deleted_at                 | timestamp with time zone
+ prefill_groups                   | id                         | bigint
+ prefill_groups                   | name                       | character varying
+ prefill_groups                   | type                       | character varying
+ prefill_groups                   | items                      | json
+ prefill_groups                   | description                | character varying
+ prefill_groups                   | created_time               | bigint
+ prefill_groups                   | updated_time               | bigint
+ prefill_groups                   | deleted_at                 | timestamp with time zone
+ quota_data                       | id                         | bigint
+ quota_data                       | user_id                    | bigint
+ quota_data                       | username                   | character varying
+ quota_data                       | model_name                 | character varying
+ quota_data                       | created_at                 | bigint
+ quota_data                       | token_used                 | bigint
+ quota_data                       | count                      | bigint
+ quota_data                       | quota                      | bigint
+ redemptions                      | id                         | bigint
+ redemptions                      | user_id                    | bigint
+ redemptions                      | key                        | character
+ redemptions                      | status                     | bigint
+ redemptions                      | name                       | text
+ redemptions                      | quota                      | bigint
+ redemptions                      | created_time               | bigint
+ redemptions                      | redeemed_time              | bigint
+ redemptions                      | used_user_id               | bigint
+ redemptions                      | deleted_at                 | timestamp with time zone
+ redemptions                      | expired_time               | bigint
+ setups                           | id                         | bigint
+ setups                           | version                    | character varying
+ setups                           | initialized_at             | bigint
+ subscription_orders              | id                         | bigint
+ subscription_orders              | user_id                    | bigint
+ subscription_orders              | plan_id                    | bigint
+ subscription_orders              | money                      | numeric
+ subscription_orders              | trade_no                   | character varying
+ subscription_orders              | payment_method             | character varying
+ subscription_orders              | status                     | text
+ subscription_orders              | create_time                | bigint
+ subscription_orders              | complete_time              | bigint
+ subscription_orders              | provider_payload           | text
+ subscription_orders              | payment_provider           | character varying
+ subscription_plans               | id                         | bigint
+ subscription_plans               | title                      | character varying
+ subscription_plans               | subtitle                   | character varying
+ subscription_plans               | price_amount               | numeric
+ subscription_plans               | currency                   | character varying
+ subscription_plans               | duration_unit              | character varying
+ subscription_plans               | duration_value             | bigint
+ subscription_plans               | custom_seconds             | bigint
+ subscription_plans               | enabled                    | boolean
+ subscription_plans               | sort_order                 | bigint
+ subscription_plans               | stripe_price_id            | character varying
+ subscription_plans               | creem_product_id           | character varying
+ subscription_plans               | max_purchase_per_user      | bigint
+ subscription_plans               | upgrade_group              | character varying
+ subscription_plans               | total_amount               | bigint
+ subscription_plans               | quota_reset_period         | character varying
+ subscription_plans               | quota_reset_custom_seconds | bigint
+ subscription_plans               | created_at                 | bigint
+ subscription_plans               | updated_at                 | bigint
+ subscription_pre_consume_records | id                         | bigint
+ subscription_pre_consume_records | request_id                 | character varying
+ subscription_pre_consume_records | user_id                    | bigint
+ subscription_pre_consume_records | user_subscription_id       | bigint
+ subscription_pre_consume_records | pre_consumed               | bigint
+ subscription_pre_consume_records | status                     | character varying
+ subscription_pre_consume_records | created_at                 | bigint
+ subscription_pre_consume_records | updated_at                 | bigint
+ tasks                            | id                         | bigint
+ tasks                            | created_at                 | bigint
+ tasks                            | updated_at                 | bigint
+ tasks                            | task_id                    | character varying
+ tasks                            | platform                   | character varying
+ tasks                            | user_id                    | bigint
+ tasks                            | group                      | character varying
+ tasks                            | channel_id                 | bigint
+ tasks                            | quota                      | bigint
+ tasks                            | action                     | character varying
+ tasks                            | status                     | character varying
+ tasks                            | fail_reason                | text
+ tasks                            | submit_time                | bigint
+ tasks                            | start_time                 | bigint
+ tasks                            | finish_time                | bigint
+ tasks                            | progress                   | character varying
+ tasks                            | properties                 | json
+ tasks                            | private_data               | json
+ tasks                            | data                       | json
+ tokens                           | id                         | bigint
+ tokens                           | user_id                    | bigint
+ tokens                           | key                        | character varying
+ tokens                           | status                     | bigint
+ tokens                           | name                       | text
+ tokens                           | created_time               | bigint
+ tokens                           | accessed_time              | bigint
+ tokens                           | expired_time               | bigint
+ tokens                           | remain_quota               | bigint
+ tokens                           | unlimited_quota            | boolean
+ tokens                           | model_limits_enabled       | boolean
+ tokens                           | model_limits               | text
+ tokens                           | allow_ips                  | text
+ tokens                           | used_quota                 | bigint
+ tokens                           | group                      | text
+ tokens                           | deleted_at                 | timestamp with time zone
+ tokens                           | cross_group_retry          | boolean
+ top_ups                          | id                         | bigint
+ top_ups                          | user_id                    | bigint
+ top_ups                          | amount                     | bigint
+ top_ups                          | money                      | numeric
+ top_ups                          | trade_no                   | character varying
+ top_ups                          | payment_method             | character varying
+ top_ups                          | create_time                | bigint
+ top_ups                          | complete_time              | bigint
+ top_ups                          | status                     | text
+ top_ups                          | payment_provider           | character varying
+ two_fa_backup_codes              | id                         | bigint
+ two_fa_backup_codes              | user_id                    | bigint
+ two_fa_backup_codes              | code_hash                  | character varying
+ two_fa_backup_codes              | is_used                    | boolean
+ two_fa_backup_codes              | used_at                    | timestamp with time zone
+ two_fa_backup_codes              | created_at                 | timestamp with time zone
+ two_fa_backup_codes              | deleted_at                 | timestamp with time zone
+ two_fas                          | id                         | bigint
+ two_fas                          | user_id                    | bigint
+ two_fas                          | secret                     | character varying
+ two_fas                          | is_enabled                 | boolean
+ two_fas                          | failed_attempts            | bigint
+ two_fas                          | locked_until               | timestamp with time zone
+ two_fas                          | last_used_at               | timestamp with time zone
+ two_fas                          | created_at                 | timestamp with time zone
+ two_fas                          | updated_at                 | timestamp with time zone
+ two_fas                          | deleted_at                 | timestamp with time zone
+ user_oauth_bindings              | id                         | bigint
+ user_oauth_bindings              | user_id                    | bigint
+ user_oauth_bindings              | provider_id                | bigint
+ user_oauth_bindings              | provider_user_id           | character varying
+ user_oauth_bindings              | created_at                 | timestamp with time zone
+ user_subscriptions               | id                         | bigint
+ user_subscriptions               | user_id                    | bigint
+ user_subscriptions               | plan_id                    | bigint
+ user_subscriptions               | amount_total               | bigint
+ user_subscriptions               | amount_used                | bigint
+ user_subscriptions               | start_time                 | bigint
+ user_subscriptions               | end_time                   | bigint
+ user_subscriptions               | status                     | character varying
+ user_subscriptions               | source                     | character varying
+ user_subscriptions               | last_reset_time            | bigint
+ user_subscriptions               | next_reset_time            | bigint
+ user_subscriptions               | upgrade_group              | character varying
+ user_subscriptions               | prev_user_group            | character varying
+ user_subscriptions               | created_at                 | bigint
+ user_subscriptions               | updated_at                 | bigint
+ users                            | id                         | bigint
+ users                            | username                   | text
+ users                            | password                   | text
+ users                            | display_name               | text
+ users                            | role                       | bigint
+ users                            | status                     | bigint
+ users                            | email                      | text
+ users                            | github_id                  | text
+ users                            | oidc_id                    | text
+ users                            | wechat_id                  | text
+ users                            | telegram_id                | text
+ users                            | access_token               | character
+ users                            | quota                      | bigint
+ users                            | used_quota                 | bigint
+ users                            | request_count              | bigint
+ users                            | group                      | character varying
+ users                            | aff_code                   | character varying
+ users                            | aff_count                  | bigint
+ users                            | aff_quota                  | bigint
+ users                            | aff_history                | bigint
+ users                            | inviter_id                 | bigint
+ users                            | deleted_at                 | timestamp with time zone
+ users                            | linux_do_id                | text
+ users                            | setting                    | text
+ users                            | remark                     | character varying
+ users                            | stripe_customer            | character varying
+ users                            | discord_id                 | text
+ users                            | created_at                 | bigint
+ users                            | last_login_at              | bigint
+ vendors                          | id                         | bigint
+ vendors                          | name                       | character varying
+ vendors                          | description                | text
+ vendors                          | icon                       | character varying
+ vendors                          | status                     | bigint
+ vendors                          | created_time               | bigint
+ vendors                          | updated_time               | bigint
+ vendors                          | deleted_at                 | timestamp with time zone
+(326 rows)
+

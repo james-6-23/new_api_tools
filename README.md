@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 
-**NewAPI-Tool** 是一个专为 [NewAPI](https://github.com/ketches/new-api) (One API 分支) 设计的现代化增强管理中间件。它通过直观的 Web 界面，补全了原版系统在数据可视化、充值记录审计、批量兑换码管理等方面的功能，帮助管理员更高效地运维系统。
+**NewAPI-Tool** 是一个专为 [NewAPI](https://github.com/QuantumNous/new-api) (One API 分支) 设计的现代化增强管理中间件。它通过直观的 Web 界面，补全了原版系统在数据可视化、充值记录审计、批量兑换码管理等方面的功能，帮助管理员更高效地运维系统。
 
 ## ✨ 核心特性
 
@@ -96,14 +96,14 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 
 ## 🛠️ 本地开发
 
-### 后端 (Python/FastAPI)
+### 后端 (Go)
 
 ```bash
 cd backend
-# 推荐使用 uv 进行依赖管理
-uv sync
-# 启动开发服务器
-uv run uvicorn app.main:app --reload --port 8000
+# 安装依赖
+go mod download
+# 启动开发服务器（默认端口 8000，可通过 SERVER_PORT 覆盖）
+go run ./cmd/server
 ```
 
 ### 前端 (React/Vite)
@@ -115,9 +115,7 @@ npm install
 npm run dev
 ```
 
-## 🔗 API 文档
-
-后端启动后，可访问 `http://localhost:8000/docs` 查看完整的 Swagger API 文档。
+## 🔗 API 端点
 
 主要端点：
 - `POST /api/auth/login`: 管理员登录

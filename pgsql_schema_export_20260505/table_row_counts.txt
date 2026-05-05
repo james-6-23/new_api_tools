@@ -1,0 +1,29 @@
+            table_name            | estimated_rows 
+----------------------------------+----------------
+ logs                             |        4517830
+ checkins                         |         302753
+ quota_data                       |         202762
+ tokens                           |          16369
+ users                            |          10834
+ redemptions                      |           9717
+ top_ups                          |           1228
+ abilities                        |            203
+ options                          |             58
+ two_fa_backup_codes              |             44
+ channels                         |             30
+ models                           |             -1
+ vendors                          |             -1
+ prefill_groups                   |             -1
+ setups                           |             -1
+ two_fas                          |             -1
+ tasks                            |             -1
+ user_subscriptions               |             -1
+ subscription_orders              |             -1
+ midjourneys                      |             -1
+ subscription_pre_consume_records |             -1
+ subscription_plans               |             -1
+ custom_oauth_providers           |             -1
+ user_oauth_bindings              |             -1
+ passkey_credentials              |             -1
+(25 rows)
+

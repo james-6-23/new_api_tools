@@ -24,6 +24,9 @@ services:
       - DB_NAME=${DB_NAME:-}
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
+      # 连接池（可选）
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-}
       # 认证
       - API_KEY=${API_KEY}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
@@ -41,6 +44,10 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    # 用于 NewAPI 以 network_mode: host 部署的场景：DSN 中的 127.0.0.1
+    # 会被 deploy.sh 改写为 host.docker.internal，靠这条解析到宿主机网关。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy

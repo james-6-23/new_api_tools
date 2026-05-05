@@ -1,0 +1,31 @@
+            table_name            | column_name |            constraint_name            
+----------------------------------+-------------+---------------------------------------
+ abilities                        | group       | abilities_pkey
+ abilities                        | model       | abilities_pkey
+ abilities                        | channel_id  | abilities_pkey
+ channels                         | id          | channels_pkey
+ checkins                         | id          | checkins_pkey
+ custom_oauth_providers           | id          | custom_oauth_providers_pkey
+ logs                             | id          | logs_pkey
+ midjourneys                      | id          | midjourneys_pkey
+ models                           | id          | models_pkey
+ options                          | key         | options_pkey
+ passkey_credentials              | id          | passkey_credentials_pkey
+ prefill_groups                   | id          | prefill_groups_pkey
+ quota_data                       | id          | quota_data_pkey
+ redemptions                      | id          | redemptions_pkey
+ setups                           | id          | setups_pkey
+ subscription_orders              | id          | subscription_orders_pkey
+ subscription_plans               | id          | subscription_plans_pkey
+ subscription_pre_consume_records | id          | subscription_pre_consume_records_pkey
+ tasks                            | id          | tasks_pkey
+ tokens                           | id          | tokens_pkey
+ top_ups                          | id          | top_ups_pkey
+ two_fa_backup_codes              | id          | two_fa_backup_codes_pkey
+ two_fas                          | id          | two_fas_pkey
+ user_oauth_bindings              | id          | user_oauth_bindings_pkey
+ user_subscriptions               | id          | user_subscriptions_pkey
+ users                            | id          | users_pkey
+ vendors                          | id          | vendors_pkey
+(27 rows)
+

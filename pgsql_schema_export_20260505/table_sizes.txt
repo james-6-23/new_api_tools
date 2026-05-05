@@ -1,0 +1,29 @@
+            table_name            | total_size | total_size_bytes 
+----------------------------------+------------+------------------
+ logs                             | 5149 MB    |       5399232512
+ checkins                         | 47 MB      |         48848896
+ quota_data                       | 35 MB      |         36478976
+ users                            | 11 MB      |         11264000
+ tokens                           | 5864 kB    |          6004736
+ redemptions                      | 2840 kB    |          2908160
+ top_ups                          | 576 kB     |           589824
+ channels                         | 208 kB     |           212992
+ abilities                        | 200 kB     |           204800
+ options                          | 192 kB     |           196608
+ tasks                            | 104 kB     |           106496
+ midjourneys                      | 80 kB      |            81920
+ two_fas                          | 72 kB      |            73728
+ vendors                          | 64 kB      |            65536
+ two_fa_backup_codes              | 56 kB      |            57344
+ user_subscriptions               | 56 kB      |            57344
+ prefill_groups                   | 48 kB      |            49152
+ subscription_orders              | 48 kB      |            49152
+ subscription_pre_consume_records | 48 kB      |            49152
+ models                           | 40 kB      |            40960
+ passkey_credentials              | 40 kB      |            40960
+ user_oauth_bindings              | 40 kB      |            40960
+ setups                           | 24 kB      |            24576
+ custom_oauth_providers           | 24 kB      |            24576
+ subscription_plans               | 16 kB      |            16384
+(25 rows)
+

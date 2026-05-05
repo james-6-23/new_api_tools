@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import ReactECharts from 'echarts-for-react'
-import * as echarts from 'echarts'
+import ReactECharts from 'echarts-for-react/lib/core'
+import * as echarts from 'echarts/core'
+import { MapChart } from 'echarts/charts'
+import { TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([MapChart, TooltipComponent, VisualMapComponent, CanvasRenderer])
 import {
   Globe, MapPin, RefreshCw, Loader2, TrendingUp,
   AlertTriangle, Activity, ChevronRight, ChevronDown, Timer, Map as MapIcon
@@ -954,6 +959,7 @@ export function IPAnalysis() {
             <div className="relative overflow-hidden rounded-b-lg">
               <ReactECharts
                 key={`${mapType}-${isDarkMode ? 'dark' : 'light'}`}
+                echarts={echarts}
                 option={currentMapOption}
                 style={{ height: '450px', width: '100%' }}
                 opts={{ renderer: 'canvas' }}

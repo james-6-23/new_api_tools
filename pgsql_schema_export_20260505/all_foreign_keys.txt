@@ -1,0 +1,4 @@
+ table_name | column_name | foreign_table | foreign_column | constraint_name 
+------------+-------------+---------------+----------------+-----------------
+(0 rows)
+

@@ -361,7 +361,6 @@ func (s *DashboardService) GetChannelStatus() ([]map[string]interface{}, error) 
 			COALESCE(balance, 0) as balance,
 			priority
 		FROM channels
-		WHERE deleted_at IS NULL
 		ORDER BY priority DESC, id ASC`
 
 	return s.db.Query(query)

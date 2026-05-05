@@ -37,21 +37,11 @@ func (s *LogAnalyticsService) GetAnalyticsState() map[string]interface{} {
 	}
 
 	// Get actual counts from database
-	row, err := s.db.QueryOne(`
-		SELECT COUNT(*) as total_processed, COALESCE(MAX(id), 0) as last_log_id
-		FROM logs WHERE type IN (2, 5)`)
-	if err != nil || row == nil {
-		return map[string]interface{}{
-			"last_log_id":       0,
-			"last_processed_at": 0,
-			"total_processed":   0,
-		}
-	}
-
+	total, maxID := s.getLogsApproxStats()
 	result := map[string]interface{}{
-		"last_log_id":       toInt64(row["last_log_id"]),
+		"last_log_id":       maxID,
 		"last_processed_at": time.Now().Unix(),
-		"total_processed":   toInt64(row["total_processed"]),
+		"total_processed":   total,
 	}
 
 	cm.Set("analytics:state", result, 60*time.Second)
@@ -247,16 +237,7 @@ func (s *LogAnalyticsService) ProcessLogs() (map[string]interface{}, error) {
 	s.clearAllCaches()
 
 	// Get actual counts to return meaningful response
-	row, _ := s.db.QueryOne(`
-		SELECT COUNT(*) as total, COALESCE(MAX(id), 0) as max_id
-		FROM logs WHERE type IN (2, 5)`)
-
-	total := int64(0)
-	maxID := int64(0)
-	if row != nil {
-		total = toInt64(row["total"])
-		maxID = toInt64(row["max_id"])
-	}
+	total, maxID := s.getLogsApproxStats()
 
 	logger.L.Business(fmt.Sprintf("日志分析处理完成，共 %d 条日志", total))
 
@@ -281,16 +262,7 @@ func (s *LogAnalyticsService) BatchProcess(maxIterations int) (map[string]interf
 	s.clearAllCaches()
 
 	// Get total log count for progress reporting
-	row, _ := s.db.QueryOne(`
-		SELECT COUNT(*) as total, COALESCE(MAX(id), 0) as max_id
-		FROM logs WHERE type IN (2, 5)`)
-
-	total := int64(0)
-	maxID := int64(0)
-	if row != nil {
-		total = toInt64(row["total"])
-		maxID = toInt64(row["max_id"])
-	}
+	total, maxID := s.getLogsApproxStats()
 
 	elapsed := time.Since(start).Seconds()
 	logsPerSec := float64(0)
@@ -323,19 +295,7 @@ func (s *LogAnalyticsService) ResetAnalytics() error {
 // GetSyncStatus returns sync status matching frontend SyncStatus interface
 func (s *LogAnalyticsService) GetSyncStatus() (map[string]interface{}, error) {
 	// Since Go queries DB directly, we are always "synced"
-	row, err := s.db.QueryOne(`
-		SELECT COUNT(*) as total, COALESCE(MAX(id), 0) as max_id
-		FROM logs WHERE type IN (2, 5)`)
-	if err != nil {
-		return nil, err
-	}
-
-	total := int64(0)
-	maxID := int64(0)
-	if row != nil {
-		total = toInt64(row["total"])
-		maxID = toInt64(row["max_id"])
-	}
+	total, maxID := s.getLogsApproxStats()
 
 	return map[string]interface{}{
 		"last_log_id":        maxID,
@@ -379,4 +339,28 @@ func (s *LogAnalyticsService) clearAllCaches() {
 	cm.Delete("analytics:user_quota_ranking")
 	cm.Delete("analytics:model_statistics")
 	cm.Delete(analyticsStatePrefix)
+}
+
+// getLogsApproxStats returns the approximate logs row count and the exact max id.
+// Avoids scanning the millions-row logs table:
+//   - total: estimated via pg_class.reltuples (PG) or information_schema (MySQL)
+//   - maxID: exact, but cheap because it uses the PK reverse index (1 row read)
+//
+// The estimate is for the whole table — not filtered by `type IN (2,5)` — since the
+// dashboard/sync indicators only need a ballpark. Over-estimate is acceptable per CLAUDE.md.
+func (s *LogAnalyticsService) getLogsApproxStats() (total int64, maxID int64) {
+	if row, err := s.db.QueryOne(`SELECT COALESCE(MAX(id), 0) as max_id FROM logs`); err == nil && row != nil {
+		maxID = toInt64(row["max_id"])
+	}
+
+	var statsQuery string
+	if s.db.IsPG {
+		statsQuery = `SELECT reltuples::bigint as total FROM pg_class WHERE relname = 'logs'`
+	} else {
+		statsQuery = `SELECT TABLE_ROWS as total FROM information_schema.TABLES WHERE TABLE_NAME = 'logs' AND TABLE_SCHEMA = DATABASE()`
+	}
+	if row, err := s.db.QueryOne(statsQuery); err == nil && row != nil {
+		total = toInt64(row["total"])
+	}
+	return
 }

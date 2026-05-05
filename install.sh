@@ -132,10 +132,16 @@ show_initial_env_detection() {
     echo -e "  ${GREEN}✓${NC} NewAPI 容器: ${GREEN}${newapi_container}${NC}"
 
     # 检测网络
-    local networks
+    local networks network_mode
     networks=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$newapi_container" 2>/dev/null | head -n 1)
+    network_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$newapi_container" 2>/dev/null || true)
 
-    if [[ "$networks" == "bridge" ]]; then
+    if [[ "$network_mode" == "host" ]]; then
+      echo -e "  ${YELLOW}!${NC} 网络模式: ${YELLOW}Host 模式${NC}"
+      echo -e "    ${YELLOW}→ NewAPI 与宿主机共享网络栈${NC}"
+      echo -e "    ${YELLOW}→ newapi-tools 将通过 host.docker.internal 访问数据库${NC}"
+      echo -e "    ${YELLOW}→ 启动时会附加 docker-compose.host.yml overlay${NC}"
+    elif [[ "$networks" == "bridge" ]]; then
       echo -e "  ${YELLOW}!${NC} 网络模式: ${YELLOW}Bridge 模式${NC}"
       echo -e "    ${YELLOW}→ NewAPI 使用默认 bridge 网络${NC}"
       echo -e "    ${YELLOW}→ 将使用 IPv4 地址连接数据库${NC}"
@@ -238,6 +244,7 @@ detect_env_details() {
     ENV_DB_PORT=$(grep -E '^DB_PORT=' "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "未知")
     ENV_DB_NAME=$(grep -E '^DB_NAME=' "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "未知")
     ENV_FRONTEND_PORT=$(grep -E '^FRONTEND_PORT=' "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "1145")
+    ENV_ADMIN_PASSWORD=$(grep -E '^ADMIN_PASSWORD=' "$env_file" 2>/dev/null | cut -d'=' -f2- || echo "")
   else
     ENV_NEWAPI_NETWORK="未配置"
     ENV_DB_ENGINE="未配置"
@@ -245,6 +252,7 @@ detect_env_details() {
     ENV_DB_PORT="未配置"
     ENV_DB_NAME="未配置"
     ENV_FRONTEND_PORT="1145"
+    ENV_ADMIN_PASSWORD=""
   fi
 
   # 判断网络模式
@@ -284,6 +292,13 @@ show_management_menu() {
     echo -e "  项目目录: ${YELLOW}$target_dir${NC}"
     echo -e "  服务状态: $service_status"
     echo -e "  访问地址: ${BLUE}http://${server_ip}:${ENV_FRONTEND_PORT}${NC}"
+    echo ""
+    echo -e "${GREEN}【登录凭证】${NC}"
+    if [[ -n "$ENV_ADMIN_PASSWORD" ]]; then
+      echo -e "  登录密码: ${YELLOW}${ENV_ADMIN_PASSWORD}${NC}"
+    else
+      echo -e "  登录密码: ${RED}未在 .env 中找到${NC}"
+    fi
     echo ""
     echo -e "${GREEN}【网络模式】${NC}"
     echo -e "  运行模式: $NETWORK_MODE_COLOR"

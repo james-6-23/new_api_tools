@@ -30,6 +30,8 @@ type Config struct {
 	// Database
 	SQLDSN         string         `json:"sql_dsn"`
 	DatabaseEngine DatabaseEngine `json:"database_engine"`
+	DBMaxOpenConns int            `json:"db_max_open_conns"`
+	DBMaxIdleConns int            `json:"db_max_idle_conns"`
 
 	// Redis
 	RedisConnString string `json:"redis_conn_string"`
@@ -69,6 +71,8 @@ func Load() *Config {
 
 		// Database
 		SQLDSN: getEnvStr("SQL_DSN", ""),
+		DBMaxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 50),
+		DBMaxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 15),
 
 		// Redis
 		RedisConnString: getEnvStr("REDIS_CONN_STRING", ""),

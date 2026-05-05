@@ -521,10 +521,10 @@ func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, d
 		condition = "request_count = 0"
 	case ActivityVeryInactive:
 		threshold := nowUnix - InactiveThreshold
-		condition = fmt.Sprintf("request_count > 0 AND id NOT IN (SELECT DISTINCT user_id FROM logs WHERE type IN (2,5) AND created_at >= %d)", threshold)
+		condition = fmt.Sprintf("request_count > 0 AND NOT EXISTS (SELECT 1 FROM logs l WHERE l.user_id = users.id AND l.type IN (2,5) AND l.created_at >= %d)", threshold)
 	case ActivityInactive:
 		threshold := nowUnix - ActiveThreshold
-		condition = fmt.Sprintf("request_count > 0 AND id NOT IN (SELECT DISTINCT user_id FROM logs WHERE type IN (2,5) AND created_at >= %d)", threshold)
+		condition = fmt.Sprintf("request_count > 0 AND NOT EXISTS (SELECT 1 FROM logs l WHERE l.user_id = users.id AND l.type IN (2,5) AND l.created_at >= %d)", threshold)
 	default:
 		return nil, fmt.Errorf("invalid activity level: %s", activityLevel)
 	}

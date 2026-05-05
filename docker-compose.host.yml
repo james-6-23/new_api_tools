@@ -1,0 +1,17 @@
+# 当 NewAPI 以 network_mode: host 部署时，使用此 overlay：
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d
+#
+# 作用：
+#   - 不再尝试加入 NewAPI 的 docker 网络（host 模式下根本没有可加入的网络）
+#   - newapi-tools 仍跑在自己的 bridge 网络里，通过 host.docker.internal 访问宿主机数据库
+#   - 数据库 DSN 中的 127.0.0.1 / localhost 由 deploy.sh 改写为 host.docker.internal
+#
+# 需要 docker compose v2.24+（依赖 !reset 语法）
+
+services:
+  newapi-tools:
+    networks: !reset
+      - default
+
+networks:
+  newapi-network: !reset null

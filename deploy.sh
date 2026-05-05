@@ -19,6 +19,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+COMPOSE_HOST_FILE="${SCRIPT_DIR}/docker-compose.host.yml"
+
+# 由 detect_environment() 设置：host 模式下需要追加 overlay compose 文件
+COMPOSE_FILES=("-f" "$COMPOSE_FILE")
 
 # 颜色输出
 RED='\033[0;31m'
@@ -50,6 +54,26 @@ detect_docker_compose() {
 
 trim() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 
+# 生成 32 字符强密码（约 200 bits 熵）
+# 字符集：62 字母数字 + 14 个安全特殊符号 = 76 chars
+# 刻意排除：$ ` \ " ' = # ; & | < > [ ] / 空格 — 这些会破坏 .env / docker-compose / heredoc 解析
+# 注意：- 必须放在 tr 字符类末尾，否则会被解读为范围操作符
+generate_strong_password() {
+  local alphabet='A-Za-z0-9!@%^*()_+:?,.-'
+  local pw=""
+  if [[ -r /dev/urandom ]]; then
+    pw="$(LC_ALL=C tr -dc "$alphabet" </dev/urandom 2>/dev/null | head -c 32)"
+  fi
+  if [[ ${#pw} -lt 32 ]] && command -v openssl >/dev/null 2>&1; then
+    pw="$(openssl rand 256 2>/dev/null | LC_ALL=C tr -dc "$alphabet" | head -c 32)"
+  fi
+  if [[ ${#pw} -lt 32 ]]; then
+    log_warn "强密码生成失败，回退到 20 字符字母数字"
+    pw="$(head -c 256 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 20)"
+  fi
+  echo "$pw"
+}
+
 first_csv() {
   echo "${1}" | sed 's/,.*$//'
 }
@@ -76,6 +100,34 @@ extract_dsn_host() {
   if [[ -n "$host" ]]; then echo "$host"; return 0; fi
   host="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:/]+).*#\1#p')"
   echo "$host"
+}
+
+# 从 DSN URL 解析用户名 (postgresql://user:pass@host:port/db)
+extract_dsn_user() {
+  local dsn="${1:-}"
+  [[ -z "$dsn" ]] && return 0
+  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:@/]+)(:[^@/]*)?@.*#\1#p'
+}
+
+# 从 DSN URL 解析密码
+extract_dsn_password() {
+  local dsn="${1:-}"
+  [[ -z "$dsn" ]] && return 0
+  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^:@/]+:([^@]*)@.*#\1#p'
+}
+
+# 从 DSN URL 解析端口
+extract_dsn_port() {
+  local dsn="${1:-}"
+  [[ -z "$dsn" ]] && return 0
+  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^:/]+:([0-9]+).*#\1#p'
+}
+
+# 从 DSN URL 解析数据库名
+extract_dsn_dbname() {
+  local dsn="${1:-}"
+  [[ -z "$dsn" ]] && return 0
+  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^/]+/([^?]+).*#\1#p'
 }
 
 detect_newapi_container() {
@@ -163,38 +215,58 @@ detect_environment() {
   fi
 
   # 检测网络
-  local networks
+  local networks network_mode
   networks="$(detect_networks_for_container "$NEWAPI_CONTAINER" | trim || true)"
-  NEWAPI_NETWORK="${NEWAPI_NETWORK:-}"
-  if [[ -z "$NEWAPI_NETWORK" ]]; then
-    NEWAPI_NETWORK="$(echo "$networks" | head -n 1 | trim)"
-  fi
-  [[ -n "$NEWAPI_NETWORK" ]] || die "无法确定 NewAPI 容器的 Docker 网络"
-  container_is_on_network "$NEWAPI_CONTAINER" "$NEWAPI_NETWORK" || die "容器 '$NEWAPI_CONTAINER' 未连接到网络 '$NEWAPI_NETWORK'"
+  network_mode="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$NEWAPI_CONTAINER" 2>/dev/null | trim || true)"
 
-  # 检查是否为默认 bridge 网络（不支持 network-scoped alias）
-  ORIGINAL_NETWORK="$NEWAPI_NETWORK"
+  ORIGINAL_NETWORK=""
   USE_BRIDGE_MODE=false
+  USE_HOST_MODE=false
 
-  if [[ "$NEWAPI_NETWORK" == "bridge" ]]; then
-    log_warn "检测到 NewAPI 使用默认 bridge 网络"
-    log_warn "默认 bridge 网络不支持 Docker 服务发现，将使用 IPv4 地址模式"
-    log_info ""
-    log_info "提示：为获得更好的体验，建议将 NewAPI 部署在用户自定义网络中"
-    log_info ""
-    USE_BRIDGE_MODE=true
+  if [[ "$network_mode" == "host" ]]; then
+    # ===== Host 网络模式 =====
+    log_warn "检测到 NewAPI 使用 host 网络模式"
+    log_info "newapi-tools 仍跑在 bridge 网络里，通过 host.docker.internal 访问宿主机数据库"
+    USE_HOST_MODE=true
+    NEWAPI_NETWORK=""
+    ORIGINAL_NETWORK="host"
 
-    # 创建一个用户自定义网络供 docker-compose 使用
-    # 这样可以避免 "network-scoped alias" 错误
-    if ! docker network inspect newapi-tools-network >/dev/null 2>&1; then
-      log_info "创建网络 'newapi-tools-network' 供服务使用..."
-      docker network create newapi-tools-network || die "创建网络失败"
+    # 加载 host 模式 overlay（去掉 external newapi-network 依赖）
+    if [[ -f "$COMPOSE_HOST_FILE" ]]; then
+      COMPOSE_FILES=("-f" "$COMPOSE_FILE" "-f" "$COMPOSE_HOST_FILE")
+    else
+      log_warn "未找到 $COMPOSE_HOST_FILE，host 模式可能启动失败"
     fi
-    # 使用新创建的网络作为 NEWAPI_NETWORK（供 docker-compose.yml 使用）
-    NEWAPI_NETWORK="newapi-tools-network"
-    log_success "使用网络: $NEWAPI_NETWORK (数据库连接将使用 IPv4 地址)"
   else
-    log_success "检测到网络: $NEWAPI_NETWORK"
+    NEWAPI_NETWORK="${NEWAPI_NETWORK:-}"
+    if [[ -z "$NEWAPI_NETWORK" ]]; then
+      NEWAPI_NETWORK="$(echo "$networks" | head -n 1 | trim)"
+    fi
+    [[ -n "$NEWAPI_NETWORK" ]] || die "无法确定 NewAPI 容器的 Docker 网络"
+    container_is_on_network "$NEWAPI_CONTAINER" "$NEWAPI_NETWORK" || die "容器 '$NEWAPI_CONTAINER' 未连接到网络 '$NEWAPI_NETWORK'"
+
+    ORIGINAL_NETWORK="$NEWAPI_NETWORK"
+
+    if [[ "$NEWAPI_NETWORK" == "bridge" ]]; then
+      log_warn "检测到 NewAPI 使用默认 bridge 网络"
+      log_warn "默认 bridge 网络不支持 Docker 服务发现，将使用 IPv4 地址模式"
+      log_info ""
+      log_info "提示：为获得更好的体验，建议将 NewAPI 部署在用户自定义网络中"
+      log_info ""
+      USE_BRIDGE_MODE=true
+
+      # 创建一个用户自定义网络供 docker-compose 使用
+      # 这样可以避免 "network-scoped alias" 错误
+      if ! docker network inspect newapi-tools-network >/dev/null 2>&1; then
+        log_info "创建网络 'newapi-tools-network' 供服务使用..."
+        docker network create newapi-tools-network || die "创建网络失败"
+      fi
+      # 使用新创建的网络作为 NEWAPI_NETWORK（供 docker-compose.yml 使用）
+      NEWAPI_NETWORK="newapi-tools-network"
+      log_success "使用网络: $NEWAPI_NETWORK (数据库连接将使用 IPv4 地址)"
+    else
+      log_success "检测到网络: $NEWAPI_NETWORK"
+    fi
   fi
 
   # 检测数据库 DSN
@@ -205,6 +277,36 @@ detect_environment() {
 
   DB_ENGINE="$(extract_dsn_engine "$detected_dsn" || true)"
   DB_DNS="$(extract_dsn_host "$detected_dsn" || true)"
+
+  # ===== Host 模式：完全从 DSN 解析凭证，跳过数据库容器探测 =====
+  if [[ "$USE_HOST_MODE" == "true" ]]; then
+    [[ -n "$detected_dsn" ]] || die "host 模式下必须能从 NewAPI 容器读取 SQL_DSN，但未检测到"
+    [[ -n "$DB_ENGINE" ]] || die "无法从 DSN 识别数据库引擎: $detected_dsn"
+
+    # 把 127.0.0.1 / localhost 替换为宿主机网关
+    if [[ "$DB_DNS" == "127.0.0.1" || "$DB_DNS" == "localhost" || "$DB_DNS" == "::1" ]]; then
+      DB_DNS="host.docker.internal"
+      log_info "数据库地址改写: 127.0.0.1 → host.docker.internal"
+    fi
+
+    DB_USER="$(extract_dsn_user "$detected_dsn")"
+    DB_PASSWORD="$(extract_dsn_password "$detected_dsn")"
+    DB_PORT="$(extract_dsn_port "$detected_dsn")"
+    DB_NAME="$(extract_dsn_dbname "$detected_dsn")"
+
+    if [[ "$DB_ENGINE" == "postgres" ]]; then
+      DB_PORT="${DB_PORT:-5432}"
+      DB_USER="${DB_USER:-postgres}"
+      DB_NAME="${DB_NAME:-new-api}"
+    elif [[ "$DB_ENGINE" == "mysql" ]]; then
+      DB_PORT="${DB_PORT:-3306}"
+      DB_USER="${DB_USER:-root}"
+      DB_NAME="${DB_NAME:-new-api}"
+    fi
+
+    log_success "检测到数据库 (host 模式): $DB_ENGINE @ $DB_DNS:$DB_PORT/$DB_NAME"
+    return 0
+  fi
 
   # 检测数据库容器
   local db_container="" db_service=""
@@ -324,30 +426,37 @@ interactive_config() {
   log_info "开始配置..."
   echo ""
 
+  AUTO_GENERATED_PASSWORD=false
+
   # 前端访问密码
   if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-    while true; do
-      echo -e "${YELLOW}请设置前端访问密码:${NC}"
-      read -sp "密码: " ADMIN_PASSWORD
-      echo ""
+    echo -e "${YELLOW}请设置前端访问密码${NC} ${BLUE}(直接回车自动生成 32 位强密码)${NC}:"
+    read -srp "密码: " ADMIN_PASSWORD
+    echo ""
 
-      if [[ -z "$ADMIN_PASSWORD" ]]; then
-        log_error "密码不能为空，请重新输入"
+    if [[ -z "$ADMIN_PASSWORD" ]]; then
+      ADMIN_PASSWORD="$(generate_strong_password)"
+      AUTO_GENERATED_PASSWORD=true
+      log_success "已自动生成强密码（部署完成后会显示，请妥善保存）"
+    else
+      while true; do
+        read -srp "确认密码: " ADMIN_PASSWORD_CONFIRM
         echo ""
-        continue
-      fi
-
-      read -sp "确认密码: " ADMIN_PASSWORD_CONFIRM
-      echo ""
-
-      if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+        if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]]; then
+          break
+        fi
         log_error "两次输入的密码不一致，请重新输入"
         echo ""
-        continue
-      fi
-
-      break
-    done
+        read -srp "密码: " ADMIN_PASSWORD
+        echo ""
+        if [[ -z "$ADMIN_PASSWORD" ]]; then
+          ADMIN_PASSWORD="$(generate_strong_password)"
+          AUTO_GENERATED_PASSWORD=true
+          log_success "已自动生成强密码"
+          break
+        fi
+      done
+    fi
   fi
   log_success "前端密码已设置"
 
@@ -374,9 +483,15 @@ generate_env_file() {
     sql_dsn="${DB_USER}:${DB_PASSWORD}@tcp(${DB_DNS}:${DB_PORT})/${DB_NAME}?charset=utf8mb4&parseTime=True"
   fi
 
+  # 给生成的 .env 标记网络模式，方便后续 status / 故障排查辨认
+  local network_mode_tag="custom"
+  [[ "$USE_BRIDGE_MODE" == "true" ]] && network_mode_tag="bridge"
+  [[ "$USE_HOST_MODE" == "true" ]] && network_mode_tag="host"
+
   cat > "$ENV_FILE" <<EOF
 # NewAPI Middleware Tool 配置文件
 # 由 deploy.sh 自动生成于 $(date '+%Y-%m-%d %H:%M:%S')
+# 网络部署模式: ${network_mode_tag}
 
 # NewAPI 环境
 NEWAPI_CONTAINER=${NEWAPI_CONTAINER}
@@ -487,20 +602,22 @@ start_services() {
   # 检查是否有旧容器
   if docker ps -a --format '{{.Names}}' | grep -qE '^newapi-tools$'; then
     log_warn "发现已存在的服务容器，正在停止..."
-    $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down 2>/dev/null || true
+    $DOCKER_COMPOSE "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
 
   # 拉取最新镜像
   log_info "拉取最新镜像..."
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
+  $DOCKER_COMPOSE "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" pull
 
   # 启动服务
-  $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  $DOCKER_COMPOSE "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" up -d
 
   # 将容器连接到 NewAPI 网络（用于访问数据库）
   # 注意：docker-compose.yml 中也配置了网络，这里是双重保障
-  # 在 bridge 模式下跳过，因为我们使用 IPv4 地址连接数据库
-  if [[ "$USE_BRIDGE_MODE" != "true" && -n "$NEWAPI_NETWORK" ]]; then
+  # bridge / host 模式下跳过：bridge 用 IPv4 地址；host 用 host.docker.internal
+  if [[ "$USE_HOST_MODE" == "true" ]]; then
+    log_info "host 模式：跳过 docker network connect"
+  elif [[ "$USE_BRIDGE_MODE" != "true" && -n "$NEWAPI_NETWORK" ]]; then
     log_info "连接到 NewAPI 网络: $NEWAPI_NETWORK"
     docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络已连接"
   fi
@@ -519,7 +636,23 @@ start_services() {
   echo -e "前端访问地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}${NC}"
   echo -e "API 地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}/api${NC}"
   echo ""
-  echo -e "登录密码: ${YELLOW}${ADMIN_PASSWORD}${NC}"
+
+  if [[ "${AUTO_GENERATED_PASSWORD:-false}" == "true" ]]; then
+    local sep
+    sep="$(printf '═%.0s' {1..62})"
+    echo -e "${YELLOW}╔${sep}╗${NC}"
+    printf "${YELLOW}║${NC}  ${YELLOW}⚠  以下是自动生成的随机登录密码，请立即复制保存：${NC}        ${YELLOW}║${NC}\n"
+    printf "${YELLOW}╠${sep}╣${NC}\n"
+    printf "${YELLOW}║${NC}                                                                ${YELLOW}║${NC}\n"
+    printf "${YELLOW}║${NC}    ${GREEN}%-56s${NC}    ${YELLOW}║${NC}\n" "$ADMIN_PASSWORD"
+    printf "${YELLOW}║${NC}                                                                ${YELLOW}║${NC}\n"
+    printf "${YELLOW}╠${sep}╣${NC}\n"
+    printf "${YELLOW}║${NC}  忘记密码可重新运行 install.sh，管理面板内会显示该密码         ${YELLOW}║${NC}\n"
+    printf "${YELLOW}║${NC}  也可执行: grep ADMIN_PASSWORD %-32s${YELLOW}║${NC}\n" "$ENV_FILE"
+    echo -e "${YELLOW}╚${sep}╝${NC}"
+  else
+    echo -e "登录密码: ${YELLOW}${ADMIN_PASSWORD}${NC}"
+  fi
   echo ""
   echo -e "配置文件: ${ENV_FILE}"
   echo -e "Compose 文件: ${COMPOSE_FILE}"

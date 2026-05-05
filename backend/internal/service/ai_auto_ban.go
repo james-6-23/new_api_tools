@@ -150,15 +150,24 @@ func (s *AIAutoBanService) ClearAuditLogs() map[string]interface{} {
 	}
 }
 
+// groupCol returns the properly quoted column name for 'group' (reserved word)
+func (s *AIAutoBanService) groupCol() string {
+	if s.db.IsPG {
+		return `"group"`
+	}
+	return "`group`"
+}
+
 // GetAvailableGroups returns groups used in recent logs
 func (s *AIAutoBanService) GetAvailableGroups(days int) ([]map[string]interface{}, error) {
 	startTime := time.Now().Unix() - int64(days*86400)
-	query := s.db.RebindQuery(`
-		SELECT DISTINCT group_id as name, COUNT(*) as count
+	groupCol := s.groupCol()
+	query := s.db.RebindQuery(fmt.Sprintf(`
+		SELECT %s as name, COUNT(*) as count
 		FROM logs
-		WHERE created_at >= ? AND group_id IS NOT NULL AND group_id != ''
-		GROUP BY group_id
-		ORDER BY count DESC`)
+		WHERE created_at >= ? AND %s IS NOT NULL AND %s != ''
+		GROUP BY %s
+		ORDER BY count DESC`, groupCol, groupCol, groupCol, groupCol))
 
 	rows, err := s.db.Query(query, startTime)
 	if err != nil {

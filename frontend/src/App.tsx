@@ -1,7 +1,20 @@
-import { useState, useEffect } from 'react'
-import { Login, Layout, TabType, Generator, History, TopUps, Dashboard, Redemptions, Analytics, UserManagement, RealtimeRanking, IPAnalysis, ModelStatusMonitor, AutoGroup, Tokens } from './components'
+import { useState, useEffect, lazy, Suspense } from 'react'
+import { Login, Layout, TabType, Dashboard } from './components'
 import { useAuth } from './contexts/AuthContext'
 import { WarmupScreen } from './components/WarmupScreen'
+
+// 懒加载非首屏 tab — 显著降低初始包体积
+const Generator = lazy(() => import('./components/Generator').then(m => ({ default: m.Generator })))
+const History = lazy(() => import('./components/History').then(m => ({ default: m.History })))
+const TopUps = lazy(() => import('./components/TopUps').then(m => ({ default: m.TopUps })))
+const Redemptions = lazy(() => import('./components/Redemptions').then(m => ({ default: m.Redemptions })))
+const Analytics = lazy(() => import('./components/Analytics').then(m => ({ default: m.Analytics })))
+const UserManagement = lazy(() => import('./components/UserManagement').then(m => ({ default: m.UserManagement })))
+const RealtimeRanking = lazy(() => import('./components/RealtimeRanking').then(m => ({ default: m.RealtimeRanking })))
+const IPAnalysis = lazy(() => import('./components/IPAnalysis').then(m => ({ default: m.IPAnalysis })))
+const ModelStatusMonitor = lazy(() => import('./components/ModelStatusMonitor').then(m => ({ default: m.ModelStatusMonitor })))
+const AutoGroup = lazy(() => import('./components/AutoGroup').then(m => ({ default: m.AutoGroup })))
+const Tokens = lazy(() => import('./components/Tokens').then(m => ({ default: m.Tokens })))
 
 // Valid tabs
 const validTabs: TabType[] = ['dashboard', 'topups', 'risk', 'ip-analysis', 'analytics', 'model-status', 'users', 'tokens', 'auto-group', 'generator', 'redemptions', 'history']
@@ -158,7 +171,15 @@ function App() {
 
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab} onLogout={logout}>
-      {renderContent()}
+      <Suspense
+        fallback={
+          <div className="min-h-[400px] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+          </div>
+        }
+      >
+        {renderContent()}
+      </Suspense>
     </Layout>
   )
 }

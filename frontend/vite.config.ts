@@ -16,6 +16,17 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         embed: path.resolve(__dirname, 'embed.html'),
       },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('react-dom') || /\/node_modules\/(react|scheduler)\//.test(id)) return 'react-vendor'
+          if (id.includes('echarts') || id.includes('echarts-for-react')) return 'echarts'
+          if (id.includes('@lobehub/icons')) return 'lobehub-icons'
+          if (id.includes('lucide-react')) return 'lucide'
+          if (id.includes('@radix-ui/')) return 'radix'
+          if (id.includes('@dnd-kit/')) return 'dnd'
+        },
+      },
     },
   },
   server: {
