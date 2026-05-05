@@ -135,6 +135,20 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                   showLabel = index % 3 === 0 || index === total - 1
                 }
 
+                // 让 tooltip 在边界柱子上不被卡片裁切
+                const isLeftEdge = index < 2
+                const isRightEdge = index >= total - 2
+                const tooltipAlign = isLeftEdge
+                  ? 'left-0'
+                  : isRightEdge
+                  ? 'right-0'
+                  : 'left-1/2 -translate-x-1/2'
+                const arrowAlign = isLeftEdge
+                  ? 'left-3'
+                  : isRightEdge
+                  ? 'right-3'
+                  : 'left-1/2 -translate-x-1/2'
+
                 return (
                   <div
                     key={index}
@@ -168,41 +182,47 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                     {/* Tooltip */}
                     <div
                       className={cn(
-                        "absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50",
+                        "absolute bottom-full mb-2 z-50",
+                        tooltipAlign,
                         "transition-all duration-200 ease-out transform",
                         hoveredIndex === index
                           ? "opacity-100 translate-y-0 scale-100"
                           : "opacity-0 translate-y-2 scale-95 pointer-events-none"
                       )}
                     >
-                      <div className="bg-popover/80 backdrop-blur-xl supports-[backdrop-filter]:bg-popover/60 text-popover-foreground text-xs rounded-lg shadow-xl border border-border/50 p-3 min-w-[140px]">
-                        <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1">
-                          <Calendar className="w-3 h-3 text-muted-foreground" />
-                          {item.timestamp ? (
-                            isHourlyMode
-                              ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                              : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                          ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
+                      <div className="bg-popover text-popover-foreground text-xs rounded-lg shadow-xl border border-border/60 p-3 min-w-[180px] whitespace-nowrap">
+                        <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1.5">
+                          <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+                          <span className="truncate">
+                            {item.timestamp ? (
+                              isHourlyMode
+                                ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+                            ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
+                          </span>
                         </div>
-                        <div className="space-y-1 mt-2">
-                          <div className="flex justify-between items-center gap-4">
-                            <span className="text-muted-foreground">请求数:</span>
-                            <span className="font-mono font-bold">{Number(item.request_count).toLocaleString()}</span>
+                        <div className="space-y-1.5 mt-2">
+                          <div className="flex justify-between items-center gap-6">
+                            <span className="text-muted-foreground">请求数</span>
+                            <span className="font-mono font-bold tabular-nums">{Number(item.request_count).toLocaleString()}</span>
                           </div>
                           {item.unique_users !== undefined && (
-                            <div className="flex justify-between items-center gap-4">
-                              <span className="text-muted-foreground">用户数:</span>
-                              <span className="font-mono">{item.unique_users}</span>
+                            <div className="flex justify-between items-center gap-6">
+                              <span className="text-muted-foreground">用户数</span>
+                              <span className="font-mono tabular-nums">{item.unique_users}</span>
                             </div>
                           )}
-                          <div className="flex justify-between items-center gap-4">
-                            <span className="text-muted-foreground">消耗:</span>
-                            <span className="font-mono">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
+                          <div className="flex justify-between items-center gap-6">
+                            <span className="text-muted-foreground">消耗</span>
+                            <span className="font-mono tabular-nums">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
                           </div>
                         </div>
                       </div>
                       {/* Arrow */}
-                      <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"></div>
+                      <div className={cn(
+                        "w-2 h-2 bg-popover border-r border-b border-border/60 rotate-45 absolute -bottom-1",
+                        arrowAlign
+                      )}></div>
                     </div>
 
                     {/* X-Axis Label */}
