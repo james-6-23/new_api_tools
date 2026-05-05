@@ -32,6 +32,35 @@ PROJECT_NAME="new_api_tools"
 REINSTALL=false
 
 #######################################
+# 根据 .env 中的 NEWAPI_NETWORK 检测 host 模式，
+# 设置 COMPOSE_FILE 让所有后续 docker compose 调用自动叠加 host overlay。
+# 在任何 $DOCKER_COMPOSE 调用前先调用本函数（通常 cd 到 project_dir 之后）。
+#######################################
+setup_compose_files() {
+  local project_dir="${1:-.}"
+  local env_file="${project_dir}/.env"
+  local base="${project_dir}/docker-compose.yml"
+  local host_overlay="${project_dir}/docker-compose.host.yml"
+
+  unset COMPOSE_FILE
+
+  [[ -f "$env_file" ]] || return 0
+
+  # 必须显式存在 NEWAPI_NETWORK 行才判断；行缺失视为老版 .env，让 base compose 走默认 fallback
+  local nw_line
+  nw_line=$(grep -E '^NEWAPI_NETWORK=' "$env_file" 2>/dev/null | head -n1)
+  [[ -n "$nw_line" ]] || return 0
+
+  local nw
+  nw=$(echo "$nw_line" | cut -d'=' -f2- | tr -d '\r\n')
+
+  # NEWAPI_NETWORK= （空值）→ deploy.sh 在 host 模式下生成的标记
+  if [[ -z "$nw" && -f "$host_overlay" ]]; then
+    export COMPOSE_FILE="${base}:${host_overlay}"
+  fi
+}
+
+#######################################
 # 检查必要命令
 #######################################
 check_requirements() {
@@ -413,6 +442,9 @@ do_update_interactive() {
   # 迁移旧版 .env（补充 Go 版本所需字段）
   migrate_env_file "$project_dir"
 
+  # 根据 .env 自动选择 compose 文件（host 模式叠加 overlay）
+  setup_compose_files "$project_dir"
+
   # 拉取最新镜像并重启
   log_info "拉取最新镜像..."
   $DOCKER_COMPOSE pull
@@ -440,6 +472,7 @@ do_update_interactive() {
 do_status_interactive() {
   local project_dir="$1"
   cd "$project_dir"
+  setup_compose_files "$project_dir"
 
   echo ""
   echo -e "${BLUE}--- 容器状态 ---${NC}"
@@ -470,6 +503,7 @@ do_status_interactive() {
 do_logs_interactive() {
   local project_dir="$1"
   cd "$project_dir"
+  setup_compose_files "$project_dir"
   log_info "显示实时日志 (Ctrl+C 返回菜单)..."
   echo ""
   $DOCKER_COMPOSE logs -f --tail=100 || true
@@ -481,6 +515,7 @@ do_logs_interactive() {
 do_restart_interactive() {
   local project_dir="$1"
   cd "$project_dir"
+  setup_compose_files "$project_dir"
   log_info "重启服务..."
   $DOCKER_COMPOSE restart
   log_success "服务已重启"
@@ -494,6 +529,7 @@ do_restart_interactive() {
 do_stop_interactive() {
   local project_dir="$1"
   cd "$project_dir"
+  setup_compose_files "$project_dir"
   log_info "停止服务..."
   $DOCKER_COMPOSE stop
   log_success "服务已停止"
@@ -505,6 +541,7 @@ do_stop_interactive() {
 do_start_interactive() {
   local project_dir="$1"
   cd "$project_dir"
+  setup_compose_files "$project_dir"
   log_info "启动服务..."
   $DOCKER_COMPOSE start
   log_success "服务已启动"
@@ -886,15 +923,22 @@ quick_update() {
   # 下载 GeoIP 数据库
   download_geoip_database
 
+  # 根据 .env 自动选择 compose 文件（host 模式叠加 overlay）
+  setup_compose_files "$PROJECT_DIR"
+  local -a compose_args=(--env-file "$env_file")
+  if [[ -z "${COMPOSE_FILE:-}" ]]; then
+    compose_args+=(-f "$compose_file")
+  fi
+
   # 拉取最新镜像
   log_info "拉取最新镜像..."
-  $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" pull
+  $DOCKER_COMPOSE "${compose_args[@]}" pull
 
   log_info "重启服务..."
-  $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" down
-  $DOCKER_COMPOSE -f "$compose_file" --env-file "$env_file" up -d
+  $DOCKER_COMPOSE "${compose_args[@]}" down
+  $DOCKER_COMPOSE "${compose_args[@]}" up -d
 
-  # 确保容器连接到 NewAPI 网络
+  # 确保容器连接到 NewAPI 网络（host 模式下 NEWAPI_NETWORK 为空，跳过）
   local newapi_network
   newapi_network=$(grep -E '^NEWAPI_NETWORK=' "$env_file" | cut -d'=' -f2 || true)
   if [[ -n "$newapi_network" ]]; then
