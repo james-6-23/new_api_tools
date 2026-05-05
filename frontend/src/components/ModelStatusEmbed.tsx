@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../lib/utils'
 import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag, KeyRound, ChevronDown } from 'lucide-react'
 import {
@@ -1440,7 +1441,10 @@ function ratioStyles(ratio: number | undefined): string {
 
 function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: TokenGroupDropdownProps) {
   const [open, setOpen] = useState(false)
+  const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const isActive = value.startsWith('token:')
   const activeName = isActive ? value.slice(6) : ''
@@ -1458,10 +1462,33 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
     })
   }, [groups])
 
+  // 打开时计算 trigger 位置（用于 portal 内 fixed 定位）
+  useEffect(() => {
+    if (!open) {
+      setTriggerRect(null)
+      return
+    }
+    const updateRect = () => {
+      if (triggerRef.current) {
+        setTriggerRect(triggerRef.current.getBoundingClientRect())
+      }
+    }
+    updateRect()
+    window.addEventListener('resize', updateRect)
+    window.addEventListener('scroll', updateRect, true)
+    return () => {
+      window.removeEventListener('resize', updateRect)
+      window.removeEventListener('scroll', updateRect, true)
+    }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const handleClickOutside = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      const inTrigger = ref.current?.contains(target)
+      const inPanel = panelRef.current?.contains(target)
+      if (!inTrigger && !inPanel) {
         setOpen(false)
       }
     }
@@ -1481,9 +1508,25 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
     setOpen(false)
   }
 
+  // 计算 panel 在视口里的位置；若右侧空间不够则向左对齐
+  const panelStyle: React.CSSProperties = useMemo(() => {
+    if (!triggerRect) return { display: 'none' }
+    const PANEL_WIDTH_HINT = 320 // min-w 18rem ≈ 288，留点余量
+    const overflowRight = triggerRect.left + PANEL_WIDTH_HINT > window.innerWidth - 16
+    const left = overflowRight
+      ? Math.max(16, triggerRect.right - PANEL_WIDTH_HINT)
+      : triggerRect.left
+    return {
+      position: 'fixed',
+      top: triggerRect.bottom + 6,
+      left,
+    }
+  }, [triggerRect])
+
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -1504,12 +1547,16 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
         <ChevronDown size={12} className={cn("flex-shrink-0 opacity-60 transition-transform", open && "rotate-180")} />
       </button>
 
-      {open && (
+      {open && triggerRect && createPortal(
         <div
+          ref={panelRef}
           role="listbox"
+          style={panelStyle}
           className={cn(
-            "absolute top-full left-0 mt-1.5 min-w-[18rem] max-w-[28rem] max-h-[24rem] overflow-y-auto rounded-lg shadow-xl z-50 p-1",
+            "min-w-[18rem] max-w-[28rem] max-h-[24rem] overflow-y-auto rounded-lg shadow-xl",
             styles.tooltip,
+            // 放在 styles.tooltip 后让 tailwind-merge 优先采用这里的值
+            "p-1 z-[10001]"
           )}
         >
           {/* "全部" option clears the token filter */}
@@ -1574,7 +1621,8 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
