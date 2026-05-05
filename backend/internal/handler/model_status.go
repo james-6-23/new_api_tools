@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/new-api-tools/backend/internal/models"
@@ -105,9 +106,10 @@ func GetAvailableModels(c *gin.Context) {
 func GetSingleModelStatus(c *gin.Context) {
 	modelName := c.Param("model_name")
 	window := c.DefaultQuery("window", service.DefaultTimeWindow)
+	useCache := !isNoCacheRequest(c)
 
 	svc := service.NewModelStatusService()
-	data, err := svc.GetModelStatus(modelName, window)
+	data, err := svc.GetModelStatusWithCache(modelName, window, useCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
 		return
@@ -123,9 +125,10 @@ func GetMultipleModelsStatusHandler(c *gin.Context) {
 		return
 	}
 	window := c.DefaultQuery("window", service.DefaultTimeWindow)
+	useCache := !isNoCacheRequest(c)
 
 	svc := service.NewModelStatusService()
-	data, err := svc.GetMultipleModelsStatus(modelNames, window)
+	data, err := svc.GetMultipleModelsStatusWithCache(modelNames, window, useCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
 		return
@@ -141,9 +144,10 @@ func GetMultipleModelsStatusHandler(c *gin.Context) {
 // GET /status/all
 func GetAllModelsStatusHandler(c *gin.Context) {
 	window := c.DefaultQuery("window", service.DefaultTimeWindow)
+	useCache := !isNoCacheRequest(c)
 
 	svc := service.NewModelStatusService()
-	data, err := svc.GetAllModelsStatus(window)
+	data, err := svc.GetAllModelsStatusWithCache(window, useCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
 		return
@@ -154,6 +158,11 @@ func GetAllModelsStatusHandler(c *gin.Context) {
 		"time_window": window,
 		"cache_ttl":   60,
 	})
+}
+
+func isNoCacheRequest(c *gin.Context) bool {
+	value := c.Query("no_cache")
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
 // GET /selected
