@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { cn } from '../lib/utils'
 import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag, KeyRound, ChevronDown } from 'lucide-react'
 import {
@@ -40,6 +40,8 @@ interface EmbedTokenGroup {
   group_name: string
   model_count: number
   models: string[]
+  description?: string
+  ratio?: number
 }
 
 // Custom model group (loaded from backend)
@@ -1193,42 +1195,13 @@ export function ModelStatusEmbed({
                   {customGroups.length > 0 && (
                     <div className="w-px h-4 bg-current opacity-20 flex-shrink-0 mx-0.5" />
                   )}
-                  {(() => {
-                    const isTokenActive = groupFilter.startsWith('token:')
-                    const activeName = isTokenActive ? groupFilter.slice(6) : ''
-                    const activeCount = isTokenActive ? (groupCountMap[groupFilter] || 0) : 0
-                    return (
-                      <div className="relative flex-shrink-0">
-                        <select
-                          aria-label="按密钥分组筛选"
-                          value={isTokenActive ? groupFilter : ''}
-                          onChange={(e) => setGroupFilter(e.target.value || 'all')}
-                          className={cn(
-                            "appearance-none cursor-pointer pl-7 pr-7 py-1.5 text-xs font-medium rounded-full border transition-all whitespace-nowrap",
-                            "focus:outline-none focus:ring-2 focus:ring-current/20",
-                            isTokenActive
-                              ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-semibold shadow-sm"
-                              : cn("border-current/20 opacity-60 hover:opacity-100", styles.statsText)
-                          )}
-                        >
-                          <option value="">
-                            {isTokenActive ? `${activeName} (${activeCount})` : `密钥分组 (${tokenGroups.length})`}
-                          </option>
-                          {tokenGroups.map((tg) => {
-                            const filterId = `token:${tg.group_name}`
-                            const count = groupCountMap[filterId] || 0
-                            return (
-                              <option key={filterId} value={filterId}>
-                                {tg.group_name} ({count})
-                              </option>
-                            )
-                          })}
-                        </select>
-                        <KeyRound size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
-                      </div>
-                    )
-                  })()}
+                  <TokenGroupDropdown
+                    groups={tokenGroups}
+                    countMap={groupCountMap}
+                    value={groupFilter}
+                    onChange={setGroupFilter}
+                    styles={styles}
+                  />
                 </>
               )}
             </div>
@@ -1442,6 +1415,155 @@ function EmbedModelCard({ model, theme, styles, onHover, onLeave }: EmbedModelCa
           <span>{isMinimal ? 'now' : timeLabels[2]}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Token Group Dropdown (rich popover with description + ratio badge)
+// ============================================================================
+
+interface TokenGroupDropdownProps {
+  groups: EmbedTokenGroup[]
+  countMap: Record<string, number>
+  value: string
+  onChange: (value: string) => void
+  styles: typeof themeStyles.obsidian
+}
+
+function ratioStyles(ratio: number | undefined): string {
+  if (ratio === undefined) return ''
+  if (ratio < 1) return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+  if (ratio === 1) return 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30'
+  return 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
+}
+
+function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: TokenGroupDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const isActive = value.startsWith('token:')
+  const activeName = isActive ? value.slice(6) : ''
+  const activeCount = isActive ? (countMap[value] || 0) : 0
+
+  useEffect(() => {
+    if (!open) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [open])
+
+  const handleSelect = (filterId: string) => {
+    onChange(filterId)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-xs font-medium rounded-full border transition-all whitespace-nowrap",
+          "focus:outline-none focus:ring-2 focus:ring-current/20",
+          isActive
+            ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-semibold shadow-sm"
+            : cn("border-current/20 opacity-70 hover:opacity-100", styles.statsText)
+        )}
+      >
+        <KeyRound size={12} className="flex-shrink-0" />
+        <span>{isActive ? activeName : '密钥分组'}</span>
+        <span className="opacity-70 tabular-nums">
+          {isActive ? activeCount : groups.length}
+        </span>
+        <ChevronDown size={12} className={cn("flex-shrink-0 opacity-60 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className={cn(
+            "absolute top-full left-0 mt-1.5 min-w-[18rem] max-w-[28rem] max-h-[24rem] overflow-y-auto rounded-lg shadow-xl z-50 p-1",
+            styles.tooltip,
+          )}
+        >
+          {/* "全部" option clears the token filter */}
+          <button
+            type="button"
+            role="option"
+            aria-selected={!isActive}
+            onClick={() => handleSelect('all')}
+            className={cn(
+              "w-full text-left px-3 py-2 rounded-md transition-colors flex items-center gap-2",
+              !isActive ? "bg-blue-500/10 text-blue-500" : "hover:bg-current/5"
+            )}
+          >
+            <Layers size={14} className="flex-shrink-0 opacity-60" />
+            <span className={cn("text-sm font-medium", styles.tooltipValue)}>全部</span>
+            <span className={cn("ml-auto text-xs tabular-nums", styles.tooltipLabel)}>
+              {countMap.all ?? 0}
+            </span>
+          </button>
+
+          <div className="h-px bg-current/10 my-1 mx-2" />
+
+          {groups.map((g) => {
+            const filterId = `token:${g.group_name}`
+            const selected = value === filterId
+            const count = countMap[filterId] || 0
+            return (
+              <button
+                type="button"
+                role="option"
+                key={filterId}
+                aria-selected={selected}
+                onClick={() => handleSelect(filterId)}
+                className={cn(
+                  "w-full text-left px-3 py-2 rounded-md transition-colors flex items-start gap-3",
+                  selected ? "bg-blue-500/10" : "hover:bg-current/5"
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className={cn("text-sm font-semibold truncate", styles.tooltipValue)}>
+                    {g.group_name}
+                  </div>
+                  {g.description && (
+                    <div className={cn("text-xs mt-0.5 line-clamp-2 break-all", styles.tooltipLabel)}>
+                      {g.description}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  {g.ratio !== undefined && (
+                    <span className={cn(
+                      "px-1.5 py-0.5 text-[10px] font-medium rounded border tabular-nums whitespace-nowrap",
+                      ratioStyles(g.ratio),
+                    )}>
+                      {g.ratio}x 倍率
+                    </span>
+                  )}
+                  <span className={cn("text-[10px] tabular-nums opacity-70", styles.tooltipLabel)}>
+                    {count} / {g.model_count}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

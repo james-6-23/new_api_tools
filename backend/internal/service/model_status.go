@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -292,6 +293,9 @@ func (s *ModelStatusService) GetTokenGroups() ([]map[string]interface{}, error) 
 		return nil, err
 	}
 
+	// 一次性读出 NewAPI 的分组描述（UserUsableGroups）和倍率（GroupRatio）
+	descMap, ratioMap := s.loadGroupMetadata()
+
 	// 为每个分组获取其模型列表
 	results := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
@@ -316,15 +320,69 @@ func (s *ModelStatusService) GetTokenGroups() ([]map[string]interface{}, error) 
 			}
 		}
 
-		results = append(results, map[string]interface{}{
+		entry := map[string]interface{}{
 			"group_name":  groupName,
 			"model_count": row["model_count"],
 			"models":      modelNames,
-		})
+		}
+		if d, ok := descMap[groupName]; ok && d != "" && d != groupName {
+			entry["description"] = d
+		}
+		if r, ok := ratioMap[groupName]; ok {
+			entry["ratio"] = r
+		}
+		results = append(results, entry)
 	}
 
 	cm.Set("model_status:token_groups", results, 5*time.Minute)
 	return results, nil
+}
+
+// loadGroupMetadata 一次性从 NewAPI 的 options 表读出分组描述和倍率配置。
+// 返回两张 map，缺失时为 nil 不影响主流程。
+func (s *ModelStatusService) loadGroupMetadata() (descMap map[string]string, ratioMap map[string]float64) {
+	descMap = map[string]string{}
+	ratioMap = map[string]float64{}
+
+	keyCol := `"key"`
+	if !s.db.IsPG {
+		keyCol = "`key`"
+	}
+	query := s.db.RebindQuery(fmt.Sprintf(
+		`SELECT %s as opt_key, value FROM options WHERE %s IN ('UserUsableGroups', 'GroupRatio')`,
+		keyCol, keyCol))
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		key := fmt.Sprintf("%v", row["opt_key"])
+		val, _ := row["value"].(string)
+		if val == "" {
+			continue
+		}
+		switch key {
+		case "UserUsableGroups":
+			_ = json.Unmarshal([]byte(val), &descMap)
+		case "GroupRatio":
+			// GroupRatio 的值可能是 number 或 string number，先按 number 解
+			raw := map[string]interface{}{}
+			if err := json.Unmarshal([]byte(val), &raw); err == nil {
+				for k, v := range raw {
+					switch n := v.(type) {
+					case float64:
+						ratioMap[k] = n
+					case json.Number:
+						if f, err := n.Float64(); err == nil {
+							ratioMap[k] = f
+						}
+					}
+				}
+			}
+		}
+	}
+	return
 }
 
 // getGroupCol 返回正确引用的 group 列名（group 是保留字）
