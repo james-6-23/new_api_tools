@@ -613,7 +613,19 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   // Fetch model statuses
   // forceRefresh: bypass cache to get fresh data (used for manual refresh)
   const fetchModelStatuses = useCallback(async (forceRefresh = false) => {
-    if (selectedModels.length === 0) {
+    // 计算实际要请求状态的模型集合：
+    //   - 用户手工选中的 selectedModels（基础）
+    //   - 当前过滤器若为某个密钥分组（token:X），把该分组下的全部模型并入
+    // 这样选中密钥分组时，分组下所有模型会自动出现在监控视图中，无需手动勾选。
+    const tokenGroupModels = (() => {
+      if (!groupFilter.startsWith('token:')) return [] as string[]
+      const name = groupFilter.slice(6)
+      const tg = tokenGroups.find(g => g.group_name === name)
+      return tg ? tg.models : []
+    })()
+    const fetchSet = Array.from(new Set([...selectedModels, ...tokenGroupModels]))
+
+    if (fetchSet.length === 0) {
       setModelStatuses([])
       setLoading(false)
       // Only clear initialLoading when we know models have been loaded
@@ -633,7 +645,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       const response = await fetch(`${apiUrl}${getApiPrefix()}/status/batch?window=${timeWindow}${cacheParam}`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(selectedModels),
+        body: JSON.stringify(fetchSet),
       })
       const data = await response.json()
       if (data.success) {
@@ -649,7 +661,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       setLoading(false)
       setRefreshing(false)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, timeWindow, isEmbed, showToast])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, timeWindow, isEmbed, showToast, groupFilter, tokenGroups, availableModels.length])
 
   // Initial load
   useEffect(() => {
@@ -660,6 +672,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
   const isInitialMount = useRef(true)
   const prevSelectedModels = useRef<string[]>([])
   const prevTimeWindow = useRef<string>(timeWindow)
+  const prevGroupFilter = useRef<string>(groupFilter)
 
   // Handle model selection and time window changes
   useEffect(() => {
@@ -668,6 +681,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       isInitialMount.current = false
       prevSelectedModels.current = selectedModels
       prevTimeWindow.current = timeWindow
+      prevGroupFilter.current = groupFilter
       fetchModelStatuses(false)  // Use cache on initial load
       return
     }
@@ -677,19 +691,24 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       selectedModels.length !== prevSelectedModels.current.length ||
       selectedModels.some(m => !prevSelectedModels.current.includes(m))
     const windowChanged = timeWindow !== prevTimeWindow.current
+    // 切到/切出某个密钥分组时也要重新拉取，因为请求集合包含分组成员
+    const groupFilterChanged = groupFilter !== prevGroupFilter.current
+    const tokenGroupSwitched =
+      groupFilterChanged && (groupFilter.startsWith('token:') || prevGroupFilter.current.startsWith('token:'))
 
     // Update refs
     prevSelectedModels.current = selectedModels
     prevTimeWindow.current = timeWindow
+    prevGroupFilter.current = groupFilter
 
-    if (modelsChanged) {
+    if (modelsChanged || tokenGroupSwitched) {
       // Models selection changed - fetch fresh data for new models
       fetchModelStatuses(true)
     } else if (windowChanged) {
       // Only time window changed - can use cache (pre-warmed)
       fetchModelStatuses(false)
     }
-  }, [selectedModels, timeWindow, fetchModelStatuses])
+  }, [selectedModels, timeWindow, groupFilter, fetchModelStatuses])
 
   // Auto refresh countdown
   useEffect(() => {

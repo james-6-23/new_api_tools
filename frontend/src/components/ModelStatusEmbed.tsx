@@ -919,7 +919,17 @@ export function ModelStatusEmbed({
   // Fetch model statuses
   // Embed page always uses cache to reduce database load
   const fetchModelStatuses = useCallback(async () => {
-    if (selectedModels.length === 0) {
+    // 选中某个密钥分组时，自动把分组下全部模型并入请求集合，
+    // 用户无需手工把每个模型加进监控列表也能看到分组下的状态。
+    const tokenGroupModels = (() => {
+      if (!groupFilter.startsWith('token:')) return [] as string[]
+      const name = groupFilter.slice(6)
+      const tg = tokenGroups.find(g => g.group_name === name)
+      return tg ? tg.models : []
+    })()
+    const fetchSet = Array.from(new Set([...selectedModels, ...tokenGroupModels]))
+
+    if (fetchSet.length === 0) {
       setModelStatuses([])
       setLoading(false)
       return
@@ -929,7 +939,7 @@ export function ModelStatusEmbed({
       const response = await fetch(`${apiUrl}/api/model-status/embed/status/batch?window=${timeWindow}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(selectedModels),
+        body: JSON.stringify(fetchSet),
       })
       const data = await response.json()
       if (data.success) {
@@ -941,13 +951,11 @@ export function ModelStatusEmbed({
     } finally {
       setLoading(false)
     }
-  }, [apiUrl, selectedModels, timeWindow])
+  }, [apiUrl, selectedModels, timeWindow, groupFilter, tokenGroups])
 
   useEffect(() => {
-    if (selectedModels.length > 0) {
-      fetchModelStatuses()
-    }
-  }, [fetchModelStatuses, selectedModels])
+    fetchModelStatuses()
+  }, [fetchModelStatuses])
 
   // Auto refresh with visibility change handling
   // When page is in background, browser throttles setInterval
