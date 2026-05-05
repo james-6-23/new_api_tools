@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
 import { BarChart3, TrendingUp, Calendar } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -21,6 +22,30 @@ interface TrendChartProps {
 
 export function TrendChart({ data, period, loading, totalRequests }: TrendChartProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  // 浮层用 portal 渲染到 body，避开 Card 的 overflow-hidden 裁切
+  const barTopsRef = useRef<Map<number, HTMLDivElement>>(new Map())
+  const [tipRect, setTipRect] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    if (hoveredIndex === null) {
+      setTipRect(null)
+      return
+    }
+    const el = barTopsRef.current.get(hoveredIndex)
+    if (!el) return
+    const update = () => {
+      const r = el.getBoundingClientRect()
+      // 锚点：柱子顶端中点
+      setTipRect({ top: r.top, left: r.left + r.width / 2 })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [hoveredIndex])
 
   // Use period to determine hourly vs daily mode
   const isHourlyMode = period === '24h'
@@ -135,20 +160,6 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                   showLabel = index % 3 === 0 || index === total - 1
                 }
 
-                // 让 tooltip 在边界柱子上不被卡片裁切
-                const isLeftEdge = index < 2
-                const isRightEdge = index >= total - 2
-                const tooltipAlign = isLeftEdge
-                  ? 'left-0'
-                  : isRightEdge
-                  ? 'right-0'
-                  : 'left-1/2 -translate-x-1/2'
-                const arrowAlign = isLeftEdge
-                  ? 'left-3'
-                  : isRightEdge
-                  ? 'right-3'
-                  : 'left-1/2 -translate-x-1/2'
-
                 return (
                   <div
                     key={index}
@@ -165,6 +176,11 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                       style={{ height: '100%' }}
                     >
                       <div
+                        ref={(el) => {
+                          // 把每根柱子顶端 DOM 引用存起来，tooltip 用 getBoundingClientRect 跟它对齐
+                          if (el) barTopsRef.current.set(index, el)
+                          else barTopsRef.current.delete(index)
+                        }}
                         className={cn(
                           "w-full rounded-t-sm transition-all duration-300 relative border-t border-x border-white/10",
                           "bg-gradient-to-b from-primary to-primary/80 dark:from-primary/90 dark:to-primary/60",
@@ -177,52 +193,6 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
                         }}
                       >
                       </div>
-                    </div>
-
-                    {/* Tooltip */}
-                    <div
-                      className={cn(
-                        "absolute bottom-full mb-2 z-50",
-                        tooltipAlign,
-                        "transition-all duration-200 ease-out transform",
-                        hoveredIndex === index
-                          ? "opacity-100 translate-y-0 scale-100"
-                          : "opacity-0 translate-y-2 scale-95 pointer-events-none"
-                      )}
-                    >
-                      <div className="bg-popover text-popover-foreground text-xs rounded-lg shadow-xl border border-border/60 p-3 min-w-[180px] whitespace-nowrap">
-                        <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1.5">
-                          <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
-                          <span className="truncate">
-                            {item.timestamp ? (
-                              isHourlyMode
-                                ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                                : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                            ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
-                          </span>
-                        </div>
-                        <div className="space-y-1.5 mt-2">
-                          <div className="flex justify-between items-center gap-6">
-                            <span className="text-muted-foreground">请求数</span>
-                            <span className="font-mono font-bold tabular-nums">{Number(item.request_count).toLocaleString()}</span>
-                          </div>
-                          {item.unique_users !== undefined && (
-                            <div className="flex justify-between items-center gap-6">
-                              <span className="text-muted-foreground">用户数</span>
-                              <span className="font-mono tabular-nums">{item.unique_users}</span>
-                            </div>
-                          )}
-                          <div className="flex justify-between items-center gap-6">
-                            <span className="text-muted-foreground">消耗</span>
-                            <span className="font-mono tabular-nums">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
-                          </div>
-                        </div>
-                      </div>
-                      {/* Arrow */}
-                      <div className={cn(
-                        "w-2 h-2 bg-popover border-r border-b border-border/60 rotate-45 absolute -bottom-1",
-                        arrowAlign
-                      )}></div>
                     </div>
 
                     {/* X-Axis Label */}
@@ -244,6 +214,96 @@ export function TrendChart({ data, period, loading, totalRequests }: TrendChartP
           </div>
         )}
       </CardContent>
+
+      {/* Floating tooltip — portaled to body, anchored to bar top */}
+      {hoveredIndex !== null && tipRect && processedData[hoveredIndex] && createPortal(
+        <FloatingBarTooltip
+          item={processedData[hoveredIndex]}
+          isHourlyMode={isHourlyMode}
+          anchorTop={tipRect.top}
+          anchorLeft={tipRect.left}
+        />,
+        document.body
+      )}
     </Card>
+  )
+}
+
+interface FloatingBarTooltipProps {
+  item: {
+    timestamp?: number
+    hour?: string
+    date?: string
+    request_count: number
+    unique_users?: number
+    quota_used: number
+  }
+  isHourlyMode: boolean
+  anchorTop: number    // 柱子顶端在视口的 top
+  anchorLeft: number   // 柱子顶端在视口的 left（中心）
+}
+
+function FloatingBarTooltip({ item, isHourlyMode, anchorTop, anchorLeft }: FloatingBarTooltipProps) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [adjusted, setAdjusted] = useState<{ top: number; left: number } | null>(null)
+
+  // 浮层挂载后量自身大小，再做边界纠正：宽超左/右、高超上时翻到柱子下方
+  useEffect(() => {
+    if (!ref.current) return
+    const tip = ref.current.getBoundingClientRect()
+    const GAP = 8
+    let top = anchorTop - tip.height - GAP   // 默认在柱子上方
+    let left = anchorLeft - tip.width / 2
+
+    if (top < 8) {
+      // 上方空间不够 → 翻到柱子下方（柱子顶 + 一些偏移）
+      top = anchorTop + GAP
+    }
+    if (left < 8) left = 8
+    if (left + tip.width > window.innerWidth - 8) left = window.innerWidth - tip.width - 8
+
+    setAdjusted({ top, left })
+  }, [anchorTop, anchorLeft])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed',
+        top: adjusted?.top ?? anchorTop,
+        left: adjusted?.left ?? anchorLeft,
+        opacity: adjusted ? 1 : 0,
+        pointerEvents: 'none',
+        zIndex: 50,
+      }}
+      className="bg-popover text-popover-foreground text-xs rounded-lg shadow-xl border border-border/60 p-3 min-w-[180px] whitespace-nowrap"
+    >
+      <div className="font-semibold mb-1 flex items-center gap-2 border-b border-border/50 pb-1.5">
+        <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+        <span className="truncate">
+          {item.timestamp ? (
+            isHourlyMode
+              ? new Date(item.timestamp * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+              : new Date(item.timestamp * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+          ) : (isHourlyMode ? (item.hour || '') : (item.date || ''))}
+        </span>
+      </div>
+      <div className="space-y-1.5 mt-2">
+        <div className="flex justify-between items-center gap-6">
+          <span className="text-muted-foreground">请求数</span>
+          <span className="font-mono font-bold tabular-nums">{Number(item.request_count).toLocaleString()}</span>
+        </div>
+        {item.unique_users !== undefined && (
+          <div className="flex justify-between items-center gap-6">
+            <span className="text-muted-foreground">用户数</span>
+            <span className="font-mono tabular-nums">{item.unique_users}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-center gap-6">
+          <span className="text-muted-foreground">消耗</span>
+          <span className="font-mono tabular-nums">${(Number(item.quota_used) / 500000).toFixed(4)}</span>
+        </div>
+      </div>
+    </div>
   )
 }
