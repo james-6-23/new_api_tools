@@ -278,13 +278,14 @@ func (s *ModelStatusService) GetTokenGroups() ([]map[string]interface{}, error) 
 	}
 
 	// 从 abilities 表获取分组及其模型列表（abilities 表定义了 group-model-channel 的映射）
+	// 注意：不再过滤 c.status = 1，否则 ManuallyDisabled / AutoDisabled 的渠道会
+	// 让分组里临时不可用的模型从下拉中消失，与用户"这个分组本来就有这个模型"的心智不符。
 	groupCol := s.getGroupCol()
 	query := s.db.RebindQuery(fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(a.%s, ''), 'default') as group_name,
 			COUNT(DISTINCT a.model) as model_count
 		FROM abilities a
 		INNER JOIN channels c ON c.id = a.channel_id
-		WHERE c.status = 1
 		GROUP BY COALESCE(NULLIF(a.%s, ''), 'default')
 		ORDER BY model_count DESC`, groupCol, groupCol))
 
@@ -305,7 +306,7 @@ func (s *ModelStatusService) GetTokenGroups() ([]map[string]interface{}, error) 
 			SELECT DISTINCT a.model as model_name
 			FROM abilities a
 			INNER JOIN channels c ON c.id = a.channel_id
-			WHERE c.status = 1 AND COALESCE(NULLIF(a.%s, ''), 'default') = ?
+			WHERE COALESCE(NULLIF(a.%s, ''), 'default') = ?
 			ORDER BY a.model`, groupCol))
 
 		modelRows, err := s.db.Query(modelsQuery, groupName)
