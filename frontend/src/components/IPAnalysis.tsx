@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
-import ReactECharts from 'echarts-for-react/lib/core'
+import ReactECharts from 'echarts-for-react/esm/core'
 import * as echarts from 'echarts/core'
 import { MapChart } from 'echarts/charts'
 import { TooltipComponent, VisualMapComponent } from 'echarts/components'
