@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { cn } from '../lib/utils'
-import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag, KeyRound } from 'lucide-react'
+import { Loader2, Timer, Activity, Zap, Sun, Moon, Minimize2, Terminal, Leaf, Droplets, Command, LayoutGrid, Bot, MessageSquareQuote, Triangle, Sparkles, CreditCard, GitBranch, Gamepad2, Rocket, Brain, Layers, Tag, KeyRound, ChevronDown } from 'lucide-react'
 import {
   OpenAI, Gemini, DeepSeek, SiliconCloud, Groq, Ollama, Claude, Mistral,
   Minimax, Baichuan, Moonshot, Spark, Qwen, Yi, Hunyuan, Stepfun, ZeroOne,
@@ -1187,31 +1187,50 @@ export function ModelStatusEmbed({
                   </button>
                 )
               })}
-              {/* Token Group Separator + Tabs */}
-              {tokenGroups.length > 0 && customGroups.length > 0 && (
-                <div className="w-px h-4 bg-current opacity-20 flex-shrink-0 mx-0.5" />
+              {/* Token Group Dropdown (密钥分组数量多时用下拉避免横向溢出) */}
+              {tokenGroups.length > 0 && (
+                <>
+                  {customGroups.length > 0 && (
+                    <div className="w-px h-4 bg-current opacity-20 flex-shrink-0 mx-0.5" />
+                  )}
+                  {(() => {
+                    const isTokenActive = groupFilter.startsWith('token:')
+                    const activeName = isTokenActive ? groupFilter.slice(6) : ''
+                    const activeCount = isTokenActive ? (groupCountMap[groupFilter] || 0) : 0
+                    return (
+                      <div className="relative flex-shrink-0">
+                        <select
+                          aria-label="按密钥分组筛选"
+                          value={isTokenActive ? groupFilter : ''}
+                          onChange={(e) => setGroupFilter(e.target.value || 'all')}
+                          className={cn(
+                            "appearance-none cursor-pointer pl-7 pr-7 py-1.5 text-xs font-medium rounded-full border transition-all whitespace-nowrap",
+                            "focus:outline-none focus:ring-2 focus:ring-current/20",
+                            isTokenActive
+                              ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-semibold shadow-sm"
+                              : cn("border-current/20 opacity-60 hover:opacity-100", styles.statsText)
+                          )}
+                        >
+                          <option value="">
+                            {isTokenActive ? `${activeName} (${activeCount})` : `密钥分组 (${tokenGroups.length})`}
+                          </option>
+                          {tokenGroups.map((tg) => {
+                            const filterId = `token:${tg.group_name}`
+                            const count = groupCountMap[filterId] || 0
+                            return (
+                              <option key={filterId} value={filterId}>
+                                {tg.group_name} ({count})
+                              </option>
+                            )
+                          })}
+                        </select>
+                        <KeyRound size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
+                      </div>
+                    )
+                  })()}
+                </>
               )}
-              {tokenGroups.map((tg) => {
-                const filterId = `token:${tg.group_name}`
-                const isActive = groupFilter === filterId
-                const count = groupCountMap[filterId] || 0
-                return (
-                  <button
-                    key={filterId}
-                    onClick={() => setGroupFilter(filterId)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full border transition-all whitespace-nowrap flex-shrink-0",
-                      isActive
-                        ? "bg-blue-500/20 border-blue-500/40 text-blue-400 font-semibold shadow-sm"
-                        : cn("border-transparent opacity-60 hover:opacity-100", styles.statsText)
-                    )}
-                  >
-                    <KeyRound size={12} className="flex-shrink-0" />
-                    {tg.group_name}
-                    <span className="opacity-70 tabular-nums">{count}</span>
-                  </button>
-                )
-              })}
             </div>
           )
         })()}
