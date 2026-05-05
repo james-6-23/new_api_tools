@@ -1614,8 +1614,11 @@ function TokenGroupDropdown({ groups, countMap, value, onChange, styles }: Token
                       {g.ratio}x 倍率
                     </span>
                   )}
-                  <span className={cn("text-[10px] tabular-nums opacity-70", styles.tooltipLabel)}>
-                    {count} / {g.model_count}
+                  <span
+                    className={cn("text-[10px] tabular-nums opacity-70", styles.tooltipLabel)}
+                    title={`筛选后可见 ${count} 个模型，分组共关联 ${g.model_count} 个`}
+                  >
+                    {count} 个模型
                   </span>
                 </div>
               </button>
