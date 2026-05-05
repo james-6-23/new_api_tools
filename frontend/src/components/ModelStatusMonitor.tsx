@@ -1000,7 +1000,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
                     </div>
                     <h2 className="text-xl font-semibold tracking-tight whitespace-nowrap">模型状态监控</h2>
                   </div>
-                  <Badge variant="outline" className="font-normal">{TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'} 滑动窗口</Badge>
+                  <Badge variant="outline" className="font-normal whitespace-nowrap shrink-0">{TIME_WINDOWS.find(w => w.value === timeWindow)?.label || '24小时'} 滑动窗口</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground mt-2 flex items-center flex-wrap gap-x-3 gap-y-1">
                   <span>监控 <span className="font-semibold text-foreground">{selectedModels.length}</span> 个模型</span>
