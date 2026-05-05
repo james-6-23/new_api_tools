@@ -149,6 +149,49 @@ interface CustomModelGroup {
   models: string[] // exact model names in this group
 }
 
+// 厂商关键字映射：当某个 vendor 分组配置了对应的 icon 时，
+// 模型名包含这些关键字（不区分大小写）也会被自动算入该分组。
+// 这样新增的模型（如 claude-opus-4-7）无需手动勾选就能出现在 Claude 分组下。
+const VENDOR_KEYWORDS: Record<string, string[]> = {
+  openai: ['gpt', 'openai', 'o1', 'o3', 'chatgpt', 'dall-e', 'whisper', 'tts'],
+  claude: ['claude', 'anthropic'],
+  gemini: ['gemini', 'gemma', 'bard'],
+  deepseek: ['deepseek'],
+  meta: ['llama', 'meta'],
+  mistral: ['mistral', 'mixtral', 'codestral', 'pixtral'],
+  qwen: ['qwen', 'tongyi'],
+  zhipu: ['glm', 'chatglm', 'zhipu'],
+  moonshot: ['moonshot', 'kimi'],
+  kimi: ['kimi', 'moonshot'],
+  doubao: ['doubao', 'bytedance'],
+  minimax: ['minimax', 'abab'],
+  baichuan: ['baichuan'],
+  yi: ['yi-', '01-ai', 'zero-one'],
+  spark: ['spark', 'xunfei'],
+  hunyuan: ['hunyuan', 'tencent'],
+  stepfun: ['stepfun', 'step-'],
+  wenxin: ['wenxin', 'ernie', 'baidu'],
+  cohere: ['cohere', 'command'],
+  perplexity: ['perplexity', 'pplx', 'sonar'],
+  groq: ['groq'],
+  ollama: ['ollama'],
+  together: ['together'],
+  openrouter: ['openrouter'],
+  siliconcloud: ['siliconcloud', 'silicon'],
+  coze: ['coze'],
+  cerebras: ['cerebras'],
+}
+
+// 判断某个模型是否属于某个自定义分组（精确名 + 厂商关键字模糊匹配）
+function modelMatchesGroup(modelName: string, group: CustomModelGroup): boolean {
+  if (group.models.includes(modelName)) return true
+  if (!group.icon) return false
+  const keywords = VENDOR_KEYWORDS[group.icon]
+  if (!keywords) return false
+  const lower = modelName.toLowerCase()
+  return keywords.some(k => lower.includes(k))
+}
+
 // Available icons for groups (from @lobehub/icons)
 const GROUP_ICON_OPTIONS: { key: string; label: string; component: IconComponent }[] = [
   { key: 'openai', label: 'OpenAI', component: OpenAI },
@@ -769,7 +812,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     counts.all = visibleModels.length
     visibleModels.forEach(m => {
       customGroups.forEach(g => {
-        if (g.models.includes(m.model_name)) {
+        if (modelMatchesGroup(m.model_name, g)) {
           counts[g.id] = (counts[g.id] || 0) + 1
         }
       })
@@ -873,10 +916,10 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           result = result.filter(m => tg.models.includes(m.model_name))
         }
       } else {
-        // 自定义分组过滤
+        // 自定义分组过滤（精确名 + 厂商关键字模糊匹配）
         const group = customGroups.find(g => g.id === groupFilter)
         if (group) {
-          result = result.filter(m => group.models.includes(m.model_name))
+          result = result.filter(m => modelMatchesGroup(m.model_name, group))
         }
       }
     }

@@ -53,6 +53,46 @@ interface EmbedCustomGroup {
   models: string[]
 }
 
+// 厂商关键字映射：vendor 分组配置了 icon 时，名字含这些关键字的模型自动归入。
+const EMBED_VENDOR_KEYWORDS: Record<string, string[]> = {
+  openai: ['gpt', 'openai', 'o1', 'o3', 'chatgpt', 'dall-e', 'whisper', 'tts'],
+  claude: ['claude', 'anthropic'],
+  gemini: ['gemini', 'gemma', 'bard'],
+  deepseek: ['deepseek'],
+  meta: ['llama', 'meta'],
+  mistral: ['mistral', 'mixtral', 'codestral', 'pixtral'],
+  qwen: ['qwen', 'tongyi'],
+  zhipu: ['glm', 'chatglm', 'zhipu'],
+  moonshot: ['moonshot', 'kimi'],
+  kimi: ['kimi', 'moonshot'],
+  doubao: ['doubao', 'bytedance'],
+  minimax: ['minimax', 'abab'],
+  baichuan: ['baichuan'],
+  yi: ['yi-', '01-ai', 'zero-one'],
+  spark: ['spark', 'xunfei'],
+  hunyuan: ['hunyuan', 'tencent'],
+  stepfun: ['stepfun', 'step-'],
+  wenxin: ['wenxin', 'ernie', 'baidu'],
+  cohere: ['cohere', 'command'],
+  perplexity: ['perplexity', 'pplx', 'sonar'],
+  groq: ['groq'],
+  ollama: ['ollama'],
+  together: ['together'],
+  openrouter: ['openrouter'],
+  siliconcloud: ['siliconcloud', 'silicon'],
+  coze: ['coze'],
+  cerebras: ['cerebras'],
+}
+
+function embedModelMatchesGroup(modelName: string, group: EmbedCustomGroup): boolean {
+  if (group.models.includes(modelName)) return true
+  if (!group.icon) return false
+  const keywords = EMBED_VENDOR_KEYWORDS[group.icon]
+  if (!keywords) return false
+  const lower = modelName.toLowerCase()
+  return keywords.some(k => lower.includes(k))
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EmbedIconComponent = React.ComponentType<any>
 
@@ -1130,7 +1170,7 @@ export function ModelStatusEmbed({
           const activeModels = modelStatuses.filter(m => m.total_requests > 0)
           const groupCountMap: Record<string, number> = { all: activeModels.length }
           customGroups.forEach(g => {
-            groupCountMap[g.id] = activeModels.filter(m => g.models.includes(m.model_name)).length
+            groupCountMap[g.id] = activeModels.filter(m => embedModelMatchesGroup(m.model_name, g)).length
           })
           tokenGroups.forEach(g => {
             groupCountMap[`token:${g.group_name}`] = activeModels.filter(m => g.models.includes(m.model_name)).length
@@ -1231,7 +1271,7 @@ export function ModelStatusEmbed({
                   return tg ? tg.models.includes(model.model_name) : true
                 }
                 const group = customGroups.find(g => g.id === groupFilter)
-                return group ? group.models.includes(model.model_name) : true
+                return group ? embedModelMatchesGroup(model.model_name, group) : true
               })
               .map(model => (
               <EmbedModelCard
