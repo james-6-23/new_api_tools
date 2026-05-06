@@ -279,6 +279,11 @@ detect_env_details() {
     _sh_raw=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
     _sh_raw="${_sh_raw//[\"\'\ $'\r'$'\n'$'\t']/}"
     ENV_SERVER_HOST="${_sh_raw:-127.0.0.1}"
+    # FRONTEND_BIND 控制 1145 端口对外暴露（0.0.0.0 公开 / 127.0.0.1 仅本机）
+    local _fb_raw
+    _fb_raw=$(grep -E '^FRONTEND_BIND=' "$env_file" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
+    _fb_raw="${_fb_raw//[\"\'\ $'\r'$'\n'$'\t']/}"
+    ENV_FRONTEND_BIND="${_fb_raw:-0.0.0.0}"
   else
     ENV_NEWAPI_NETWORK="未配置"
     ENV_DB_ENGINE="未配置"
@@ -286,6 +291,7 @@ detect_env_details() {
     ENV_DB_PORT="未配置"
     ENV_DB_NAME="未配置"
     ENV_SERVER_HOST="未配置"
+    ENV_FRONTEND_BIND="未配置"
     ENV_FRONTEND_PORT="1145"
     ENV_ADMIN_PASSWORD=""
   fi
@@ -312,6 +318,18 @@ detect_env_details() {
   else
     BIND_MODE="自定义"
     BIND_MODE_COLOR="${YELLOW}${ENV_SERVER_HOST}${NC}"
+  fi
+
+  # 判断前端端口暴露范围（FRONTEND_BIND 控制 1145 是否对外）
+  if [[ "$ENV_FRONTEND_BIND" == "127.0.0.1" || "$ENV_FRONTEND_BIND" == "localhost" || "$ENV_FRONTEND_BIND" == "::1" ]]; then
+    FRONTEND_BIND_MODE="仅本机"
+    FRONTEND_BIND_COLOR="${GREEN}${ENV_FRONTEND_BIND}:${ENV_FRONTEND_PORT}${NC} (仅本机访问，需配 nginx 反代)"
+  elif [[ "$ENV_FRONTEND_BIND" == "0.0.0.0" || "$ENV_FRONTEND_BIND" == "::" || "$ENV_FRONTEND_BIND" == "未配置" ]]; then
+    FRONTEND_BIND_MODE="公网"
+    FRONTEND_BIND_COLOR="${YELLOW}0.0.0.0:${ENV_FRONTEND_PORT}${NC} (任意 IP 可达)"
+  else
+    FRONTEND_BIND_MODE="自定义"
+    FRONTEND_BIND_COLOR="${YELLOW}${ENV_FRONTEND_BIND}:${ENV_FRONTEND_PORT}${NC}"
   fi
 }
 
@@ -358,6 +376,7 @@ show_management_menu() {
     echo ""
     echo -e "${GREEN}【后端绑定】${NC}"
     echo -e "  SERVER_HOST: $BIND_MODE_COLOR"
+    echo -e "  对外端口:    $FRONTEND_BIND_COLOR"
     echo ""
     echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}【操作菜单】${NC}"
@@ -375,10 +394,10 @@ show_management_menu() {
     echo "  9) 完全卸载   (删除所有内容，包括数据，需确认)"
     echo " 10) 完全重装   (完全卸载后重新安装，需确认)"
     echo ""
-    if [[ "$BIND_MODE" == "不安全" ]]; then
-      echo -e " 11) ${GREEN}切换为安全绑定${NC} (改为 SERVER_HOST=127.0.0.1 并重启) ${YELLOW}← 当前不安全${NC}"
+    if [[ "$BIND_MODE" == "不安全" || "$FRONTEND_BIND_MODE" == "公网" ]]; then
+      echo -e " 11) ${GREEN}安全设置${NC}     (切换 SERVER_HOST / 切换前端端口暴露范围)"
     else
-      echo " 11) 切换后端绑定 (在 127.0.0.1 安全模式 / 0.0.0.0 暴露模式之间切换)"
+      echo " 11) 安全设置     (切换 SERVER_HOST / 切换前端端口暴露范围)"
     fi
     echo ""
     echo "  0) 退出"
@@ -438,7 +457,7 @@ show_management_menu() {
         do_full_reinstall_interactive "$target_dir"
         ;;
       11)
-        do_toggle_bind_mode_interactive "$target_dir"
+        do_security_settings_interactive "$target_dir"
         echo ""
         read -r -p "按回车键继续..."
         # 重新读取以刷新菜单上的状态
@@ -453,6 +472,116 @@ show_management_menu() {
         ;;
     esac
   done
+}
+
+#######################################
+# 安全设置子菜单
+# 提供 SERVER_HOST / FRONTEND_BIND 两个开关
+#######################################
+do_security_settings_interactive() {
+  local project_dir="$1"
+  while true; do
+    detect_env_details "$project_dir"
+    echo ""
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  安全设置${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  当前 SERVER_HOST     : $BIND_MODE_COLOR"
+    echo -e "  当前对外端口绑定     : $FRONTEND_BIND_COLOR"
+    echo ""
+    echo "  1) 切换 SERVER_HOST（Go 后端 8000 端口绑定地址）"
+    echo "  2) 切换前端端口绑定（${ENV_FRONTEND_PORT} 端口是否对公网开放）"
+    echo ""
+    echo "  0) 返回上级菜单"
+    echo ""
+    read -r -p "请选择 [0-2]: " choice
+    case "$choice" in
+      1) do_toggle_bind_mode_interactive "$project_dir" ;;
+      2) do_toggle_frontend_bind_interactive "$project_dir" ;;
+      0|"") return 0 ;;
+      *) log_warn "无效选择" ;;
+    esac
+  done
+}
+
+#######################################
+# 切换前端端口绑定（FRONTEND_BIND）
+#######################################
+do_toggle_frontend_bind_interactive() {
+  local project_dir="$1"
+  local env_file="${project_dir}/.env"
+  [[ -f "$env_file" ]] || { log_error "未找到 .env"; return 1; }
+  cd "$project_dir"
+
+  local current
+  current=$(grep -E '^FRONTEND_BIND=' "$env_file" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
+  current="${current//[\"\'\ $'\r'$'\n'$'\t']/}"
+  current="${current:-0.0.0.0}"
+
+  echo ""
+  echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}  切换前端端口（${ENV_FRONTEND_PORT}）暴露范围${NC}"
+  echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+  echo ""
+  echo -e "  当前: ${YELLOW}${current}:${ENV_FRONTEND_PORT}${NC}"
+  echo ""
+  echo -e "  ${YELLOW}1) 公网可达${NC}    FRONTEND_BIND=0.0.0.0"
+  echo -e "                  浏览器可直接 http://server-ip:${ENV_FRONTEND_PORT} 访问"
+  echo -e "                  适合内网部署 / 域名解析未就绪 / 需要快速访问的场景"
+  echo ""
+  echo -e "  ${GREEN}2) 仅本机${NC}      FRONTEND_BIND=127.0.0.1"
+  echo -e "                  外部直连不通，需配宿主机 nginx 反代到 https://your-domain"
+  echo -e "                  ${GREEN}推荐${NC}：HTTPS、域名、隔离公网攻击面"
+  echo ""
+  echo "  0) 取消"
+  echo ""
+  read -r -p "请选择 [0-2]: " choice
+  local target=""
+  case "$choice" in
+    1) target="0.0.0.0" ;;
+    2)
+      echo ""
+      log_warn "切换后将无法用 IP:${ENV_FRONTEND_PORT} 直接访问，必须先在宿主机配好 nginx 反代"
+      log_warn "示例 nginx 配置:"
+      cat <<NGINX
+   server {
+     listen 443 ssl http2;
+     server_name your-domain.com;
+     ssl_certificate     /path/to/fullchain.pem;
+     ssl_certificate_key /path/to/privkey.pem;
+     location / {
+       proxy_pass http://127.0.0.1:${ENV_FRONTEND_PORT};
+       proxy_set_header Host \$host;
+       proxy_set_header X-Real-IP \$remote_addr;
+       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto \$scheme;
+     }
+   }
+NGINX
+      echo ""
+      read -r -p "确认切换? [y/N]: " confirm
+      [[ "$confirm" =~ ^[yY]$ ]] || { log_info "已取消"; return 0; }
+      target="127.0.0.1"
+      ;;
+    0|"") log_info "已取消"; return 0 ;;
+    *) log_warn "无效选择"; return 1 ;;
+  esac
+
+  if [[ "$current" == "$target" ]]; then
+    log_info "当前已是 ${target}，无需切换"
+    return 0
+  fi
+
+  sed -i.bak 's|^FRONTEND_BIND=|# Disabled by install.sh: FRONTEND_BIND=|g' "$env_file" 2>/dev/null && rm -f "${env_file}.bak"
+  echo "FRONTEND_BIND=${target}" >> "$env_file"
+  log_success "已写入 FRONTEND_BIND=${target}"
+
+  setup_compose_files "$project_dir"
+  log_info "重启服务以应用新绑定..."
+  $DOCKER_COMPOSE down 2>&1 | tail -5
+  $DOCKER_COMPOSE up -d 2>&1 | tail -5
+  log_success "服务已重启"
 }
 
 #######################################
