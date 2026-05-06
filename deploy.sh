@@ -466,6 +466,25 @@ interactive_config() {
   # 前端端口默认 1145
   FRONTEND_PORT="${FRONTEND_PORT:-1145}"
 
+  # 前端端口暴露范围
+  if [[ -z "${FRONTEND_BIND:-}" ]]; then
+    echo ""
+    echo -e "${YELLOW}前端端口暴露范围${NC}"
+    echo -e "  ${BLUE}1) 公网可达${NC}    任何 IP 都能 http://server-ip:${FRONTEND_PORT} 直接访问 ${BLUE}(默认，便于快速使用)${NC}"
+    echo -e "  ${GREEN}2) 仅本机${NC}      仅监听 127.0.0.1，需自行配宿主机 nginx 反代到 HTTPS 域名 ${GREEN}(更安全)${NC}"
+    read -r -p "请选择 [1/2，回车默认 1]: " bind_choice
+    case "$bind_choice" in
+      2)
+        FRONTEND_BIND="127.0.0.1"
+        log_info "已选仅本机模式，部署完成后请配置宿主机 nginx 反代"
+        ;;
+      *)
+        FRONTEND_BIND="0.0.0.0"
+        log_info "已选公网模式，可直接通过 IP:${FRONTEND_PORT} 访问"
+        ;;
+    esac
+  fi
+
   echo ""
 }
 
@@ -512,6 +531,7 @@ API_KEY=${API_KEY}
 
 # 服务配置
 FRONTEND_PORT=${FRONTEND_PORT}
+FRONTEND_BIND=${FRONTEND_BIND}
 TIMEZONE=Asia/Shanghai
 LOG_LEVEL=info
 
@@ -633,8 +653,28 @@ start_services() {
   echo -e "${GREEN}  NewAPI Middleware Tool 部署成功!${NC}"
   echo -e "${GREEN}========================================${NC}"
   echo ""
-  echo -e "前端访问地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}${NC}"
-  echo -e "API 地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}/api${NC}"
+  if [[ "$FRONTEND_BIND" == "127.0.0.1" || "$FRONTEND_BIND" == "localhost" || "$FRONTEND_BIND" == "::1" ]]; then
+    echo -e "${YELLOW}前端端口仅监听本机 127.0.0.1:${FRONTEND_PORT}，外部直连不可达${NC}"
+    echo -e "请在宿主机配置 nginx 反代到 HTTPS 域名，参考配置："
+    cat <<NGINX
+   server {
+     listen 443 ssl http2;
+     server_name your-domain.com;
+     ssl_certificate     /path/to/fullchain.pem;
+     ssl_certificate_key /path/to/privkey.pem;
+     location / {
+       proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+       proxy_set_header Host \$host;
+       proxy_set_header X-Real-IP \$remote_addr;
+       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto \$scheme;
+     }
+   }
+NGINX
+  else
+    echo -e "前端访问地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}${NC}"
+    echo -e "API 地址: ${BLUE}http://${server_ip}:${FRONTEND_PORT}/api${NC}"
+  fi
   echo ""
 
   if [[ "${AUTO_GENERATED_PASSWORD:-false}" == "true" ]]; then
@@ -712,7 +752,8 @@ NewAPI Middleware Tool - 一键部署脚本
   NEWAPI_NETWORK     指定 Docker 网络名 (默认: 自动检测)
   ADMIN_PASSWORD     前端访问密码 (默认: 交互式输入)
   API_KEY            后端 API Key (默认: 交互式输入或自动生成)
-  FRONTEND_PORT      前端端口 (默认: 8080)
+  FRONTEND_PORT      前端端口 (默认: 1145)
+  FRONTEND_BIND      前端端口绑定网卡 0.0.0.0/127.0.0.1 (默认: 交互式选择)
 
 示例:
   # 基本部署
@@ -721,8 +762,8 @@ NewAPI Middleware Tool - 一键部署脚本
   # 指定容器名部署
   NEWAPI_CONTAINER=my-newapi ./deploy.sh
 
-  # 非交互式部署
-  ADMIN_PASSWORD=mypass API_KEY=mykey ./deploy.sh
+  # 非交互式部署，用 nginx 反代模式
+  ADMIN_PASSWORD=mypass API_KEY=mykey FRONTEND_BIND=127.0.0.1 ./deploy.sh
 EOF
 }
 
