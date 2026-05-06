@@ -35,7 +35,9 @@ services:
       # Redis 缓存
       - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # 服务配置
-      - SERVER_HOST=127.0.0.1
+      # SERVER_HOST 默认 127.0.0.1（仅供容器内 Nginx 反代访问，对外端口由 Nginx 暴露）
+      # 如需让其他容器/宿主机直连 Go 后端 8000，可在 .env 中改为 0.0.0.0（不推荐，安全风险）
+      - SERVER_HOST=${SERVER_HOST:-127.0.0.1}
       - SERVER_PORT=8000
       - TIMEZONE=${TIMEZONE:-Asia/Shanghai}
       - LOG_LEVEL=${LOG_LEVEL:-info}

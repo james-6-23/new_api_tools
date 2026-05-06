@@ -442,6 +442,9 @@ do_update_interactive() {
   # 迁移旧版 .env（补充 Go 版本所需字段）
   migrate_env_file "$project_dir"
 
+  # 安全检查：SERVER_HOST 是否绑定到不安全的 0.0.0.0
+  check_server_host_security "$project_dir"
+
   # 根据 .env 自动选择 compose 文件（host 模式叠加 overlay）
   setup_compose_files "$project_dir"
 
@@ -895,6 +898,42 @@ migrate_env_file() {
 }
 
 #######################################
+# 检查 SERVER_HOST 安全性
+# 默认 Go 后端绑定 127.0.0.1，仅 Nginx 反代访问
+# 若用户显式配了 0.0.0.0，给出告警并询问是否改回（保留兼容旧配置的用户）
+#######################################
+check_server_host_security() {
+  local env_file="${1}/.env"
+  [[ -f "$env_file" ]] || return 0
+
+  local host_line
+  host_line=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | head -n1)
+  [[ -z "$host_line" ]] && return 0
+
+  local host_value
+  host_value=$(echo "$host_line" | cut -d'=' -f2-)
+  # 去掉所有引号、空白、回车
+  host_value="${host_value//[\"\'\ $'\r'$'\n'$'\t']/}"
+
+  if [[ "$host_value" == "0.0.0.0" || "$host_value" == "::" ]]; then
+    echo ""
+    log_warn "⚠ 检测到 .env 中 SERVER_HOST=${host_value}"
+    log_warn "   Go 后端 (8000 端口) 会暴露到容器虚拟网卡所有接口"
+    log_warn "   若是 host 网络模式部署，会直接暴露到宿主机外部，有安全风险"
+    echo ""
+    read -r -p "是否改为安全默认值 SERVER_HOST=127.0.0.1（推荐）? [Y/n]: " confirm
+    if [[ ! "$confirm" =~ ^[nN]$ ]]; then
+      # 注释掉旧行，追加新行
+      sed -i.bak 's|^SERVER_HOST=|# Disabled by install.sh (insecure): SERVER_HOST=|' "$env_file" 2>/dev/null && rm -f "${env_file}.bak"
+      echo "SERVER_HOST=127.0.0.1" >> "$env_file"
+      log_success "已改为 SERVER_HOST=127.0.0.1"
+    else
+      log_info "保留 SERVER_HOST=${host_value}（确认你了解风险）"
+    fi
+  fi
+}
+
+#######################################
 # 快速更新服务 (保留配置)
 #######################################
 quick_update() {
@@ -919,6 +958,9 @@ quick_update() {
 
   # 迁移旧版 .env（补充 Go 版本所需字段）
   migrate_env_file "$PROJECT_DIR"
+
+  # 安全检查：SERVER_HOST 是否绑定到不安全的 0.0.0.0
+  check_server_host_security "$PROJECT_DIR"
 
   # 下载 GeoIP 数据库
   download_geoip_database
