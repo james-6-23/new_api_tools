@@ -35,7 +35,7 @@ services:
       # Redis 缓存
       - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:-}@redis:6379/0
       # 服务配置
-      - SERVER_HOST=0.0.0.0
+      - SERVER_HOST=127.0.0.1
       - SERVER_PORT=8000
       - TIMEZONE=${TIMEZONE:-Asia/Shanghai}
       - LOG_LEVEL=${LOG_LEVEL:-info}

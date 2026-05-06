@@ -66,7 +66,7 @@ func Load() *Config {
 	cfg = &Config{
 		// Server defaults (support both SERVER_PORT/PORT and SERVER_HOST/HOST)
 		ServerPort: getEnvIntMulti([]string{"SERVER_PORT", "PORT"}, 8000),
-		ServerHost: getEnvStrMulti([]string{"SERVER_HOST", "HOST"}, "0.0.0.0"),
+		ServerHost: getEnvStrMulti([]string{"SERVER_HOST", "HOST"}, "127.0.0.1"),
 		TimeZone:   getEnvStrMulti([]string{"TIMEZONE", "TZ"}, "Asia/Shanghai"),
 
 		// Database
