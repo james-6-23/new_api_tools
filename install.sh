@@ -274,12 +274,18 @@ detect_env_details() {
     ENV_DB_NAME=$(grep -E '^DB_NAME=' "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "未知")
     ENV_FRONTEND_PORT=$(grep -E '^FRONTEND_PORT=' "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "1145")
     ENV_ADMIN_PASSWORD=$(grep -E '^ADMIN_PASSWORD=' "$env_file" 2>/dev/null | cut -d'=' -f2- || echo "")
+    # SERVER_HOST 读取 .env 中显式声明的最后一行（处理用户多次写入的情况）；缺失视为默认 127.0.0.1
+    local _sh_raw
+    _sh_raw=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
+    _sh_raw="${_sh_raw//[\"\'\ $'\r'$'\n'$'\t']/}"
+    ENV_SERVER_HOST="${_sh_raw:-127.0.0.1}"
   else
     ENV_NEWAPI_NETWORK="未配置"
     ENV_DB_ENGINE="未配置"
     ENV_DB_DNS="未配置"
     ENV_DB_PORT="未配置"
     ENV_DB_NAME="未配置"
+    ENV_SERVER_HOST="未配置"
     ENV_FRONTEND_PORT="1145"
     ENV_ADMIN_PASSWORD=""
   fi
@@ -294,6 +300,18 @@ detect_env_details() {
   else
     NETWORK_MODE="正常模式"
     NETWORK_MODE_COLOR="${GREEN}正常模式${NC} (使用 Docker 网络服务发现)"
+  fi
+
+  # 判断后端绑定模式（影响 8000 端口的暴露范围）
+  if [[ "$ENV_SERVER_HOST" == "0.0.0.0" || "$ENV_SERVER_HOST" == "::" ]]; then
+    BIND_MODE="不安全"
+    BIND_MODE_COLOR="${RED}${ENV_SERVER_HOST}${NC} (8000 端口对外暴露，不推荐)"
+  elif [[ "$ENV_SERVER_HOST" == "127.0.0.1" || "$ENV_SERVER_HOST" == "localhost" || "$ENV_SERVER_HOST" == "::1" ]]; then
+    BIND_MODE="安全"
+    BIND_MODE_COLOR="${GREEN}${ENV_SERVER_HOST}${NC} (仅容器内 Nginx 反代访问)"
+  else
+    BIND_MODE="自定义"
+    BIND_MODE_COLOR="${YELLOW}${ENV_SERVER_HOST}${NC}"
   fi
 }
 
@@ -338,6 +356,9 @@ show_management_menu() {
     echo -e "  数据库地址: ${YELLOW}${ENV_DB_DNS}:${ENV_DB_PORT}${NC}"
     echo -e "  数据库名称: ${YELLOW}${ENV_DB_NAME}${NC}"
     echo ""
+    echo -e "${GREEN}【后端绑定】${NC}"
+    echo -e "  SERVER_HOST: $BIND_MODE_COLOR"
+    echo ""
     echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}【操作菜单】${NC}"
     echo ""
@@ -354,9 +375,15 @@ show_management_menu() {
     echo "  9) 完全卸载   (删除所有内容，包括数据，需确认)"
     echo " 10) 完全重装   (完全卸载后重新安装，需确认)"
     echo ""
+    if [[ "$BIND_MODE" == "不安全" ]]; then
+      echo -e " 11) ${GREEN}切换为安全绑定${NC} (改为 SERVER_HOST=127.0.0.1 并重启) ${YELLOW}← 当前不安全${NC}"
+    else
+      echo " 11) 切换后端绑定 (在 127.0.0.1 安全模式 / 0.0.0.0 暴露模式之间切换)"
+    fi
+    echo ""
     echo "  0) 退出"
     echo ""
-    read -r -p "请选择操作 [0-10]: " choice
+    read -r -p "请选择操作 [0-11]: " choice
 
     case "$choice" in
       1)
@@ -410,6 +437,13 @@ show_management_menu() {
       10)
         do_full_reinstall_interactive "$target_dir"
         ;;
+      11)
+        do_toggle_bind_mode_interactive "$target_dir"
+        echo ""
+        read -r -p "按回车键继续..."
+        # 重新读取以刷新菜单上的状态
+        detect_env_details "$target_dir"
+        ;;
       0|"")
         log_info "退出"
         exit 0
@@ -419,6 +453,80 @@ show_management_menu() {
         ;;
     esac
   done
+}
+
+#######################################
+# 切换 Go 后端绑定地址（安全 ⇄ 暴露）
+# 用法：菜单选项 11
+#######################################
+do_toggle_bind_mode_interactive() {
+  local project_dir="$1"
+  local env_file="${project_dir}/.env"
+
+  if [[ ! -f "$env_file" ]]; then
+    log_error "未找到 .env 文件: $env_file"
+    return 1
+  fi
+
+  cd "$project_dir"
+
+  # 读取当前值（与 detect_env_details 一致的解析规则）
+  local current
+  current=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true)
+  current="${current//[\"\'\ $'\r'$'\n'$'\t']/}"
+  current="${current:-127.0.0.1}"
+
+  echo ""
+  echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+  echo -e "${BLUE}  Go 后端绑定模式切换${NC}"
+  echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+  echo ""
+  echo -e "  当前: ${YELLOW}SERVER_HOST=${current}${NC}"
+  echo ""
+  echo -e "  ${GREEN}1) 安全模式${NC}    SERVER_HOST=127.0.0.1"
+  echo -e "                  Go 后端只监听容器内 loopback，由 Nginx 反代到 ${ENV_FRONTEND_PORT} 端口对外。"
+  echo -e "                  这是${GREEN}推荐${NC}配置。"
+  echo ""
+  echo -e "  ${RED}2) 暴露模式${NC}    SERVER_HOST=0.0.0.0"
+  echo -e "                  Go 后端 8000 端口监听容器所有接口。"
+  echo -e "                  ${RED}host 网络模式下会直接暴露到宿主机外网，有安全风险。${NC}"
+  echo -e "                  仅在调试或自定义反代时使用。"
+  echo ""
+  echo "  0) 取消"
+  echo ""
+  read -r -p "请选择 [0-2]: " choice
+
+  local target=""
+  case "$choice" in
+    1) target="127.0.0.1" ;;
+    2)
+      echo ""
+      log_warn "你即将把 Go 后端 8000 端口暴露到容器虚拟网卡所有接口"
+      log_warn "请确认你了解此操作的安全影响"
+      read -r -p "继续? [y/N]: " confirm
+      [[ "$confirm" =~ ^[yY]$ ]] || { log_info "已取消"; return 0; }
+      target="0.0.0.0"
+      ;;
+    0|"") log_info "已取消"; return 0 ;;
+    *) log_warn "无效选择"; return 1 ;;
+  esac
+
+  if [[ "$current" == "$target" ]]; then
+    log_info "当前已是 ${target}，无需切换"
+    return 0
+  fi
+
+  # 注释掉所有旧的 SERVER_HOST 行（保留追溯），追加新值到末尾
+  sed -i.bak 's|^SERVER_HOST=|# Disabled by install.sh: SERVER_HOST=|g' "$env_file" 2>/dev/null && rm -f "${env_file}.bak"
+  echo "SERVER_HOST=${target}" >> "$env_file"
+  log_success "已写入 SERVER_HOST=${target}"
+
+  # 重启容器使配置生效（环境变量只在容器启动时读取）
+  setup_compose_files "$project_dir"
+  log_info "重启服务以应用新绑定..."
+  $DOCKER_COMPOSE down 2>&1 | tail -5
+  $DOCKER_COMPOSE up -d 2>&1 | tail -5
+  log_success "服务已用新绑定重启"
 }
 
 #######################################
