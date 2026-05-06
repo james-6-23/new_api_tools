@@ -441,7 +441,13 @@ show_management_menu() {
         ;;
       8)
         echo ""
-        echo -e "${YELLOW}重新安装将删除容器和配置文件，但保留 data 目录${NC}"
+        echo -e "${YELLOW}重新安装将：${NC}"
+        echo "  • 删除现有 newapi-tools 容器和 .env 配置"
+        echo "  • 保留 data 目录（GeoIP / 本地存储）"
+        echo "  • 重新运行部署向导"
+        echo ""
+        echo -e "${GREEN}NewAPI 自身的数据库 / 用户数据完全不受影响${NC}"
+        echo ""
         read -r -p "确认重新安装? [y/N]: " confirm
         if [[ "$confirm" =~ ^[yY]$ ]]; then
           REINSTALL=true
@@ -818,11 +824,23 @@ do_purge_interactive() {
   cd "$project_dir"
 
   echo ""
-  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
   echo -e "${RED}  警告: 完全卸载${NC}"
-  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${RED}所有数据将被永久删除，无法恢复!${NC}"
+  echo -e "${YELLOW}将永久删除以下 newapi-tools 自身的数据：${NC}"
+  echo "  • 容器: newapi-tools / newapi-tools-redis"
+  echo "  • 镜像: ghcr.io/james-6-23/new_api_tools:*"
+  echo "  • Redis 缓存卷 (仪表盘 / 模型状态 / 等缓存)"
+  echo "  • Docker 网络: newapi-tools-network (若存在)"
+  echo "  • 配置文件 .env (含登录密码)"
+  echo "  • 项目目录: ${project_dir}"
+  echo ""
+  echo -e "${GREEN}NewAPI 本身完全不受影响：${NC}"
+  echo "  ✓ NewAPI 容器、数据库、Redis、用户充值/Token/日志 → 全部保留"
+  echo "  ✓ 本项目仅以只读方式访问 NewAPI 数据库，从不写入"
+  echo ""
+  echo -e "${YELLOW}卸载后想再用，重新跑 install.sh 一键部署即可${NC}"
   echo ""
   read -r -p "输入 'DELETE' 确认完全卸载: " confirm
 
@@ -863,16 +881,21 @@ do_full_reinstall_interactive() {
   local project_dir="$1"
 
   echo ""
-  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
   echo -e "${RED}  警告: 完全重新安装${NC}"
-  echo -e "${RED}========================================${NC}"
+  echo -e "${RED}════════════════════════════════════════════════════════════${NC}"
   echo ""
-  echo -e "${RED}将执行以下操作:${NC}"
-  echo -e "  1. 完全卸载现有服务（删除所有数据）"
-  echo -e "  2. 重新克隆项目"
-  echo -e "  3. 重新运行部署向导"
+  echo -e "${YELLOW}将执行：${NC}"
+  echo "  1. 删除现有 newapi-tools 容器 / 镜像 / 缓存卷 / 项目目录"
+  echo "  2. 重新克隆项目代码"
+  echo "  3. 重新运行部署向导（会再次询问密码 / 端口绑定等）"
   echo ""
-  echo -e "${RED}所有数据将被永久删除，无法恢复!${NC}"
+  echo -e "${YELLOW}影响范围：${NC}"
+  echo "  • newapi-tools 自身数据丢失（密码、缓存、配置）"
+  echo "  • 重新部署后需重新设置登录密码"
+  echo ""
+  echo -e "${GREEN}不影响：${NC}"
+  echo "  ✓ NewAPI 容器、数据库、用户业务数据 → 全部保留"
   echo ""
   read -r -p "输入 'REINSTALL' 确认完全重装: " confirm
 
