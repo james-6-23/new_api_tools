@@ -73,6 +73,9 @@ const SOURCE_LABELS: Record<string, { label: string; icon: typeof Github }> = {
   password: { label: '密码注册', icon: Key },
 }
 
+const SOFT_DELETE_CONFIRM_TEXT = '注销用户'
+const HARD_DELETE_CONFIRM_TEXT = '彻底删除'
+
 interface UserInfo {
   id: number
   username: string
@@ -124,6 +127,7 @@ export function UserManagement() {
     activityLevel?: string
     hardDelete?: boolean
     requireConfirmText?: boolean
+    confirmText?: string
   }>({
     isOpen: false,
     title: '',
@@ -132,8 +136,8 @@ export function UserManagement() {
     onConfirm: () => { },
   })
 
-  // 彻底删除确认输入
-  const [hardDeleteConfirmText, setHardDeleteConfirmText] = useState('')
+  // 删除类高风险操作的二次确认输入
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   // 用户分析弹窗状态
   const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
@@ -274,7 +278,7 @@ export function UserManagement() {
 
   // 预览清理软删除用户
   const previewPurgeSoftDeleted = async () => {
-    setHardDeleteConfirmText('')
+    setDeleteConfirmText('')
     setConfirmDialog({
       isOpen: true,
       title: '清理已软删除用户',
@@ -283,6 +287,7 @@ export function UserManagement() {
       loading: true,
       hardDelete: true,
       requireConfirmText: true,
+      confirmText: HARD_DELETE_CONFIRM_TEXT,
       onConfirm: () => executePurgeSoftDeleted(),
     })
 
@@ -326,7 +331,7 @@ export function UserManagement() {
       const response = await fetch(`${apiUrl}/api/users/soft-deleted/purge`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ dry_run: false }),
+        body: JSON.stringify({ dry_run: false, confirm_text: HARD_DELETE_CONFIRM_TEXT }),
       })
       const data = await response.json()
       if (data.success) {
@@ -400,7 +405,7 @@ export function UserManagement() {
     const userToDelete = users.find(u => u.id === userId)
     setDeleteUserTarget({ userId, username, activityLevel: userToDelete?.activity_level || '' })
     setDeleteMode('soft')
-    setHardDeleteConfirmText('')
+    setDeleteConfirmText('')
     setConfirmDialog({
       isOpen: true,
       title: '删除用户',
@@ -422,6 +427,9 @@ export function UserManagement() {
       const response = await fetch(`${apiUrl}/api/users/${userId}?hard_delete=${hardDelete}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
+        body: JSON.stringify({
+          confirm_text: deleteConfirmText,
+        }),
       })
       const data = await response.json()
       if (data.success) {
@@ -458,10 +466,11 @@ export function UserManagement() {
 
   const previewBatchDelete = async (level: string, hardDelete: boolean = false) => {
     // 重置确认输入
-    setHardDeleteConfirmText('')
+    setDeleteConfirmText('')
 
     const levelLabel = level === 'never' ? '从未请求' : level === 'inactive' ? '不活跃' : '非常不活跃'
-    const actionLabel = hardDelete ? '彻底删除' : '删除'
+    const actionLabel = hardDelete ? '彻底删除' : '注销'
+    const confirmText = hardDelete ? HARD_DELETE_CONFIRM_TEXT : SOFT_DELETE_CONFIRM_TEXT
 
     // 先立即显示弹窗，带加载状态
     setConfirmDialog({
@@ -472,7 +481,8 @@ export function UserManagement() {
       loading: true,
       activityLevel: level,
       hardDelete,
-      requireConfirmText: hardDelete,
+      requireConfirmText: true,
+      confirmText,
       onConfirm: () => executeBatchDelete(level, hardDelete),
     })
 
@@ -494,7 +504,7 @@ export function UserManagement() {
         // 更新弹窗内容
         const warningText = hardDelete
           ? `⚠️ 彻底删除将永久移除用户及所有关联数据（令牌、配额、任务等），此操作不可恢复！`
-          : `此操作为软删除，数据可通过数据库恢复。`
+          : `此操作为注销（软删除），数据可通过数据库恢复。`
         setConfirmDialog(prev => ({
           ...prev,
           message: `确定要${actionLabel} ${count} 个${levelLabel}的用户吗？\n\n${warningText}`,
@@ -520,7 +530,12 @@ export function UserManagement() {
       const response = await fetch(`${apiUrl}/api/users/batch-delete`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ activity_level: level, dry_run: false, hard_delete: hardDelete }),
+        body: JSON.stringify({
+          activity_level: level,
+          dry_run: false,
+          hard_delete: hardDelete,
+          confirm_text: hardDelete ? HARD_DELETE_CONFIRM_TEXT : SOFT_DELETE_CONFIRM_TEXT,
+        }),
       })
       const data = await response.json()
       if (data.success) {
@@ -667,6 +682,13 @@ export function UserManagement() {
         return <Badge variant="outline" className={baseClass}>未知</Badge>
     }
   }
+
+  const currentDialogConfirmText = deleteUserTarget
+    ? (deleteMode === 'hard' ? HARD_DELETE_CONFIRM_TEXT : SOFT_DELETE_CONFIRM_TEXT)
+    : (confirmDialog.requireConfirmText ? confirmDialog.confirmText : '')
+  const confirmActionDisabled = Boolean(
+    confirmDialog.loading || (currentDialogConfirmText && deleteConfirmText !== currentDialogConfirmText)
+  )
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -1132,16 +1154,16 @@ export function UserManagement() {
       </Card>
 
       {/* Confirm Dialog */}
-      <Dialog open={confirmDialog.isOpen} onOpenChange={(open: boolean) => { setConfirmDialog(prev => ({ ...prev, isOpen: open })); if (!open) { setHardDeleteConfirmText(''); setDeleteUserTarget(null) } }}>
+      <Dialog open={confirmDialog.isOpen} onOpenChange={(open: boolean) => { setConfirmDialog(prev => ({ ...prev, isOpen: open })); if (!open) { setDeleteConfirmText(''); setDeleteUserTarget(null) } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className={confirmDialog.hardDelete || deleteMode === 'hard' ? "text-red-600 dark:text-red-400" : ""}>{confirmDialog.title}</DialogTitle>
+            <DialogTitle className={confirmDialog.hardDelete || (deleteUserTarget !== null && deleteMode === 'hard') ? "text-red-600 dark:text-red-400" : ""}>{confirmDialog.title}</DialogTitle>
             <DialogDescription className="whitespace-pre-line">{confirmDialog.message}</DialogDescription>
           </DialogHeader>
           {confirmDialog.loading ? (
             <div className="py-8 flex flex-col items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
-              <p className="text-sm text-muted-foreground">正在查询用户数据，您也可以直接删除...</p>
+              <p className="text-sm text-muted-foreground">正在查询用户数据，请等待预览结果...</p>
             </div>
           ) : deleteUserTarget ? (
             /* 单个用户删除 - 显示模式选择 */
@@ -1155,7 +1177,7 @@ export function UserManagement() {
                     type="radio"
                     name="deleteMode"
                     checked={deleteMode === 'soft'}
-                    onChange={() => setDeleteMode('soft')}
+                    onChange={() => { setDeleteMode('soft'); setDeleteConfirmText('') }}
                     className="mt-1"
                   />
                   <div>
@@ -1168,7 +1190,7 @@ export function UserManagement() {
                     type="radio"
                     name="deleteMode"
                     checked={deleteMode === 'hard'}
-                    onChange={() => setDeleteMode('hard')}
+                    onChange={() => { setDeleteMode('hard'); setDeleteConfirmText('') }}
                     className="mt-1"
                   />
                   <div>
@@ -1177,26 +1199,26 @@ export function UserManagement() {
                   </div>
                 </label>
               </div>
-              {/* 彻底删除需要输入确认 */}
-              {deleteMode === 'hard' && (
-                <div className="border-t pt-4">
-                  <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">
-                    请输入 <span className="font-mono bg-red-100 dark:bg-red-900 px-2 py-0.5 rounded">彻底删除</span> 以确认操作：
-                  </p>
-                  <Input
-                    value={hardDeleteConfirmText}
-                    onChange={(e) => setHardDeleteConfirmText(e.target.value)}
-                    placeholder="请输入 彻底删除"
-                    className="border-red-300 focus:border-red-500 focus:ring-red-500"
-                  />
-                </div>
-              )}
+              <div className="border-t pt-4">
+                <p className={cn(
+                  "text-sm font-medium mb-2",
+                  deleteMode === 'hard' ? "text-red-600 dark:text-red-400" : "text-orange-600 dark:text-orange-400"
+                )}>
+                  请输入 <span className="font-mono bg-red-100 dark:bg-red-900 px-2 py-0.5 rounded">{currentDialogConfirmText}</span> 以确认操作：
+                </p>
+                <Input
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={`请输入 ${currentDialogConfirmText}`}
+                  className={deleteMode === 'hard' ? "border-red-300 focus:border-red-500 focus:ring-red-500" : "border-orange-300 focus:border-orange-500 focus:ring-orange-500"}
+                />
+              </div>
             </div>
           ) : confirmDialog.details && (
             /* 批量删除 - 显示用户列表 */
             <div className="py-4 space-y-4">
               <div>
-                <p className="text-sm text-muted-foreground mb-2">将{confirmDialog.hardDelete ? '彻底' : ''}删除以下用户（显示前20个）：</p>
+                <p className="text-sm text-muted-foreground mb-2">将{confirmDialog.hardDelete ? '彻底删除' : '注销'}以下用户（显示前20个）：</p>
                 <div className="max-h-40 overflow-y-auto bg-muted rounded-md p-3">
                   <div className="flex flex-wrap gap-2">
                     {confirmDialog.details.users.map((username, i) => (
@@ -1208,28 +1230,31 @@ export function UserManagement() {
                   </div>
                 </div>
               </div>
-              {/* 彻底删除需要输入确认 */}
+              {/* 所有批量删除/清理操作都需要输入确认 */}
               {confirmDialog.requireConfirmText && (
                 <div className="border-t pt-4">
-                  <p className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">
-                    请输入 <span className="font-mono bg-red-100 dark:bg-red-900 px-2 py-0.5 rounded">彻底删除</span> 以确认操作：
+                  <p className={cn(
+                    "text-sm font-medium mb-2",
+                    confirmDialog.hardDelete ? "text-red-600 dark:text-red-400" : "text-orange-600 dark:text-orange-400"
+                  )}>
+                    请输入 <span className="font-mono bg-red-100 dark:bg-red-900 px-2 py-0.5 rounded">{currentDialogConfirmText}</span> 以确认操作：
                   </p>
                   <Input
-                    value={hardDeleteConfirmText}
-                    onChange={(e) => setHardDeleteConfirmText(e.target.value)}
-                    placeholder="请输入 彻底删除"
-                    className="border-red-300 focus:border-red-500 focus:ring-red-500"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder={`请输入 ${currentDialogConfirmText}`}
+                    className={confirmDialog.hardDelete ? "border-red-300 focus:border-red-500 focus:ring-red-500" : "border-orange-300 focus:border-orange-500 focus:ring-orange-500"}
                   />
                 </div>
               )}
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setConfirmDialog(prev => ({ ...prev, isOpen: false })); setHardDeleteConfirmText(''); setDeleteUserTarget(null) }}>
+            <Button variant="outline" onClick={() => { setConfirmDialog(prev => ({ ...prev, isOpen: false })); setDeleteConfirmText(''); setDeleteUserTarget(null) }}>
               取消
             </Button>
             <Button
-              variant={confirmDialog.type === 'danger' || deleteMode === 'hard' ? 'destructive' : 'default'}
+              variant={confirmDialog.type === 'danger' || (deleteUserTarget !== null && deleteMode === 'hard') ? 'destructive' : 'default'}
               onClick={() => {
                 if (deleteUserTarget) {
                   executeDeleteUser()
@@ -1237,9 +1262,9 @@ export function UserManagement() {
                   confirmDialog.onConfirm()
                 }
               }}
-              disabled={((confirmDialog.requireConfirmText ?? false) || (deleteUserTarget !== null && deleteMode === 'hard')) && hardDeleteConfirmText !== '彻底删除'}
+              disabled={confirmActionDisabled}
             >
-              {deleteUserTarget ? (deleteMode === 'hard' ? '确认彻底删除' : '确认注销') : (confirmDialog.hardDelete ? '确认彻底删除' : '确定删除')}
+              {deleteUserTarget ? (deleteMode === 'hard' ? '确认彻底删除' : '确认注销') : (confirmDialog.hardDelete ? '确认彻底删除' : '确认注销')}
             </Button>
           </DialogFooter>
         </DialogContent>
