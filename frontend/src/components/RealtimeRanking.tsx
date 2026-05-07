@@ -2503,7 +2503,7 @@ export function RealtimeRanking() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card className="rounded-xl border-l-4 border-l-blue-500 shadow-sm hover:shadow-md transition-shadow">
+              <Card className="rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -2529,7 +2529,7 @@ export function RealtimeRanking() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-xl border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-shadow">
+              <Card className="rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -2546,7 +2546,7 @@ export function RealtimeRanking() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-xl border-l-4 border-l-orange-500 shadow-sm hover:shadow-md transition-shadow">
+              <Card className="rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -2563,7 +2563,7 @@ export function RealtimeRanking() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-xl border-l-4 border-l-red-500 shadow-sm hover:shadow-md transition-shadow">
+              <Card className="rounded-xl shadow-sm hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
