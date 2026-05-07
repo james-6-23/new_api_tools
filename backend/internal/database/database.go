@@ -78,6 +78,12 @@ func Get() *Manager {
 	return mgr
 }
 
+// SetForTesting overrides the package-level manager. Tests use this to inject
+// an in-memory SQLite backend or a stub Manager — production code never calls it.
+func SetForTesting(m *Manager) {
+	mgr = m
+}
+
 // Close closes the database connection
 func Close() error {
 	if mgr != nil && mgr.DB != nil {

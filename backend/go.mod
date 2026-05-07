@@ -12,6 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.4.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mattn/go-colorable v0.1.14
+	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/oschwald/geoip2-golang v1.8.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/rs/zerolog v1.34.0

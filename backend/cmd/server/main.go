@@ -85,6 +85,7 @@ func main() {
 		// Phase 2.1: Basic modules
 		handler.RegisterRedemptionRoutes(api)
 		handler.RegisterTopUpRoutes(api)
+		handler.RegisterTopUpAnalyticsRoutes(api)
 		handler.RegisterStorageRoutes(api)
 		handler.RegisterSystemRoutes(api)
 

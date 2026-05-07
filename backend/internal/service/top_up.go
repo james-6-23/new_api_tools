@@ -1,7 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,15 +65,11 @@ type PaginatedTopUps struct {
 	TotalPages int           `json:"total_pages"`
 }
 
-// ListTopUpRecords lists top-up records with pagination and filtering
-func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
-	if params.Page < 1 {
-		params.Page = 1
-	}
-	if params.PageSize < 1 || params.PageSize > 100 {
-		params.PageSize = 20
-	}
-
+// buildTopUpWhere translates filter params into a parameterised WHERE clause.
+// Returns the WHERE body (without the leading "WHERE"), the corresponding args,
+// and the next placeholder index that the caller should use for additional args
+// (e.g. LIMIT/OFFSET when paginating).
+func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 	db := database.Get()
 
 	where := []string{}
@@ -88,7 +89,9 @@ func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
 		case "failed":
 			where = append(where, "(LOWER(t.status) IN ('failed', 'error') OR t.status = '-1')")
 		case "pending":
-			where = append(where, "(LOWER(t.status) NOT IN ('success', 'failed', 'completed', 'error') AND t.status NOT IN ('1', '-1'))")
+			// NULL 走 ELSE 兜底归入 pending（与 funnel 的 status 分桶一致）；
+			// 用 IS NULL 显式短路，避免 LOWER(NULL)/NOT IN 整体为 NULL 时被剔除。
+			where = append(where, "(t.status IS NULL OR (LOWER(t.status) NOT IN ('success', 'failed', 'completed', 'error') AND t.status NOT IN ('1', '-1')))")
 		}
 	}
 
@@ -126,6 +129,21 @@ func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
 	if len(where) > 0 {
 		whereSQL = strings.Join(where, " AND ")
 	}
+	return whereSQL, args, argIdx
+}
+
+// ListTopUpRecords lists top-up records with pagination and filtering
+func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.PageSize < 1 || params.PageSize > 100 {
+		params.PageSize = 20
+	}
+
+	db := database.Get()
+
+	whereSQL, args, argIdx := buildTopUpWhere(params)
 
 	// Count
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t WHERE %s", whereSQL)
@@ -171,6 +189,119 @@ func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
 		PageSize:   params.PageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// CountTopUps returns the total number of top-ups matching the filter.
+// Used by ExportTopUpsToCSV to enforce the export size cap before streaming.
+func CountTopUps(params ListTopUpParams) (int64, error) {
+	db := database.Get()
+	whereSQL, args, _ := buildTopUpWhere(params)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t WHERE %s", whereSQL)
+	var total int64
+	if err := db.DB.Get(&total, countSQL, args...); err != nil {
+		return 0, fmt.Errorf("count query failed: %w", err)
+	}
+	return total, nil
+}
+
+// ErrExportTooLarge is returned when an export request exceeds the row cap.
+var ErrExportTooLarge = errors.New("export exceeds row limit")
+
+// TopUpExportLimit caps how many rows a single CSV export may contain.
+// Streaming the table is fine, but the user-side cost (download size, Excel
+// load time) makes a hard ceiling kinder than letting them request millions.
+// Declared as var (not const) so tests can shrink it temporarily and verify
+// the streaming break — production code should treat it as immutable.
+var TopUpExportLimit int64 = 100000
+
+// ExportTopUpsToCSV streams top-up records as CSV to the writer. The caller is
+// responsible for setting response headers and (recommended) running CountTopUps
+// first to short-circuit oversized exports — this function only flips on the
+// limit if the count exceeds it mid-stream.
+func ExportTopUpsToCSV(ctx context.Context, w io.Writer, params ListTopUpParams) error {
+	db := database.Get()
+	whereSQL, args, _ := buildTopUpWhere(params)
+
+	// UTF-8 BOM so Excel (especially zh-CN locale) auto-detects encoding.
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return err
+	}
+
+	csvW := csv.NewWriter(w)
+	defer csvW.Flush()
+
+	header := []string{
+		"ID", "用户ID", "用户名", "额度(USD)", "金额(CNY)",
+		"交易号", "支付方式", "状态", "创建时间", "完成时间",
+	}
+	if err := csvW.Write(header); err != nil {
+		return err
+	}
+
+	selectSQL := fmt.Sprintf(`SELECT t.id, t.user_id, u.username, t.amount, t.money, COALESCE(t.trade_no,'') as trade_no, COALESCE(t.payment_method,'') as payment_method, COALESCE(t.create_time,0) as create_time, COALESCE(t.complete_time,0) as complete_time, COALESCE(t.status,'') as status FROM top_ups t LEFT JOIN users u ON t.user_id = u.id WHERE %s ORDER BY t.create_time DESC`, whereSQL)
+
+	rows, err := db.DB.QueryxContext(ctx, selectSQL, args...)
+	if err != nil {
+		return fmt.Errorf("export query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var written int64
+	for rows.Next() {
+		// Surface ctx cancellation (timeout / client disconnect) without finishing the loop.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var rec TopUpRecord
+		if err := rows.StructScan(&rec); err != nil {
+			continue
+		}
+
+		username := ""
+		if rec.Username != nil {
+			username = *rec.Username
+		}
+		createTimeStr := ""
+		if rec.CreateTime > 0 {
+			createTimeStr = time.Unix(rec.CreateTime, 0).Format(time.RFC3339)
+		}
+		completeTimeStr := ""
+		if rec.CompleteTime > 0 {
+			completeTimeStr = time.Unix(rec.CompleteTime, 0).Format(time.RFC3339)
+		}
+
+		if err := csvW.Write([]string{
+			strconv.FormatInt(rec.ID, 10),
+			strconv.FormatInt(rec.UserID, 10),
+			username,
+			strconv.FormatInt(rec.Amount, 10),
+			strconv.FormatFloat(rec.Money, 'f', 2, 64),
+			rec.TradeNo,
+			rec.PaymentMethod,
+			rec.Status,
+			createTimeStr,
+			completeTimeStr,
+		}); err != nil {
+			return err
+		}
+
+		written++
+		if written >= TopUpExportLimit {
+			// 写满上限就停手，不再吐第 100001 行 —— handler 的 CountTopUps 预检通常已经
+			// 把超限请求挡在 400 上，这里只是兜底 race（count 之后又有新插入）。
+			break
+		}
+		// Periodic flush so the browser begins receiving bytes promptly.
+		if written%500 == 0 {
+			csvW.Flush()
+			if err := csvW.Error(); err != nil {
+				return err
+			}
+		}
+	}
+
+	return rows.Err()
 }
 
 // GetTopUpStatistics returns aggregate top-up statistics
@@ -273,6 +404,3 @@ func GetTopUpByID(id int64) (*TopUpRecord, error) {
 	}
 	return &rec, nil
 }
-
-// Unused import guard
-var _ = time.Now
