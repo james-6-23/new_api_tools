@@ -78,9 +78,16 @@ type HourlyHeatmapPoint struct {
 	Money     float64 `json:"money"`
 }
 
-// successStatusCondition returns the SQL condition for successful top-ups
-func successStatusCondition() string {
-	return "(LOWER(status) IN ('success', 'completed') OR status = '1')"
+// successStatusCondition returns the SQL condition for successful top-ups.
+// Pass a qualified column (for example "t.status") when the query joins another
+// table that also has a status column.
+func successStatusCondition(columnRefs ...string) string {
+	column := "status"
+	if len(columnRefs) > 0 && strings.TrimSpace(columnRefs[0]) != "" {
+		column = columnRefs[0]
+	}
+	trimmed := fmt.Sprintf("TRIM(%s)", column)
+	return fmt.Sprintf("(LOWER(%s) IN ('success', 'completed') OR %s = '1')", trimmed, trimmed)
 }
 
 // TopUpTrendsParams holds query parameters for revenue trends
@@ -452,7 +459,7 @@ func GetTopUpTopUsers(limit int, days int) ([]TopUpTopUser, error) {
 		WHERE t.create_time >= ? AND %s
 		GROUP BY t.user_id, u.username
 		ORDER BY money DESC
-		LIMIT ?`, castExpr, successStatusCondition()))
+		LIMIT ?`, castExpr, successStatusCondition("t.status")))
 
 	rows, err := db.QueryWithTimeout(15*time.Second, query, startTime, limit)
 	if err != nil {
@@ -584,16 +591,16 @@ func GetTopUpRealtimeStats() (*TopUpRealtimeStats, error) {
 		successCond, successCond))
 
 	row, err := db.QueryOneWithTimeout(15*time.Second, query,
-		todayStart,       // today_money
-		todayStart,       // today_count
+		todayStart,                 // today_money
+		todayStart,                 // today_count
 		yesterdayStart, todayStart, // yesterday_money
 		yesterdayStart, todayStart, // yesterday_count
-		weekStart,        // week_money
-		weekStart,        // week_count
+		weekStart,                // week_money
+		weekStart,                // week_count
 		lastWeekStart, weekStart, // last_week_money
 		lastWeekStart, weekStart, // last_week_count
-		monthStart,       // month_money
-		monthStart,       // month_count
+		monthStart,                 // month_money
+		monthStart,                 // month_count
 		lastMonthStart, monthStart, // last_month_money
 		lastMonthStart, monthStart, // last_month_count
 		lastMonthStart, // WHERE condition
@@ -646,12 +653,7 @@ func GetTopUpHourlyHeatmap(days int) ([]HourlyHeatmapPoint, error) {
 	startTime := time.Now().AddDate(0, 0, -days).Unix()
 	tzOffset := localTZOffset()
 
-	// Extract day of week and hour from unix timestamp with timezone offset
-	// PostgreSQL: EXTRACT(DOW FROM ...) returns 0=Sunday
-	// We use arithmetic approach for cross-DB compatibility
-	hourExpr := fmt.Sprintf("FLOOR(((create_time + %d) %% 86400) / 3600)", tzOffset)
-	// Day of week: (FLOOR((ts + offset) / 86400) + 4) % 7 gives 0=Sunday (Unix epoch was Thursday=4)
-	dowExpr := fmt.Sprintf("(FLOOR((create_time + %d) / 86400) + 4) %% 7", tzOffset)
+	hourExpr, dowExpr := topUpHeatmapTimeExpressions(tzOffset, db.IsPG)
 
 	query := db.RebindQuery(fmt.Sprintf(`
 		SELECT %s as day_of_week,
@@ -669,7 +671,13 @@ func GetTopUpHourlyHeatmap(days int) ([]HourlyHeatmapPoint, error) {
 		return nil, fmt.Errorf("heatmap query failed: %w", err)
 	}
 
-	// Initialize full 7x24 grid
+	result := topUpHeatmapGrid(rows)
+
+	cm.Set(cacheKey, result, 10*time.Minute)
+	return result, nil
+}
+
+func topUpHeatmapGrid(rows []map[string]interface{}) []HourlyHeatmapPoint {
 	result := make([]HourlyHeatmapPoint, 0, 7*24)
 	heatmap := make(map[string]*HourlyHeatmapPoint)
 
@@ -692,7 +700,6 @@ func GetTopUpHourlyHeatmap(days int) ([]HourlyHeatmapPoint, error) {
 		}
 	}
 
-	// Convert to sorted slice
 	for dow := 0; dow < 7; dow++ {
 		for h := 0; h < 24; h++ {
 			key := fmt.Sprintf("%d-%d", dow, h)
@@ -700,7 +707,6 @@ func GetTopUpHourlyHeatmap(days int) ([]HourlyHeatmapPoint, error) {
 		}
 	}
 
-	// Sort by count descending for the response (frontend can re-sort as needed)
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].DayOfWeek != result[j].DayOfWeek {
 			return result[i].DayOfWeek < result[j].DayOfWeek
@@ -708,8 +714,21 @@ func GetTopUpHourlyHeatmap(days int) ([]HourlyHeatmapPoint, error) {
 		return result[i].Hour < result[j].Hour
 	})
 
-	cm.Set(cacheKey, result, 10*time.Minute)
-	return result, nil
+	return result
+}
+
+func topUpHeatmapTimeExpressions(tzOffset int, isPG bool) (hourExpr, dowExpr string) {
+	// Extract day of week and hour from unix timestamp with timezone offset.
+	// Day of week: (day_bucket + 4) % 7 gives 0=Sunday because Unix epoch was Thursday=4.
+	hourExpr = fmt.Sprintf("FLOOR(((create_time + %d) %% 86400) / 3600)", tzOffset)
+	dayBucketExpr := fmt.Sprintf("FLOOR((create_time + %d) / 86400)", tzOffset)
+	if isPG {
+		// PostgreSQL FLOOR(bigint division) returns double precision, and modulo
+		// is not defined for double precision. Cast before applying %.
+		dayBucketExpr = fmt.Sprintf("CAST(%s AS BIGINT)", dayBucketExpr)
+	}
+	dowExpr = fmt.Sprintf("(%s + 4) %% 7", dayBucketExpr)
+	return hourExpr, dowExpr
 }
 
 // FunnelStatusBucket counts top-ups grouped into success/failed/pending buckets.

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   TrendingUp, TrendingDown, ArrowRight, Loader2, RefreshCw,
   CalendarDays, CalendarRange, Calendar as CalendarIcon,
-  Trophy, CreditCard, Activity, Zap, Filter, Users
+  Trophy, CreditCard, Activity, Zap, Filter, Users, BarChart3, LineChart
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
@@ -54,6 +54,7 @@ interface FunnelData {
 }
 
 type Granularity = 'daily' | 'weekly' | 'monthly'
+type TrendChartType = 'bar' | 'line'
 
 const fmtMoney = (n: number) => `¥${(n || 0).toFixed(2)}`
 const fmtCompactMoney = (n: number) => {
@@ -95,6 +96,7 @@ export function TopUpAnalytics({ active }: Props) {
   const [trends, setTrends] = useState<TrendPoint[]>([])
   const [trendGranularity, setTrendGranularity] = useState<Granularity>('daily')
   const [trendDays, setTrendDays] = useState(30)
+  const [trendChartType, setTrendChartType] = useState<TrendChartType>('bar')
   const [financial, setFinancial] = useState<FinancialSummary[]>([])
   const [financialMonths, setFinancialMonths] = useState(12)
   const [topUsers, setTopUsers] = useState<TopUser[]>([])
@@ -217,8 +219,10 @@ export function TopUpAnalytics({ active }: Props) {
         data={trends}
         granularity={trendGranularity}
         days={trendDays}
+        chartType={trendChartType}
         onGranularityChange={setTrendGranularity}
         onDaysChange={setTrendDays}
+        onChartTypeChange={setTrendChartType}
       />
 
       {/* 模块 3 & 4：财务汇总 + Top 用户 */}
@@ -326,16 +330,18 @@ function ComparePanel({
   )
 }
 
-// ============ 模块 2: 收入趋势（柱状） ============
+// ============ 模块 2: 收入趋势 ============
 function TrendsBlock({
-  data, granularity, days,
-  onGranularityChange, onDaysChange,
+  data, granularity, days, chartType,
+  onGranularityChange, onDaysChange, onChartTypeChange,
 }: {
   data: TrendPoint[]
   granularity: Granularity
   days: number
+  chartType: TrendChartType
   onGranularityChange: (g: Granularity) => void
   onDaysChange: (d: number) => void
+  onChartTypeChange: (t: TrendChartType) => void
 }) {
   const { points, max } = useMemo(() => {
     const pts = data || []
@@ -343,6 +349,17 @@ function TrendsBlock({
     return { points: pts, max: m }
   }, [data])
   const total = points.reduce((sum, p) => sum + (p.success_money || 0), 0)
+  const linePoints = useMemo(() => {
+    return points.map((p, i) => {
+      const x = points.length <= 1 ? 50 : (i / (points.length - 1)) * 100
+      const y = 100 - ((p.success_money || 0) / max) * 100
+      return { x, y: Math.min(100, Math.max(0, y)), point: p, index: i }
+    })
+  }, [points, max])
+  const linePath = linePoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')
+  const areaPath = linePoints.length
+    ? `${linePath} L ${linePoints[linePoints.length - 1].x} 100 L ${linePoints[0].x} 100 Z`
+    : ''
 
   const formatLabel = (p: TrendPoint, i: number, total: number) => {
     if (granularity === 'monthly') return p.date
@@ -393,11 +410,80 @@ function TrendsBlock({
               <option value="365">近 365 天</option>
             </Select>
           </div>
+          <div className="flex items-center gap-1 rounded-md border border-input bg-background p-0.5 shadow-sm">
+            <Button
+              variant={chartType === 'bar' ? 'default' : 'ghost'}
+              size="icon"
+              className="h-7 w-7"
+              aria-label="柱状图"
+              aria-pressed={chartType === 'bar'}
+              title="柱状图"
+              onClick={() => onChartTypeChange('bar')}
+            >
+              <BarChart3 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={chartType === 'line' ? 'default' : 'ghost'}
+              size="icon"
+              className="h-7 w-7"
+              aria-label="折线图"
+              aria-pressed={chartType === 'line'}
+              title="折线图"
+              onClick={() => onChartTypeChange('line')}
+            >
+              <LineChart className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
         {points.length === 0 ? (
           <div className="text-sm text-muted-foreground py-8 text-center">暂无数据</div>
+        ) : chartType === 'line' ? (
+          <div className="relative h-[220px] border-b border-border/50 pb-6">
+            <div className="absolute inset-x-0 top-0 bottom-6">
+              <svg className="h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                {areaPath && <path d={areaPath} className="fill-primary/10" />}
+                {linePath && (
+                  <path
+                    d={linePath}
+                    className="fill-none stroke-primary"
+                    strokeWidth="2"
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+              </svg>
+              {linePoints.map(({ x, y, point, index }) => (
+                <div
+                  key={index}
+                  className="absolute group"
+                  style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)' }}
+                >
+                  <div className="h-3 w-3 rounded-full border-2 border-background bg-primary shadow-sm" />
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-popover text-popover-foreground text-[10px] rounded px-2 py-1 shadow-md border whitespace-nowrap z-10">
+                    <div className="font-medium">{point.date}</div>
+                    <div>实收 {fmtMoney(point.success_money)}</div>
+                    <div className="text-muted-foreground">{point.success_count} 笔成功 / 共 {point.count} 笔</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {linePoints.map(({ x, point, index }) => {
+              const label = formatLabel(point, index, points.length)
+              if (!label) return null
+              return (
+                <div
+                  key={`label-${index}`}
+                  className="absolute bottom-0 text-[9px] text-muted-foreground whitespace-nowrap"
+                  style={{ left: `${x}%`, transform: 'translateX(-50%)' }}
+                >
+                  {label}
+                </div>
+              )
+            })}
+          </div>
         ) : (
           <div className="relative h-[220px] flex items-end gap-1 border-b border-border/50 pb-6">
             {points.map((p, i) => {
