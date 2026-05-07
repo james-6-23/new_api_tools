@@ -102,9 +102,7 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
             <div className="flex justify-between items-center py-3">
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center text-primary shadow-inner">
-                    <LayoutDashboard className="w-5 h-5" />
-                  </div>
+                  <img src="/tool.svg" alt="NewAPI-Tool" className="h-8 w-8 shrink-0" />
                   <h1 className="text-lg sm:text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
                     NewAPI-Tool
                   </h1>

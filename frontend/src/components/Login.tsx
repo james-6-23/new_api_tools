@@ -39,6 +39,7 @@ export function Login({ onLogin }: LoginProps) {
       <div className="max-w-md w-full">
         <Card>
           <CardHeader className="text-center">
+            <img src="/tool.svg" alt="NewAPI-Tool" className="mx-auto mb-3 h-14 w-14" />
             <CardTitle className="text-2xl">NewAPI Middleware Tool</CardTitle>
             <CardDescription>请输入密码以访问管理界面</CardDescription>
           </CardHeader>
