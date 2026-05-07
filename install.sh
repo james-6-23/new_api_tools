@@ -47,8 +47,9 @@ setup_compose_files() {
   [[ -f "$env_file" ]] || return 0
 
   # 必须显式存在 NEWAPI_NETWORK 行才判断；行缺失视为老版 .env，让 base compose 走默认 fallback
+  # 注意：set -e + pipefail 下，grep 无匹配会让 pipe 退出码为 1 → 整个脚本死掉，必须 || true 兜底。
   local nw_line
-  nw_line=$(grep -E '^NEWAPI_NETWORK=' "$env_file" 2>/dev/null | head -n1)
+  nw_line=$(grep -E '^NEWAPI_NETWORK=' "$env_file" 2>/dev/null | head -n1 || true)
   [[ -n "$nw_line" ]] || return 0
 
   local nw
@@ -1167,7 +1168,8 @@ check_server_host_security() {
   [[ -f "$env_file" ]] || return 0
 
   local host_line
-  host_line=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | head -n1)
+  # set -e + pipefail 下，grep 无匹配会让 pipe 退出码为 1 → 必须 || true 兜底，否则脚本静默退出。
+  host_line=$(grep -E '^SERVER_HOST=' "$env_file" 2>/dev/null | head -n1 || true)
   [[ -z "$host_line" ]] && return 0
 
   local host_value
