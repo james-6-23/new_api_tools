@@ -10,7 +10,8 @@ import { CanvasRenderer } from 'echarts/renderers'
 echarts.use([MapChart, TooltipComponent, VisualMapComponent, CanvasRenderer])
 import {
   Globe, MapPin, RefreshCw, Loader2, TrendingUp,
-  AlertTriangle, Activity, ChevronRight, ChevronDown, Timer, Map as MapIcon
+  AlertTriangle, Activity, ChevronRight, ChevronDown, Timer, Map as MapIcon,
+  Database, CheckCircle2
 } from 'lucide-react'
 import { IPLookup } from './IPLookup'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card'
@@ -31,6 +32,11 @@ interface RegionStats {
 interface IPDistributionData {
   total_ips: number
   total_requests: number
+  sampled_ip_limit: number
+  sampled_ips: number
+  sampled_requests: number
+  coverage_percentage: number
+  geo_available: boolean
   domestic_percentage: number
   overseas_percentage: number
   by_country: RegionStats[]
@@ -846,7 +852,7 @@ export function IPAnalysis() {
       </div>
 
       {/* Overview Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
           title="独立 IP 数"
           value={formatNumber(data?.total_ips || 0)}
@@ -862,16 +868,29 @@ export function IPAnalysis() {
           color="emerald"
         />
         <StatCard
-          title="国内占比"
+          title="国内占比(样本)"
           value={`${(data?.domestic_percentage || 0).toFixed(1)}%`}
           icon={TrendingUp}
           color="purple"
         />
         <StatCard
-          title="海外占比"
+          title="海外占比(样本)"
           value={`${(data?.overseas_percentage || 0).toFixed(1)}%`}
           icon={Globe}
           color="orange"
+        />
+        <StatCard
+          title="样本覆盖"
+          value={`${(data?.coverage_percentage || 0).toFixed(1)}%`}
+          rawValue={data?.sampled_requests || 0}
+          icon={Database}
+          color="cyan"
+        />
+        <StatCard
+          title="GeoIP"
+          value={data?.geo_available ? '已就绪' : '未就绪'}
+          icon={CheckCircle2}
+          color={data?.geo_available ? 'emerald' : 'slate'}
         />
       </div>
 
@@ -887,7 +906,10 @@ export function IPAnalysis() {
                 <Globe className="w-5 h-5 text-muted-foreground" />
                 Web 流量请求（按{mapType === 'world' ? '国家/地区' : '省份'}）
               </CardTitle>
-              <CardDescription>过去 {getTimeWindowLabel(timeWindow)}</CardDescription>
+              <CardDescription>
+                过去 {getTimeWindowLabel(timeWindow)} · Top {formatNumber(data?.sampled_ip_limit || 3000)} IP 地理样本
+                {data && ` · 覆盖 ${data.coverage_percentage.toFixed(1)}% 流量`}
+              </CardDescription>
             </div>
             {/* 地图切换下拉框 */}
             <div className="relative">
@@ -976,8 +998,11 @@ export function IPAnalysis() {
       {/* Traffic Ranking Table */}
       <Card className="shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">流量排名靠前的国家/地区</CardTitle>
-          <CardDescription>过去 {getTimeWindowLabel(timeWindow)}</CardDescription>
+          <CardTitle className="text-lg">Top IP 样本国家/地区排名</CardTitle>
+          <CardDescription>
+            过去 {getTimeWindowLabel(timeWindow)}
+            {data && ` · ${formatNumber(data.sampled_ips)} 个样本 IP / ${formatNumber(data.sampled_requests)} 次请求`}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {data && data.by_country.length > 0 ? (
@@ -1018,7 +1043,10 @@ export function IPAnalysis() {
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">中国省份流量排名</CardTitle>
-            <CardDescription>过去 {getTimeWindowLabel(timeWindow)}</CardDescription>
+            <CardDescription>
+              过去 {getTimeWindowLabel(timeWindow)}
+              {data && ` · 基于 Top IP 地理样本`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -1099,6 +1127,8 @@ function StatCard({ title, value, rawValue, icon: Icon, color }: StatCardProps) 
     emerald: { bg: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' },
     purple: { bg: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
     orange: { bg: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
+    cyan: { bg: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300' },
+    slate: { bg: 'bg-slate-50 text-slate-700 dark:bg-slate-900 dark:text-slate-300' },
   }
   const theme = colorMap[color] || colorMap.blue
 

@@ -236,7 +236,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		WHERE user_id = ? AND created_at >= ? AND created_at <= ?
 			AND type IN (2, 5) AND ip IS NOT NULL AND ip != ''
 		ORDER BY created_at ASC`)
-	ipSequence, _ := s.db.Query(ipSeqQuery, userID, startTime, now)
+	ipSequence, _ := s.db.QueryWithTimeout(30*time.Second, ipSeqQuery, userID, startTime, now)
 	if ipSequence == nil {
 		ipSequence = []map[string]interface{}{}
 	}
@@ -340,7 +340,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		ORDER BY requests DESC
 		LIMIT 20`)
 
-	topIPs, _ := s.db.Query(ipsQuery, userID, startTime, now)
+	topIPs, _ := s.db.QueryWithTimeout(30*time.Second, ipsQuery, userID, startTime, now)
 	if topIPs == nil {
 		topIPs = []map[string]interface{}{}
 	}
@@ -502,7 +502,7 @@ func (s *RiskMonitoringService) GetSameIPRegistrations(window string, minUsers, 
 		ORDER BY user_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.Query(query, startTime, minUsers, limit)
+	rows, err := s.db.QueryWithTimeout(30*time.Second, query, startTime, minUsers, limit)
 	if err != nil {
 		return nil, err
 	}

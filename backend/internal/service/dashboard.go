@@ -15,6 +15,10 @@ type DashboardService struct {
 	db *database.Manager
 }
 
+var ipDistributionSampleLimit = 3000
+
+const ipDistributionQueryTimeout = 30 * time.Second
+
 // NewDashboardService creates a new DashboardService
 func NewDashboardService() *DashboardService {
 	return &DashboardService{db: database.Get()}
@@ -366,9 +370,34 @@ func (s *DashboardService) GetChannelStatus() ([]map[string]interface{}, error) 
 	return s.db.Query(query)
 }
 
-// GetIPDistribution returns IP access distribution statistics
-func (s *DashboardService) GetIPDistribution(window string) (map[string]interface{}, error) {
+// GetIPDistribution returns IP access distribution statistics.
+// Total counters are computed from the full time window; geographic breakdowns
+// use a top-IP sample so large logs tables stay responsive.
+func (s *DashboardService) GetIPDistribution(window string, noCache bool) (map[string]interface{}, error) {
+	cm := cache.Get()
+	cacheKey := fmt.Sprintf("dashboard:ip_distribution:%s", window)
+	if !noCache {
+		var cached map[string]interface{}
+		if found, _ := cm.GetJSON(cacheKey, &cached); found {
+			return cached, nil
+		}
+	}
+
 	startTime, endTime := parsePeriodToTimestamps(window)
+	geoAvailable := IsIPGeoAvailable()
+
+	statsQuery := s.db.RebindQuery(`
+		SELECT
+			COUNT(DISTINCT ip) as total_ips,
+			COUNT(*) as total_requests
+		FROM logs
+		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''`)
+	statsRow, err := s.db.QueryOneWithTimeout(ipDistributionQueryTimeout, statsQuery, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	totalIPs := toInt64(statsRow["total_ips"])
+	totalRequests := toInt64(statsRow["total_requests"])
 
 	// Step 1: Query distinct IPs with request counts and user counts
 	ipQuery := s.db.RebindQuery(`
@@ -379,25 +408,35 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''
 		GROUP BY ip
 		ORDER BY request_count DESC
-		LIMIT 3000`)
+		LIMIT ?`)
 
-	rows, err := s.db.Query(ipQuery, startTime, endTime)
-	if err != nil || len(rows) == 0 {
-		return map[string]interface{}{
+	rows, err := s.db.QueryWithTimeout(ipDistributionQueryTimeout, ipQuery, startTime, endTime, ipDistributionSampleLimit)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		result := map[string]interface{}{
 			"total_ips":           0,
 			"total_requests":      0,
+			"sampled_ip_limit":    ipDistributionSampleLimit,
+			"sampled_ips":         int64(0),
+			"sampled_requests":    int64(0),
+			"coverage_percentage": float64(0),
+			"geo_available":       geoAvailable,
 			"domestic_percentage": 0.0,
 			"overseas_percentage": 0.0,
 			"by_country":          []map[string]interface{}{},
 			"by_province":         []map[string]interface{}{},
 			"top_cities":          []map[string]interface{}{},
 			"snapshot_time":       time.Now().Unix(),
-		}, nil
+		}
+		result["total_ips"] = totalIPs
+		result["total_requests"] = totalRequests
+		cm.Set(cacheKey, result, 5*time.Minute)
+		return result, nil
 	}
 
 	// Step 2: Collect IPs and look up GeoIP
-	geoSvc := GetIPGeoService()
-
 	type ipStat struct {
 		IP           string
 		RequestCount int64
@@ -419,7 +458,7 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 		ips = append(ips, ip)
 	}
 
-	geoResults := geoSvc.QueryBatch(ips)
+	geoResults := LookupIPGeoBatch(ips)
 
 	// Step 3: Aggregate by country, province, city
 	type countryAgg struct {
@@ -449,8 +488,8 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	byProvince := map[string]*provinceAgg{}
 	byCity := map[string]*cityAgg{}
 
-	var totalIPs int64
-	var totalRequests int64
+	var sampledIPs int64
+	var sampledRequests int64
 	var domesticRequests int64
 	var overseasRequests int64
 
@@ -466,8 +505,8 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 			countryCode = "XX"
 		}
 
-		totalIPs++
-		totalRequests += stat.RequestCount
+		sampledIPs++
+		sampledRequests += stat.RequestCount
 
 		// Domestic vs overseas
 		if domesticCountryCodes[countryCode] {
@@ -506,12 +545,17 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 		}
 	}
 
+	coveragePct := float64(0)
+	if totalRequests > 0 {
+		coveragePct = math.Round(float64(sampledRequests)/float64(totalRequests)*10000) / 100
+	}
+
 	// Step 4: Convert to sorted lists
 	countryList := make([]map[string]interface{}, 0, len(byCountry))
 	for name, agg := range byCountry {
 		pct := float64(0)
-		if totalRequests > 0 {
-			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		if sampledRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(sampledRequests) * 100
 		}
 		countryList = append(countryList, map[string]interface{}{
 			"country":       name,
@@ -527,8 +571,8 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	provinceList := make([]map[string]interface{}, 0, len(byProvince))
 	for name, agg := range byProvince {
 		pct := float64(0)
-		if totalRequests > 0 {
-			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		if sampledRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(sampledRequests) * 100
 		}
 		provinceList = append(provinceList, map[string]interface{}{
 			"country":       agg.Country,
@@ -545,8 +589,8 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	cityList := make([]map[string]interface{}, 0, len(byCity))
 	for _, agg := range byCity {
 		pct := float64(0)
-		if totalRequests > 0 {
-			pct = float64(agg.RequestCount) / float64(totalRequests) * 100
+		if sampledRequests > 0 {
+			pct = float64(agg.RequestCount) / float64(sampledRequests) * 100
 		}
 		cityList = append(cityList, map[string]interface{}{
 			"country":       agg.Country,
@@ -564,21 +608,28 @@ func (s *DashboardService) GetIPDistribution(window string) (map[string]interfac
 	// Domestic/overseas percentage
 	domesticPct := float64(0)
 	overseasPct := float64(0)
-	if totalRequests > 0 {
-		domesticPct = math.Round(float64(domesticRequests)/float64(totalRequests)*10000) / 100
-		overseasPct = math.Round(float64(overseasRequests)/float64(totalRequests)*10000) / 100
+	if sampledRequests > 0 {
+		domesticPct = math.Round(float64(domesticRequests)/float64(sampledRequests)*10000) / 100
+		overseasPct = math.Round(float64(overseasRequests)/float64(sampledRequests)*10000) / 100
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"total_ips":           totalIPs,
 		"total_requests":      totalRequests,
+		"sampled_ip_limit":    ipDistributionSampleLimit,
+		"sampled_ips":         sampledIPs,
+		"sampled_requests":    sampledRequests,
+		"coverage_percentage": coveragePct,
+		"geo_available":       geoAvailable,
 		"domestic_percentage": domesticPct,
 		"overseas_percentage": overseasPct,
 		"by_country":          countryList,
 		"by_province":         provinceList,
 		"top_cities":          cityList,
 		"snapshot_time":       time.Now().Unix(),
-	}, nil
+	}
+	cm.Set(cacheKey, result, 5*time.Minute)
+	return result, nil
 }
 
 // fillDailyGaps ensures every day in the range has a row.

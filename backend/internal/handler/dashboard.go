@@ -166,9 +166,10 @@ func GetIPDistribution(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": gin.H{"message": "Invalid window value"}})
 		return
 	}
+	noCache := c.Query("no_cache") == "true"
 
 	svc := service.NewDashboardService()
-	data, err := svc.GetIPDistribution(window)
+	data, err := svc.GetIPDistribution(window, noCache)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
 		return

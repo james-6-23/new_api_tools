@@ -247,37 +247,44 @@ export function IPLookup() {
               </div>
 
               {/* Geo Info */}
-              {data.geo && data.geo.success && (
-                <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 text-sm">
-                  <span className="flex items-center gap-1.5">
-                    <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-                    {data.geo.country}
-                    {data.geo.country_code && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        {data.geo.country_code}
-                      </Badge>
+              {data.geo && (
+                data.geo.success ? (
+                  <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 text-sm">
+                    <span className="flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                      {data.geo.country}
+                      {data.geo.country_code && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {data.geo.country_code}
+                        </Badge>
+                      )}
+                    </span>
+                    {data.geo.region && (
+                      <span className="flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                        {data.geo.region}
+                        {data.geo.city && data.geo.city !== data.geo.region && ` · ${data.geo.city}`}
+                      </span>
                     )}
-                  </span>
-                  {data.geo.region && (
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                      {data.geo.region}
-                      {data.geo.city && data.geo.city !== data.geo.region && ` · ${data.geo.city}`}
-                    </span>
-                  )}
-                  {data.geo.isp && (
-                    <span className="flex items-center gap-1.5">
-                      <Building className="h-3.5 w-3.5 text-muted-foreground" />
-                      {data.geo.isp}
-                    </span>
-                  )}
-                  {data.geo.asn && (
-                    <span className="flex items-center gap-1.5">
-                      <Server className="h-3.5 w-3.5 text-muted-foreground" />
-                      {data.geo.asn}
-                    </span>
-                  )}
-                </div>
+                    {data.geo.isp && (
+                      <span className="flex items-center gap-1.5">
+                        <Building className="h-3.5 w-3.5 text-muted-foreground" />
+                        {data.geo.isp}
+                      </span>
+                    )}
+                    {data.geo.asn && (
+                      <span className="flex items-center gap-1.5">
+                        <Server className="h-3.5 w-3.5 text-muted-foreground" />
+                        {data.geo.asn}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
+                    <Globe className="h-3.5 w-3.5" />
+                    GeoIP 未解析
+                  </div>
+                )
               )}
 
               {/* Model Usage (collapsible) */}

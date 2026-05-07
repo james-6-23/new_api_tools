@@ -15,12 +15,15 @@ import (
 
 // IPGeoInfo represents IP geolocation information
 type IPGeoInfo struct {
-	IP          string
-	Country     string
-	CountryCode string
-	Region      string
-	City        string
-	Success     bool
+	IP          string `json:"ip"`
+	Country     string `json:"country"`
+	CountryCode string `json:"country_code"`
+	Region      string `json:"region"`
+	City        string `json:"city"`
+	ISP         string `json:"isp"`
+	Org         string `json:"org"`
+	ASN         string `json:"asn"`
+	Success     bool   `json:"success"`
 }
 
 // GeoIP database download URLs (multiple mirrors for reliability)
@@ -49,6 +52,10 @@ var (
 	geoService     *IPGeoService
 	geoServiceOnce sync.Once
 )
+
+var ipGeoServiceProvider = func() *IPGeoService {
+	return GetIPGeoService()
+}
 
 // domesticCountryCodes defines Chinese domestic country codes
 var domesticCountryCodes = map[string]bool{
@@ -281,10 +288,6 @@ func (s *IPGeoService) IsAvailable() bool {
 func (s *IPGeoService) QuerySingle(ip string) IPGeoInfo {
 	result := IPGeoInfo{IP: ip}
 
-	if !s.available || s.cityReader == nil {
-		return result
-	}
-
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return result
@@ -300,6 +303,9 @@ func (s *IPGeoService) QuerySingle(ip string) IPGeoInfo {
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if !s.available || s.cityReader == nil {
+		return result
+	}
 
 	record, err := s.cityReader.City(parsedIP)
 	if err != nil {
@@ -342,6 +348,58 @@ func (s *IPGeoService) QueryBatch(ips []string) map[string]IPGeoInfo {
 		results[ip] = s.QuerySingle(ip)
 	}
 	return results
+}
+
+// LookupIPGeo looks up one IP through the configured GeoIP service provider.
+func LookupIPGeo(ip string) IPGeoInfo {
+	svc := ipGeoServiceProvider()
+	if svc == nil {
+		return IPGeoInfo{IP: ip}
+	}
+	return svc.QuerySingle(ip)
+}
+
+// LookupIPGeoBatch looks up multiple IPs through the configured GeoIP service provider.
+func LookupIPGeoBatch(ips []string) map[string]IPGeoInfo {
+	svc := ipGeoServiceProvider()
+	if svc == nil {
+		results := make(map[string]IPGeoInfo, len(ips))
+		for _, ip := range ips {
+			results[ip] = IPGeoInfo{IP: ip}
+		}
+		return results
+	}
+	return svc.QueryBatch(ips)
+}
+
+// IsIPGeoAvailable reports whether the configured GeoIP service is ready.
+func IsIPGeoAvailable() bool {
+	svc := ipGeoServiceProvider()
+	return svc != nil && svc.IsAvailable()
+}
+
+// FormatIPGeoInfo returns the stable snake_case response shape used by IP APIs.
+func FormatIPGeoInfo(info IPGeoInfo) map[string]interface{} {
+	return map[string]interface{}{
+		"ip":           info.IP,
+		"country":      info.Country,
+		"country_code": info.CountryCode,
+		"region":       info.Region,
+		"city":         info.City,
+		"isp":          info.ISP,
+		"org":          info.Org,
+		"asn":          info.ASN,
+		"success":      info.Success,
+	}
+}
+
+// SetIPGeoServiceProviderForTesting replaces the GeoIP provider and returns a restore function.
+func SetIPGeoServiceProviderForTesting(provider func() *IPGeoService) func() {
+	old := ipGeoServiceProvider
+	ipGeoServiceProvider = provider
+	return func() {
+		ipGeoServiceProvider = old
+	}
 }
 
 // Close releases the GeoIP database resources and stops the background updater
