@@ -4,13 +4,22 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   TrendingUp, TrendingDown, ArrowRight, Loader2, RefreshCw,
   CalendarDays, CalendarRange, Calendar as CalendarIcon,
-  Trophy, CreditCard, Activity, Zap, Filter, Users, BarChart3, LineChart
+  Trophy, CreditCard, Activity, Zap, Filter, Users, BarChart3, LineChart,
+  HelpCircle
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Select } from './ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from './ui/dialog'
 import { cn } from '../lib/utils'
 
 interface Props { active: boolean }
@@ -57,11 +66,10 @@ type Granularity = 'daily' | 'weekly' | 'monthly'
 type TrendChartType = 'bar' | 'line'
 
 const fmtMoney = (n: number) => `¥${(n || 0).toFixed(2)}`
-const fmtCompactMoney = (n: number) => {
-  const v = n || 0
-  if (v >= 10000) return `¥${(v / 10000).toFixed(2)}万`
-  return `¥${v.toFixed(2)}`
-}
+const fmtExactMoney = (n: number) => `¥${(n || 0).toLocaleString('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})}`
 const fmtNum = (n: number) => (n || 0).toLocaleString()
 const fmtPct = (n: number) => `${(n || 0).toFixed(2)}%`
 
@@ -381,7 +389,7 @@ function TrendsBlock({
             <CardDescription>按粒度统计成功充值金额</CardDescription>
           </div>
           <div className="flex items-center gap-2 text-right">
-            <div className="text-xl font-bold text-primary">{fmtCompactMoney(total)}</div>
+            <div className="text-xl font-bold text-primary tabular-nums">{fmtExactMoney(total)}</div>
             <span className="text-xs text-muted-foreground">区间合计</span>
           </div>
         </div>
@@ -771,6 +779,56 @@ function HeatmapBlock({
             <CardTitle className="text-base flex items-center gap-2">
               <Activity className="h-4 w-4 text-primary" />
               充值时段热力图
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label="查看充值时段热力图说明"
+                    title="查看说明"
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-xl">
+                  <DialogHeader>
+                    <DialogTitle>充值时段热力图说明</DialogTitle>
+                    <DialogDescription>
+                      用来观察最近一段时间内，用户在每周各小时段的成功充值活跃度。
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 text-sm leading-6 text-muted-foreground">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <div className="font-medium text-foreground">横轴</div>
+                        <div>一天 24 小时，顶部每隔 3 小时显示一个刻度。</div>
+                      </div>
+                      <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                        <div className="font-medium text-foreground">纵轴</div>
+                        <div>周日到周六，后端按 0=周日、6=周六返回。</div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                      <div className="font-medium text-foreground">颜色含义</div>
+                      <div>每个格子代表某个“星期几 + 小时”的成功充值笔数。颜色越深，表示该时段相对充值笔数越多；颜色越浅，表示充值笔数越少。</div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                      <div className="font-medium text-foreground">统计口径</div>
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        <li>只统计成功充值，不包含待处理或失败订单。</li>
+                        <li>统计的是充值笔数，不是充值金额；金额只在悬停提示中辅助查看。</li>
+                        <li>右上角可切换近 7、30、60、90 天，颜色深浅会按当前范围内的最大笔数重新归一化。</li>
+                        <li>时间按本地时区聚合，所以看到的是本地业务时间，而不是 UTC。</li>
+                      </ul>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+                      <div className="font-medium text-foreground">查看明细</div>
+                      <div>把鼠标悬停在任意格子上，可以看到对应星期、小时、充值笔数和充值金额。</div>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </CardTitle>
             <CardDescription>按星期 × 小时统计成功充值笔数（本地时区）</CardDescription>
           </div>
