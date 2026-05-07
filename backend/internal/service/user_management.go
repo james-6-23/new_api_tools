@@ -510,6 +510,27 @@ func (s *UserManagementService) PurgeSoftDeleted(dryRun bool) (int64, error) {
 	return affected, nil
 }
 
+// PreviewSoftDeletedUsers returns count and sample usernames for the purge dialog.
+func (s *UserManagementService) PreviewSoftDeletedUsers() (map[string]interface{}, error) {
+	count, err := s.GetSoftDeletedCount()
+	if err != nil {
+		return nil, err
+	}
+
+	users, err := s.previewUsers("SELECT id, username FROM users WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC LIMIT 20")
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"dry_run":        true,
+		"count":          count,
+		"affected":       count,
+		"affected_count": count,
+		"users":          users,
+	}, nil
+}
+
 // BatchDeleteInactiveUsers deletes inactive users
 func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, dryRun, hardDelete bool) (map[string]interface{}, error) {
 	now := time.Now()
@@ -538,10 +559,18 @@ func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, d
 	affected := toInt64(countRow["count"])
 
 	if dryRun {
+		users, err := s.previewUsers(fmt.Sprintf(
+			"SELECT id, username FROM users WHERE deleted_at IS NULL AND role != 100 AND %s ORDER BY id ASC LIMIT 20", condition))
+		if err != nil {
+			return nil, err
+		}
+
 		return map[string]interface{}{
 			"dry_run":        true,
+			"count":          affected,
 			"affected_count": affected,
 			"activity_level": activityLevel,
+			"users":          users,
 		}, nil
 	}
 
@@ -563,10 +592,35 @@ func (s *UserManagementService) BatchDeleteInactiveUsers(activityLevel string, d
 
 	return map[string]interface{}{
 		"dry_run":        false,
+		"count":          affected,
 		"affected_count": affected,
 		"activity_level": activityLevel,
 		"hard_delete":    hardDelete,
 	}, nil
+}
+
+func (s *UserManagementService) previewUsers(query string) ([]string, error) {
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	users := make([]string, 0, len(rows))
+	for _, row := range rows {
+		users = append(users, userPreviewName(row))
+	}
+	return users, nil
+}
+
+func userPreviewName(row map[string]interface{}) string {
+	username := strings.TrimSpace(toString(row["username"]))
+	if username != "" {
+		return username
+	}
+	if id := toInt64(row["id"]); id > 0 {
+		return fmt.Sprintf("用户#%d", id)
+	}
+	return "未知用户"
 }
 
 // toInt64 safely converts interface{} to int64

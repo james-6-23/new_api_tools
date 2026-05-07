@@ -191,19 +191,29 @@ func PurgeSoftDeletedUsers(c *gin.Context) {
 	}
 
 	svc := service.NewUserManagementService()
+	if req.DryRun {
+		result, err := svc.PreviewSoftDeletedUsers()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResp("DELETE_ERROR", err.Error(), ""))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "预览完成",
+			"data":    result,
+		})
+		return
+	}
+
 	affected, err := svc.PurgeSoftDeleted(req.DryRun)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("DELETE_ERROR", err.Error(), ""))
 		return
 	}
 
-	message := "预览完成"
-	if !req.DryRun {
-		message = "清理完成"
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": message,
+		"message": "清理完成",
 		"data":    gin.H{"affected": affected},
 	})
 }

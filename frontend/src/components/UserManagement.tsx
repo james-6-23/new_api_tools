@@ -299,8 +299,8 @@ export function UserManagement() {
       })
       const data = await response.json()
       if (data.success && data.data) {
-        const count = data.data.count
-        const usernames = data.data.users || []
+        const count = data.data.count ?? data.data.affected_count ?? data.data.affected ?? 0
+        const usernames = Array.isArray(data.data.users) ? data.data.users : []
         if (count === 0) {
           setConfirmDialog(prev => ({ ...prev, isOpen: false }))
           showToast('info', '没有需要清理的软删除用户')
@@ -494,8 +494,8 @@ export function UserManagement() {
       })
       const data = await response.json()
       if (data.success && data.data) {
-        const count = data.data.count
-        const usernames = data.data.users || []
+        const count = data.data.count ?? data.data.affected_count ?? data.data.affected ?? 0
+        const usernames = Array.isArray(data.data.users) ? data.data.users : []
         if (count === 0) {
           setConfirmDialog(prev => ({ ...prev, isOpen: false }))
           showToast('info', '没有符合条件的用户')
