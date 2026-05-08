@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
-	_ "modernc.org/sqlite"
 	"github.com/new-api-tools/backend/internal/database"
+	_ "modernc.org/sqlite"
 )
 
 // installSQLiteForTests replaces the global manager with an in-memory SQLite.
@@ -28,27 +28,25 @@ func TestBuildTopUpWhere_PendingIncludesNULL(t *testing.T) {
 
 	where, _, _ := buildTopUpWhere(ListTopUpParams{Status: "pending"})
 
-	// 关键诉求：pending 必须涵盖 status IS NULL —— 否则 NULL 行既不算成功也不算失败也不算 pending，
-	// 与 funnel 里 ELSE 'pending' 的兜底分桶口径不一致。
-	if !strings.Contains(where, "t.status IS NULL") {
-		t.Fatalf("pending where must explicitly include NULL, got: %s", where)
-	}
-	// 也必须排除已成功 / 已失败的所有别名。
-	for _, marker := range []string{"'success'", "'failed'", "'completed'", "'error'", "'1'", "'-1'"} {
+	// 关键诉求：pending 走统一归一化状态桶，必须涵盖 NULL / 空值，
+	// 同时不能把 expired 或 unknown 混入待处理。
+	for _, marker := range []string{"COALESCE(t.status, '')", "'pending'", "'expired'", "'unknown'"} {
 		if !strings.Contains(where, marker) {
-			t.Errorf("pending where missing exclusion marker %s, got: %s", marker, where)
+			t.Errorf("pending where missing marker %s, got: %s", marker, where)
 		}
+	}
+	if !strings.Contains(where, "= ?") {
+		t.Fatalf("pending where should compare normalized bucket with a placeholder, got: %s", where)
 	}
 }
 
-func TestBuildTopUpWhere_SuccessAndFailedDoNotIncludeNULL(t *testing.T) {
+func TestBuildTopUpWhere_StatusFiltersUseNormalizedBucket(t *testing.T) {
 	installSQLiteForTests(t)
 
-	for _, status := range []string{"success", "failed"} {
+	for _, status := range []string{"success", "failed", "pending", "expired", "unknown"} {
 		where, _, _ := buildTopUpWhere(ListTopUpParams{Status: status})
-		// success/failed 是显式枚举值匹配，必须不含 IS NULL —— NULL 应只走 pending。
-		if strings.Contains(where, "IS NULL") {
-			t.Errorf("status=%s where must NOT include IS NULL, got: %s", status, where)
+		if !strings.Contains(where, "CASE") || !strings.Contains(where, "= ?") {
+			t.Errorf("status=%s should use normalized CASE bucket, got: %s", status, where)
 		}
 	}
 }

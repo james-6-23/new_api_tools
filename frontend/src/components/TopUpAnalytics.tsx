@@ -61,6 +61,21 @@ interface FunnelData {
   avg_completion_secs: number
   total_count: number
 }
+interface PayerCohorts {
+  days: number
+  paying_users: number
+  first_time_payers: number
+  repeat_payers: number
+  repeat_rate: number
+  total_revenue: number
+  arppu: number
+  avg_orders_per_payer: number
+  avg_first_pay_delay_hours: number
+  repeat_revenue_share: number
+  top1_revenue_share: number
+  top5_revenue_share: number
+  top10_revenue_share: number
+}
 
 type Granularity = 'daily' | 'weekly' | 'monthly'
 type TrendChartType = 'bar' | 'line'
@@ -116,6 +131,8 @@ export function TopUpAnalytics({ active }: Props) {
   const [heatmapDays, setHeatmapDays] = useState(30)
   const [funnel, setFunnel] = useState<FunnelData | null>(null)
   const [funnelDays, setFunnelDays] = useState(30)
+  const [payerCohorts, setPayerCohorts] = useState<PayerCohorts | null>(null)
+  const [payerDays, setPayerDays] = useState(30)
 
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -173,6 +190,11 @@ export function TopUpAnalytics({ active }: Props) {
     if (d) setFunnel(d)
   }, [safeFetch, funnelDays])
 
+  const fetchPayerCohorts = useCallback(async () => {
+    const d = await safeFetch<PayerCohorts>(`/api/top-ups/analytics/payer-cohorts?days=${payerDays}`)
+    if (d) setPayerCohorts(d)
+  }, [safeFetch, payerDays])
+
   // 首次激活才发起所有请求；后续受控字段（granularity/days）变化只触发对应模块
   useEffect(() => {
     if (!active || initialLoadedRef.current) return
@@ -180,9 +202,9 @@ export function TopUpAnalytics({ active }: Props) {
     setLoading(true)
     Promise.all([
       fetchRealtime(), fetchTrends(), fetchFinancial(),
-      fetchTopUsers(), fetchPayment(), fetchHeatmap(), fetchFunnel(),
+      fetchTopUsers(), fetchPayment(), fetchHeatmap(), fetchFunnel(), fetchPayerCohorts(),
     ]).finally(() => setLoading(false))
-  }, [active, fetchRealtime, fetchTrends, fetchFinancial, fetchTopUsers, fetchPayment, fetchHeatmap, fetchFunnel])
+  }, [active, fetchRealtime, fetchTrends, fetchFinancial, fetchTopUsers, fetchPayment, fetchHeatmap, fetchFunnel, fetchPayerCohorts])
 
   // 受控参数变化时单独刷新
   useEffect(() => { if (initialLoadedRef.current) fetchTrends() }, [fetchTrends])
@@ -191,12 +213,13 @@ export function TopUpAnalytics({ active }: Props) {
   useEffect(() => { if (initialLoadedRef.current) fetchPayment() }, [fetchPayment])
   useEffect(() => { if (initialLoadedRef.current) fetchHeatmap() }, [fetchHeatmap])
   useEffect(() => { if (initialLoadedRef.current) fetchFunnel() }, [fetchFunnel])
+  useEffect(() => { if (initialLoadedRef.current) fetchPayerCohorts() }, [fetchPayerCohorts])
 
   const handleRefreshAll = async () => {
     setRefreshing(true)
     await Promise.all([
       fetchRealtime(), fetchTrends(), fetchFinancial(),
-      fetchTopUsers(), fetchPayment(), fetchHeatmap(), fetchFunnel(),
+      fetchTopUsers(), fetchPayment(), fetchHeatmap(), fetchFunnel(), fetchPayerCohorts(),
     ])
     setRefreshing(false)
     showToast('success', '已刷新所有分析数据')
@@ -232,6 +255,9 @@ export function TopUpAnalytics({ active }: Props) {
         onDaysChange={setTrendDays}
         onChartTypeChange={setTrendChartType}
       />
+
+      {/* 模块 2.5：付费用户质量 */}
+      <PayerQualityBlock data={payerCohorts} days={payerDays} onDaysChange={setPayerDays} />
 
       {/* 模块 3 & 4：财务汇总 + Top 用户 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -334,6 +360,67 @@ function ComparePanel({
         {prevLabel}: <span className="font-medium">{fmtMoney(prevValue)}</span>
         <span className="ml-2">{fmtNum(prevCount)} 笔</span>
       </div>
+    </div>
+  )
+}
+
+// ============ 模块 2.5: 付费用户质量 ============
+function PayerQualityBlock({
+  data, days, onDaysChange,
+}: {
+  data: PayerCohorts | null
+  days: number
+  onDaysChange: (d: number) => void
+}) {
+  const delayText = data?.avg_first_pay_delay_hours
+    ? data.avg_first_pay_delay_hours < 24
+      ? `${data.avg_first_pay_delay_hours.toFixed(1)} 小时`
+      : `${(data.avg_first_pay_delay_hours / 24).toFixed(1)} 天`
+    : '-'
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              付费用户质量
+            </CardTitle>
+            <CardDescription>首充、复购、ARPPU 与收入集中度</CardDescription>
+          </div>
+          <div className="w-28">
+            <Select value={days.toString()} onChange={e => onDaysChange(parseInt(e.target.value))}>
+              <option value="7">近 7 天</option>
+              <option value="30">近 30 天</option>
+              <option value="90">近 90 天</option>
+              <option value="365">近 1 年</option>
+            </Select>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {!data ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">数据加载中...</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <MetricPanel label="付费用户" value={fmtNum(data.paying_users)} detail={`首充 ${fmtNum(data.first_time_payers)} 人`} />
+            <MetricPanel label="ARPPU" value={fmtMoney(data.arppu)} detail={`人均 ${data.avg_orders_per_payer.toFixed(2)} 笔`} />
+            <MetricPanel label="复购率" value={fmtPct(data.repeat_rate)} detail={`复购收入占比 ${fmtPct(data.repeat_revenue_share)}`} />
+            <MetricPanel label="首充耗时" value={delayText} detail={`Top 5 收入占比 ${fmtPct(data.top5_revenue_share)}`} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function MetricPanel({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-2 text-2xl font-bold tabular-nums">{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
     </div>
   )
 }
@@ -896,8 +983,20 @@ function FunnelBlock({
   days: number
   onDaysChange: (d: number) => void
 }) {
-  const statusColor = (s: string) => s === 'success' ? 'bg-green-500' : s === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
-  const statusLabel = (s: string) => s === 'success' ? '成功' : s === 'pending' ? '待处理' : '失败'
+  const statusColor = (s: string) => (
+    s === 'success' ? 'bg-green-500'
+      : s === 'pending' ? 'bg-yellow-500'
+        : s === 'expired' ? 'bg-slate-500'
+          : s === 'unknown' ? 'bg-purple-500'
+            : 'bg-red-500'
+  )
+  const statusLabel = (s: string) => (
+    s === 'success' ? '成功'
+      : s === 'pending' ? '待处理'
+        : s === 'expired' ? '已过期'
+          : s === 'unknown' ? '未知'
+            : '失败'
+  )
   const total = data?.total_count || 0
 
   return (

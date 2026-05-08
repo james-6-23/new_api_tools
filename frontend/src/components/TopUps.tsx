@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { CreditCard, Loader2, RefreshCw, Copy, ExternalLink, CheckCircle2, Clock, XCircle, Search, Calendar, Filter, Download, BarChart3, ListOrdered } from 'lucide-react'
+import { CreditCard, Loader2, RefreshCw, Copy, ExternalLink, CheckCircle2, Clock, XCircle, Search, Calendar, Filter, Download, BarChart3, ListOrdered, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -11,6 +11,7 @@ import { Input } from './ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { StatCard } from './StatCard'
 import { TopUpAnalytics } from './TopUpAnalytics'
+import { TopUpAudit } from './TopUpAudit'
 import { cn } from '../lib/utils'
 
 interface TopUpRecord {
@@ -21,9 +22,13 @@ interface TopUpRecord {
   money: number
   trade_no: string
   payment_method: string
+  payment_provider: string
   create_time: number
   complete_time: number
   status: string
+  status_bucket: string
+  completion_seconds: number
+  anomaly_reasons?: string[]
 }
 
 interface TopUpStatistics {
@@ -39,6 +44,12 @@ interface TopUpStatistics {
   failed_count: number
   failed_amount: number
   failed_money: number
+  expired_count: number
+  expired_amount: number
+  expired_money: number
+  unknown_count: number
+  unknown_amount: number
+  unknown_money: number
 }
 
 interface PaginatedResponse {
@@ -49,16 +60,33 @@ interface PaginatedResponse {
   total_pages: number
 }
 
-type StatusFilter = '' | 'pending' | 'success' | 'failed'
+type StatusFilter = '' | 'pending' | 'success' | 'failed' | 'expired' | 'unknown'
+
+function getStatusLabel(status: string) {
+  if (status === 'success') return '成功'
+  if (status === 'pending') return '待处理'
+  if (status === 'failed') return '失败'
+  if (status === 'expired') return '已过期'
+  if (status === 'unknown') return '未知'
+  return status || '-'
+}
+
+function getStatusVariant(status: string): 'success' | 'warning' | 'destructive' | 'outline' {
+  if (status === 'success') return 'success'
+  if (status === 'pending') return 'warning'
+  if (status === 'failed') return 'destructive'
+  return 'outline'
+}
 
 export function TopUps() {
   const { showToast } = useToast()
   const { token } = useAuth()
 
-  const [activeTab, setActiveTab] = useState<'records' | 'analytics'>('records')
+  const [activeTab, setActiveTab] = useState<'records' | 'analytics' | 'audit'>('records')
   const [records, setRecords] = useState<TopUpRecord[]>([])
   const [statistics, setStatistics] = useState<TopUpStatistics | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<string[]>([])
+  const [paymentProviders, setPaymentProviders] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -67,6 +95,7 @@ export function TopUps() {
   const [totalPages, setTotalPages] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('')
+  const [paymentProviderFilter, setPaymentProviderFilter] = useState('')
   const [tradeNoSearch, setTradeNoSearch] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -79,20 +108,21 @@ export function TopUps() {
     'Authorization': `Bearer ${token}`,
   }), [token])
 
-  // Fetch payment methods
+  // Fetch payment methods/providers
   useEffect(() => {
-    const fetchPaymentMethods = async () => {
+    const fetchPaymentFilters = async () => {
       try {
-        const response = await fetch(`${apiUrl}/api/top-ups/payment-methods`, { headers: getAuthHeaders() })
-        const data = await response.json()
-        if (data.success) {
-          setPaymentMethods(Array.isArray(data.data) ? data.data : [])
-        } else {
-          setPaymentMethods([])
-        }
+        const [methodsRes, providersRes] = await Promise.all([
+          fetch(`${apiUrl}/api/top-ups/payment-methods`, { headers: getAuthHeaders() }),
+          fetch(`${apiUrl}/api/top-ups/payment-providers`, { headers: getAuthHeaders() }),
+        ])
+        const methodsData = await methodsRes.json()
+        const providersData = await providersRes.json()
+        setPaymentMethods(methodsData.success && Array.isArray(methodsData.data) ? methodsData.data : [])
+        setPaymentProviders(providersData.success && Array.isArray(providersData.data) ? providersData.data : [])
       } catch (error) { console.error('Failed to fetch payment methods:', error) }
     }
-    fetchPaymentMethods()
+    fetchPaymentFilters()
   }, [apiUrl, getAuthHeaders])
 
   const fetchStatistics = useCallback(async () => {
@@ -115,6 +145,7 @@ export function TopUps() {
       const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() })
       if (statusFilter) params.append('status', statusFilter)
       if (paymentMethodFilter) params.append('payment_method', paymentMethodFilter)
+      if (paymentProviderFilter) params.append('payment_provider', paymentProviderFilter)
       if (tradeNoSearch) params.append('trade_no', tradeNoSearch)
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
@@ -131,11 +162,11 @@ export function TopUps() {
       showToast('error', '网络错误，请重试')
       console.error('Failed to fetch records:', error)
     } finally { setLoading(false) }
-  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, paymentMethodFilter, tradeNoSearch, startDate, endDate, showToast])
+  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, startDate, endDate, showToast])
 
   useEffect(() => { fetchRecords() }, [fetchRecords])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
-  useEffect(() => { setPage(1) }, [statusFilter, paymentMethodFilter, tradeNoSearch, startDate, endDate])
+  useEffect(() => { setPage(1) }, [statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, startDate, endDate])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -153,6 +184,7 @@ export function TopUps() {
       const params = new URLSearchParams()
       if (statusFilter) params.append('status', statusFilter)
       if (paymentMethodFilter) params.append('payment_method', paymentMethodFilter)
+      if (paymentProviderFilter) params.append('payment_provider', paymentProviderFilter)
       if (tradeNoSearch) params.append('trade_no', tradeNoSearch)
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
@@ -224,8 +256,8 @@ export function TopUps() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'records' | 'analytics')} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'records' | 'analytics' | 'audit')} className="w-full">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="records" className="gap-2">
             <ListOrdered className="h-4 w-4" />
             记录
@@ -234,13 +266,17 @@ export function TopUps() {
             <BarChart3 className="h-4 w-4" />
             分析
           </TabsTrigger>
+          <TabsTrigger value="audit" className="gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            审计
+          </TabsTrigger>
         </TabsList>
 
         {/* forceMount + data-state hide：让"记录"tab 的状态/分页/筛选在切换 tab 时不丢，
             重新切回不会触发重新 fetch（fetchRecords 依赖未变）。 */}
         <TabsContent value="records" forceMount className="data-[state=inactive]:hidden mt-6 space-y-6">
           {/* Statistics Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatCard
               title="成功充值"
               value={statsLoading ? '-' : `${statistics?.success_count || 0} 笔`}
@@ -268,6 +304,15 @@ export function TopUps() {
               className="border-l-4 border-l-red-500"
               onClick={() => setStatusFilter('failed')}
             />
+            <StatCard
+              title="已过期"
+              value={statsLoading ? '-' : `${statistics?.expired_count || 0} 笔`}
+              subValue={statsLoading ? '-' : `${formatMoney(statistics?.expired_money || 0)}`}
+              icon={AlertTriangle}
+              color="gray"
+              className="border-l-4 border-l-slate-500"
+              onClick={() => setStatusFilter('expired')}
+            />
           </div>
 
           {/* Total Stats Summary —— 仅统计成功充值（不含待处理 / 失败） */}
@@ -285,6 +330,14 @@ export function TopUps() {
                  <span className="text-muted-foreground">入账额度:</span>
                  <span className="font-semibold">{statsLoading ? '-' : formatAmount(statistics?.success_amount || 0)} USD</span>
               </div>
+              {(statistics?.unknown_count || 0) > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">未知状态:</span>
+                  <button className="font-semibold text-amber-600 hover:underline" onClick={() => setStatusFilter('unknown')}>
+                    {statistics?.unknown_count || 0} 笔
+                  </button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -297,7 +350,7 @@ export function TopUps() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">状态</label>
                   <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
@@ -305,6 +358,17 @@ export function TopUps() {
                     <option value="success">成功</option>
                     <option value="pending">待处理</option>
                     <option value="failed">失败</option>
+                    <option value="expired">已过期</option>
+                    <option value="unknown">未知</option>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">支付渠道</label>
+                  <Select value={paymentProviderFilter} onChange={(e) => setPaymentProviderFilter(e.target.value)}>
+                    <option value="">全部渠道</option>
+                    {paymentProviders.map((provider) => (
+                      <option key={provider} value={provider}>{provider}</option>
+                    ))}
                   </Select>
                 </div>
                 <div className="space-y-1">
@@ -345,7 +409,7 @@ export function TopUps() {
                 </div>
               </div>
               <div className="mt-4 flex justify-end">
-                <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setPaymentMethodFilter(''); setTradeNoSearch(''); setStartDate(''); setEndDate('') }} className="text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setPaymentMethodFilter(''); setPaymentProviderFilter(''); setTradeNoSearch(''); setStartDate(''); setEndDate('') }} className="text-muted-foreground hover:text-foreground">
                   重置筛选
                 </Button>
               </div>
@@ -379,8 +443,9 @@ export function TopUps() {
                         <TableHead>额度 (USD)</TableHead>
                         <TableHead>金额 (CNY)</TableHead>
                         <TableHead>交易号</TableHead>
-                        <TableHead>支付方式</TableHead>
+                        <TableHead>支付渠道</TableHead>
                         <TableHead>状态</TableHead>
+                        <TableHead>异常</TableHead>
                         <TableHead>时间</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -430,12 +495,27 @@ export function TopUps() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="font-normal">{record.payment_method}</Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant="outline" className="font-normal w-fit">{record.payment_provider || '未知'}</Badge>
+                              <span className="text-xs text-muted-foreground">{record.payment_method || '未知方式'}</span>
+                            </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={record.status === 'success' ? 'success' : record.status === 'pending' ? 'warning' : 'destructive'}>
-                              {record.status === 'success' ? '成功' : record.status === 'pending' ? '待处理' : '失败'}
+                            <Badge variant={getStatusVariant(record.status_bucket || record.status)}>
+                              {getStatusLabel(record.status_bucket || record.status)}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {record.anomaly_reasons && record.anomaly_reasons.length > 0 ? (
+                              <div className="flex flex-wrap gap-1 max-w-[180px]">
+                                {record.anomaly_reasons.slice(0, 2).map(reason => (
+                                  <Badge key={reason} variant="outline" className="font-normal">{reason}</Badge>
+                                ))}
+                                {record.anomaly_reasons.length > 2 && <span className="text-xs text-muted-foreground">+{record.anomaly_reasons.length - 2}</span>}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             <div className="flex flex-col">
@@ -476,6 +556,10 @@ export function TopUps() {
         {/* 分析 tab：首次进入时挂载并 fetch；后续切换由 forceMount 保活避免重 fetch。 */}
         <TabsContent value="analytics" forceMount className="data-[state=inactive]:hidden mt-6">
           <TopUpAnalytics active={activeTab === 'analytics'} />
+        </TabsContent>
+
+        <TabsContent value="audit" forceMount className="data-[state=inactive]:hidden mt-6">
+          <TopUpAudit active={activeTab === 'audit'} />
         </TabsContent>
       </Tabs>
     </div>

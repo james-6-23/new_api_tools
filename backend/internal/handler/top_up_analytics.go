@@ -20,6 +20,9 @@ func RegisterTopUpAnalyticsRoutes(r *gin.RouterGroup) {
 		g.GET("/realtime", GetTopUpRealtimeStats)
 		g.GET("/heatmap", GetTopUpHourlyHeatmap)
 		g.GET("/funnel", GetTopUpFunnel)
+		g.GET("/payer-cohorts", GetTopUpPayerCohorts)
+		g.GET("/provider-health", GetTopUpProviderHealth)
+		g.GET("/anomalies", GetTopUpAnomalies)
 	}
 }
 
@@ -151,6 +154,71 @@ func GetTopUpFunnel(c *gin.Context) {
 	}
 
 	data, err := service.GetTopUpFunnel(days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// GET /api/top-ups/analytics/payer-cohorts
+func GetTopUpPayerCohorts(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	data, err := service.GetTopUpPayerCohorts(days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// GET /api/top-ups/analytics/provider-health
+func GetTopUpProviderHealth(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+	if days < 1 || days > 365 {
+		days = 30
+	}
+
+	data, err := service.GetTopUpProviderHealth(days)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// GET /api/top-ups/analytics/anomalies
+func GetTopUpAnomalies(c *gin.Context) {
+	days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+	if days < 1 || days > 365 {
+		days = 30
+	}
+	pendingHours, _ := strconv.Atoi(c.DefaultQuery("pending_hours", "2"))
+	if pendingHours < 1 || pendingHours > 168 {
+		pendingHours = 2
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	data, err := service.GetTopUpAnomalies(days, pendingHours, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
 		return

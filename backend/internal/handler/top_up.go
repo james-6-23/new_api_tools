@@ -39,6 +39,7 @@ func RegisterTopUpRoutes(r *gin.RouterGroup) {
 		g.GET("", ListTopUps)
 		g.GET("/statistics", GetTopUpStatistics)
 		g.GET("/payment-methods", GetPaymentMethods)
+		g.GET("/payment-providers", GetPaymentProviders)
 		g.GET("/export", ExportTopUps)
 		g.GET("/:id", GetTopUpRecord)
 	}
@@ -50,13 +51,14 @@ func ListTopUps(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
 	params := service.ListTopUpParams{
-		Page:          page,
-		PageSize:      pageSize,
-		Status:        c.Query("status"),
-		PaymentMethod: c.Query("payment_method"),
-		TradeNo:       c.Query("trade_no"),
-		StartDate:     c.Query("start_date"),
-		EndDate:       c.Query("end_date"),
+		Page:            page,
+		PageSize:        pageSize,
+		Status:          c.Query("status"),
+		PaymentMethod:   c.Query("payment_method"),
+		PaymentProvider: c.Query("payment_provider"),
+		TradeNo:         c.Query("trade_no"),
+		StartDate:       c.Query("start_date"),
+		EndDate:         c.Query("end_date"),
 	}
 
 	// Parse optional user_id
@@ -110,6 +112,20 @@ func GetPaymentMethods(c *gin.Context) {
 	})
 }
 
+// GET /api/top-ups/payment-providers
+func GetPaymentProviders(c *gin.Context) {
+	providers, err := service.GetPaymentProviders()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    providers,
+	})
+}
+
 // GET /api/top-ups/:id
 func GetTopUpRecord(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -145,11 +161,12 @@ func ExportTopUps(c *gin.Context) {
 	defer exportInFlight.Delete(lockKey)
 
 	params := service.ListTopUpParams{
-		Status:        c.Query("status"),
-		PaymentMethod: c.Query("payment_method"),
-		TradeNo:       c.Query("trade_no"),
-		StartDate:     c.Query("start_date"),
-		EndDate:       c.Query("end_date"),
+		Status:          c.Query("status"),
+		PaymentMethod:   c.Query("payment_method"),
+		PaymentProvider: c.Query("payment_provider"),
+		TradeNo:         c.Query("trade_no"),
+		StartDate:       c.Query("start_date"),
+		EndDate:         c.Query("end_date"),
 	}
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if uid, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -181,9 +198,9 @@ func ExportTopUps(c *gin.Context) {
 	subject, _ := c.Get("user_sub")
 	method, _ := c.Get("auth_method")
 	log.Printf(
-		"audit top_ups_export user=%v auth=%v rows=%d filters={status:%q payment:%q trade_no:%q user_id:%v start:%q end:%q} ip=%s",
+		"audit top_ups_export user=%v auth=%v rows=%d filters={status:%q payment:%q provider:%q trade_no:%q user_id:%v start:%q end:%q} ip=%s",
 		subject, method, total,
-		params.Status, params.PaymentMethod, params.TradeNo, params.UserID,
+		params.Status, params.PaymentMethod, params.PaymentProvider, params.TradeNo, params.UserID,
 		params.StartDate, params.EndDate, c.ClientIP(),
 	)
 

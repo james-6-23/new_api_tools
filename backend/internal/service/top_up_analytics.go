@@ -769,20 +769,17 @@ func GetTopUpFunnel(days int) (*TopUpFunnelData, error) {
 
 	db := database.Get()
 	startTime := time.Now().AddDate(0, 0, -days).Unix()
+	bucketSQL := topUpStatusBucketSQL("status")
 
-	// 1. status breakdown — bucketize each row into success / failed / pending.
+	// 1. status breakdown — bucketize each row into the shared normalized status set.
 	statusQuery := db.RebindQuery(fmt.Sprintf(`
 		SELECT
-			CASE
-				WHEN %s THEN 'success'
-				WHEN (LOWER(status) IN ('failed', 'error') OR status = '-1') THEN 'failed'
-				ELSE 'pending'
-			END as bucket,
+			%s as bucket,
 			COUNT(*) as count,
 			COALESCE(SUM(money), 0) as money
 		FROM top_ups
 		WHERE create_time >= ?
-		GROUP BY 1`, successStatusCondition()))
+		GROUP BY 1`, bucketSQL))
 
 	statusRows, err := db.QueryWithTimeout(15*time.Second, statusQuery, startTime)
 	if err != nil {
@@ -801,9 +798,9 @@ func GetTopUpFunnel(days int) (*TopUpFunnelData, error) {
 		}
 		totalCount += count
 	}
-	// Always emit all 3 buckets in a stable order.
-	finalStatus := make([]FunnelStatusBucket, 0, 3)
-	for _, s := range []string{"success", "pending", "failed"} {
+	// Always emit all buckets in a stable order.
+	finalStatus := make([]FunnelStatusBucket, 0, 5)
+	for _, s := range []string{"success", "pending", "failed", "expired", "unknown"} {
 		if b, ok := tally[s]; ok {
 			finalStatus = append(finalStatus, b)
 		} else {

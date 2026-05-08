@@ -23,6 +23,7 @@ func seedTopUps(t *testing.T, n int) {
 		money REAL NOT NULL DEFAULT 0,
 		trade_no TEXT,
 		payment_method TEXT,
+		payment_provider TEXT,
 		create_time INTEGER NOT NULL DEFAULT 0,
 		complete_time INTEGER NOT NULL DEFAULT 0,
 		status TEXT
@@ -41,9 +42,9 @@ func seedTopUps(t *testing.T, n int) {
 	}
 	for i := 1; i <= n; i++ {
 		_, err := tx.Exec(
-			`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, create_time, complete_time, status)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i, i%5+1, 100, 1.5, fmt.Sprintf("T%06d", i), "alipay", 1700000000+int64(i), 1700000010+int64(i), "success",
+			`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, payment_provider, create_time, complete_time, status)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			i, i%5+1, 100, 1.5, fmt.Sprintf("T%06d", i), "alipay", "epay", 1700000000+int64(i), 1700000010+int64(i), "success",
 		)
 		if err != nil {
 			t.Fatalf("insert %d: %v", i, err)
@@ -153,6 +154,7 @@ func TestExportTopUpsToCSV_StatusFilter(t *testing.T) {
 		money REAL NOT NULL DEFAULT 0,
 		trade_no TEXT,
 		payment_method TEXT,
+		payment_provider TEXT,
 		create_time INTEGER NOT NULL DEFAULT 0,
 		complete_time INTEGER NOT NULL DEFAULT 0,
 		status TEXT
