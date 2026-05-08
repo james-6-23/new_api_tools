@@ -46,7 +46,7 @@ function Toast({ toast, onClose }: ToastProps) {
   }[toast.type]
 
   return (
-    <div className={`${bgColor} text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3 min-w-[280px] max-w-md`}>
+    <div className={`${bgColor} pointer-events-auto text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3 min-w-[280px] max-w-md`}>
       {icon}
       <span className="flex-1 text-sm">{toast.message}</span>
       <button
@@ -68,7 +68,7 @@ interface ToastContainerProps {
 
 export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
   return (
-    <div className="fixed top-4 right-4 z-50 flex flex-col space-y-2">
+    <div className="pointer-events-none fixed top-4 right-4 z-[10000] flex flex-col space-y-2">
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} onClose={onClose} />
       ))}
