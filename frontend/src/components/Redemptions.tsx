@@ -335,7 +335,78 @@ export function Redemptions() {
               </p>
             </div>
           ) : (
-            <div className="rounded-md border-t border-b sm:border-0">
+            <>
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border/60 border-t border-b">
+              {codes.map((code) => {
+                const expired = code.expired_time > 0 && code.expired_time * 1000 < Date.now()
+                return (
+                  <div key={code.id} className="px-3 py-3 space-y-2 hover:bg-muted/30">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(code.id)}
+                        onChange={(e) => handleSelectOne(code.id, e.target.checked)}
+                        className="mt-1 rounded border-input w-4 h-4"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-sm truncate">{code.name || '未命名'}</span>
+                          <Badge variant={code.status === 'unused' ? 'success' : code.status === 'used' ? 'secondary' : 'destructive'}>
+                            {code.status === 'unused' ? '未使用' : code.status === 'used' ? '已使用' : '已过期'}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <code className="text-[11px] font-mono bg-muted px-1.5 py-0.5 rounded truncate flex-1">{code.key}</code>
+                          <button onClick={() => copyToClipboard(code.key)} className="text-muted-foreground hover:text-primary shrink-0" title="复制">
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                          <div><span className="text-muted-foreground">额度：</span><span className="text-green-600 font-medium">{formatQuota(code.quota)}</span></div>
+                          <div className="text-muted-foreground truncate">
+                            {code.expired_time > 0 ? (
+                              <span className={cn("flex items-center gap-1", expired && "text-red-500")}>
+                                {expired && <AlertCircle className="h-3 w-3" />}
+                                {formatTimestamp(code.expired_time)}
+                              </span>
+                            ) : '永不过期'}
+                          </div>
+                          <div className="col-span-2 text-muted-foreground">创建：{formatTimestamp(code.created_time)}</div>
+                          {code.used_user_id > 0 && (
+                            <div className="col-span-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedUser({ id: code.used_user_id, username: code.used_username || `用户 #${code.used_user_id}` })
+                                  setAnalysisDialogOpen(true)
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary text-xs"
+                              >
+                                <div className="w-4 h-4 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[9px] text-primary font-bold">
+                                  {(code.used_username || '#')[0]?.toUpperCase()}
+                                </div>
+                                {code.used_username || `用户 #${code.used_user_id}`}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeleteDialog({ open: true, type: 'single', id: code.id })}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block rounded-md border-t border-b sm:border-0">
               <Table>
                 <TableHeader className="bg-muted/50">
                   <TableRow>
@@ -432,8 +503,9 @@ export function Redemptions() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
-          
+
           {/* Pagination */}
           {total > 0 && (
             <div className="px-4 py-4 border-t flex items-center justify-between">

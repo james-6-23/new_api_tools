@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState, useRef } from 'react'
-import { LayoutDashboard, Ticket, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell } from 'lucide-react'
+import { LayoutDashboard, Ticket, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell, Menu, X } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { cn } from '../lib/utils'
@@ -41,7 +41,20 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null)
   const [unreadBroadcasts, setUnreadBroadcasts] = useState(0)
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, opacity: 0 })
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
+  const activeTabLabel = tabs.find(tab => tab.id === activeTab)?.label ?? ''
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previous }
+  }, [mobileNavOpen])
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [activeTab])
 
   const fetchUnreadBroadcasts = useCallback(async () => {
     if (!token) return
@@ -130,11 +143,21 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
         <header className="w-full">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center py-3">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setMobileNavOpen(true)}
+                  className="md:hidden -ml-2 h-9 w-9 px-0"
+                  aria-label="打开导航"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+                <div className="flex items-center gap-2 min-w-0">
                   <img src="/tool.svg" alt="NewAPI-Tool" className="h-8 w-8 shrink-0" />
-                  <h1 className="text-lg sm:text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-                    NewAPI-Tool
+                  <h1 className="text-lg sm:text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70 truncate">
+                    <span className="md:hidden">{activeTabLabel || 'NewAPI-Tool'}</span>
+                    <span className="hidden md:inline">NewAPI-Tool</span>
                   </h1>
                 </div>
                 {dbStatus && (
@@ -180,8 +203,8 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
           </div>
         </header>
 
-        {/* Modern Navigation Tabs */}
-        <div className="w-full border-t border-border/40 bg-gradient-to-b from-transparent to-muted/10">
+        {/* Modern Navigation Tabs (desktop only) */}
+        <div className="hidden md:block w-full border-t border-border/40 bg-gradient-to-b from-transparent to-muted/10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <nav className="relative flex items-center w-full overflow-x-auto custom-scrollbar h-12" aria-label="Tabs">
               {/* Sliding Background Indicator */}
@@ -214,6 +237,52 @@ export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutPro
           </div>
         </div>
       </div>
+
+      {/* Mobile Navigation Drawer */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-[60] md:hidden" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in-up"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <aside className="absolute inset-y-0 left-0 w-[78%] max-w-xs bg-background border-r border-border shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-4 h-14 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <img src="/tool.svg" alt="" className="h-6 w-6" />
+                <span className="font-semibold">NewAPI-Tool</span>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={() => setMobileNavOpen(false)} aria-label="关闭导航">
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            <nav className="flex-1 overflow-y-auto py-2">
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => onTabChange(id)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors",
+                    activeTab === id
+                      ? "bg-secondary text-foreground"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  )}
+                >
+                  <Icon className={cn("h-5 w-5 shrink-0", activeTab === id ? "text-primary" : "")} />
+                  <span className="truncate">{label}</span>
+                </button>
+              ))}
+            </nav>
+            {dbStatus && (
+              <div className="px-4 py-3 border-t border-border/60 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <span className={cn("inline-block h-2 w-2 rounded-full", dbStatus.connected ? "bg-emerald-500" : "bg-red-500")} />
+                  {dbStatus.connected ? `${dbStatus.engine.toUpperCase()} · 已连接` : '数据库离线'}
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
 
       {/* Main Content with Fade In */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-fade-in-up">

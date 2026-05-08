@@ -281,7 +281,49 @@ export function Tokens() {
               </p>
             </div>
           ) : (
-            <div className="rounded-md border-t border-b sm:border-0">
+            <>
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border/60 border-t border-b">
+              {tokens.map((t) => (
+                <div key={t.id} className="px-3 py-3 space-y-2 hover:bg-muted/30">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate" title={t.name}>{t.name || '-'} <span className="text-[11px] text-muted-foreground font-mono">#{t.id}</span></div>
+                      <code className="block mt-1 text-[11px] font-mono bg-muted px-1.5 py-0.5 rounded truncate">{t.key}</code>
+                    </div>
+                    {getStatusBadge(t)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    <div className="text-muted-foreground">所属：
+                      {t.user_id > 0 ? (
+                        <button
+                          onClick={() => { setSelectedUser({ id: t.user_id, username: t.username || `用户 #${t.user_id}` }); setAnalysisDialogOpen(true) }}
+                          className="ml-1 text-primary hover:underline"
+                        >
+                          {t.username || `#${t.user_id}`}
+                        </button>
+                      ) : '-'}
+                    </div>
+                    <div className="text-muted-foreground">分组：{t.group || 'default'}</div>
+                    <div className="col-span-2 text-muted-foreground">
+                      额度：{t.unlimited_quota ? <span className="text-blue-600">无限</span> : <>总 {formatQuota(t.quota)} · 用 <span className="text-green-600">{formatQuota(t.used_quota)}</span></>}
+                    </div>
+                    {t.models && <div className="col-span-2 text-muted-foreground truncate" title={t.models}>模型：{t.models}</div>}
+                    <div className="text-muted-foreground">创建：{formatTimestamp(t.created_time)}</div>
+                    <div className="text-muted-foreground">最后：{formatTimestamp(t.accessed_time)}</div>
+                    {t.expired_time > 0 && (
+                      <div className={cn("col-span-2 text-muted-foreground flex items-center gap-1", isTokenExpired(t.expired_time) && "text-red-500")}>
+                        {isTokenExpired(t.expired_time) && <AlertCircle className="w-3 h-3" />}
+                        过期：{formatTimestamp(t.expired_time)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block rounded-md border-t border-b sm:border-0">
               <Table>
                 <TableHeader className="bg-muted/50">
                   <TableRow>
@@ -380,6 +422,7 @@ export function Tokens() {
                 </TableBody>
               </Table>
             </div>
+            </>
           )}
 
           {/* Pagination */}

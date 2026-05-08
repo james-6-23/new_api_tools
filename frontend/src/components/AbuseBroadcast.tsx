@@ -549,30 +549,48 @@ function InfoRow({ label, value, danger = false }: { label: string; value: strin
 
 function ResponsiveTable({ columns, rows, empty }: { columns: string[]; rows: ReactNode[][]; empty: string }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-muted-foreground">
-            {columns.map((column) => (
-              <th key={column} className="py-2 pr-4 font-medium whitespace-nowrap">{column}</th>
+    <>
+      {/* Mobile: stacked card list */}
+      <div className="md:hidden divide-y divide-border/60">
+        {rows.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">{empty}</div>
+        ) : rows.map((row, rowIndex) => (
+          <div key={rowIndex} className="py-3 space-y-1.5 text-sm">
+            {row.map((cell, cellIndex) => (
+              <div key={cellIndex} className="flex gap-2">
+                <span className="shrink-0 w-20 text-xs text-muted-foreground">{columns[cellIndex]}</span>
+                <span className="flex-1 min-w-0 break-words">{cell}</span>
+              </div>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} className="py-10 text-center text-muted-foreground">{empty}</td>
-            </tr>
-          ) : rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-b last:border-0">
-              {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="py-3 pr-4 align-middle whitespace-nowrap">{cell}</td>
+          </div>
+        ))}
+      </div>
+      {/* Desktop: table */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-muted-foreground">
+              {columns.map((column) => (
+                <th key={column} className="py-2 pr-4 font-medium whitespace-nowrap">{column}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="py-10 text-center text-muted-foreground">{empty}</td>
+              </tr>
+            ) : rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b last:border-0">
+                {row.map((cell, cellIndex) => (
+                  <td key={cellIndex} className="py-3 pr-4 align-middle whitespace-nowrap">{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 

@@ -638,7 +638,7 @@ export function Dashboard() {
           <Database className="w-5 h-5 text-primary" />
           平台资源
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
           <StatCard
             title="用户总数"
             value={overview?.total_users || 0}
@@ -683,7 +683,7 @@ export function Dashboard() {
           <Activity className="w-5 h-5 text-primary" />
           流量分析 ({getPeriodLabel()})
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
           <StatCard
             title="请求总数"
             value={formatNumber(usage?.total_requests || 0)}
