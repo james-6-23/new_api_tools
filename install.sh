@@ -62,6 +62,25 @@ setup_compose_files() {
 }
 
 #######################################
+# 只清理本项目命名的 Docker 残留资源。
+# 注意：不要调用 docker system prune，它会全局删除其他项目的已停止容器、
+# 未使用网络、悬空镜像和构建缓存。
+#######################################
+cleanup_project_docker_resources() {
+  log_info "清理 newapi-tools 残留 Docker 资源..."
+
+  docker ps -a --format '{{.Names}}' \
+    | grep -E '^(newapi-tools|newapi-tools-redis|newapi-tools-backend|newapi-tools-frontend)$' \
+    | xargs -r docker rm -f 2>/dev/null || true
+
+  docker images --format '{{.Repository}}:{{.Tag}}' \
+    | grep -E '^(ghcr\.io/james-6-23/new_api_tools|new_api_tools|newapi-tools|newapi-tools-backend|newapi-tools-frontend)(:|$)' \
+    | xargs -r docker rmi -f 2>/dev/null || true
+
+  docker network rm newapi-tools-network new_api_tools_default 2>/dev/null || true
+}
+
+#######################################
 # 检查必要命令
 #######################################
 check_requirements() {
@@ -913,13 +932,7 @@ do_full_reinstall_interactive() {
   log_info "停止并删除容器..."
   $DOCKER_COMPOSE down -v 2>/dev/null || true
 
-  # 删除相关镜像
-  log_info "删除相关镜像..."
-  docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'new_api_tools|newapi-tools' | xargs -r docker rmi -f 2>/dev/null || true
-
-  # 删除网络
-  docker network rm newapi-tools-network 2>/dev/null || true
-  docker network rm new_api_tools_default 2>/dev/null || true
+  cleanup_project_docker_resources
 
   # 记录安装目录（项目目录的父目录）
   local install_dir
@@ -931,10 +944,6 @@ do_full_reinstall_interactive() {
   # 删除项目目录
   log_info "删除项目目录..."
   rm -rf "$project_dir"
-
-  # 清理 Docker 资源
-  log_info "清理 Docker 资源..."
-  docker system prune -f 2>/dev/null || true
 
   log_success "卸载完成，开始重新安装..."
   echo ""
@@ -980,35 +989,15 @@ perform_cleanup() {
     log_success "已删除相关容器"
   fi
 
-  # 2. 删除相关镜像
-  log_info "删除相关镜像..."
-  local images
-  images=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(newapi-tools-backend|newapi-tools-frontend|new_api_tools)' 2>/dev/null || true)
-  if [[ -n "$images" ]]; then
-    echo "$images" | xargs -r docker rmi -f 2>/dev/null || true
-    log_success "已删除相关镜像"
-  fi
+  # 2. 删除本项目残留 Docker 资源
+  cleanup_project_docker_resources
 
-  # 也尝试删除可能的 compose 项目镜像
-  images=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'new_api_tools' 2>/dev/null || true)
-  if [[ -n "$images" ]]; then
-    echo "$images" | xargs -r docker rmi -f 2>/dev/null || true
-  fi
-
-  # 3. 删除相关网络 (如果存在)
-  log_info "清理相关网络..."
-  docker network rm new_api_tools_default 2>/dev/null || true
-
-  # 4. 删除项目目录
+  # 3. 删除项目目录
   log_info "删除项目目录: $target_dir"
   if [[ -d "$target_dir" ]]; then
     rm -rf "$target_dir"
     log_success "已删除项目目录"
   fi
-
-  # 5. 清理未使用的 Docker 资源
-  log_info "清理未使用的 Docker 资源..."
-  docker system prune -f 2>/dev/null || true
 
   log_success "清理完成，准备全新安装"
   echo ""
