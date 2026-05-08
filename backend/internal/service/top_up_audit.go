@@ -104,17 +104,34 @@ func GetTopUpPayerCohorts(days int) (*TopUpPayerCohorts, error) {
 
 	db := database.Get()
 	startTime := time.Now().AddDate(0, 0, -days).Unix()
+	userCreatedSelect := "0 as user_created_at"
+	userJoin := ""
+	if db.ColumnExists("users", "created_at") {
+		userCreatedSelect = "COALESCE(MAX(u.created_at), 0) as user_created_at"
+		userJoin = "LEFT JOIN users u ON w.user_id = u.id"
+	}
 	query := db.RebindQuery(fmt.Sprintf(`
-		SELECT t.user_id,
-			COALESCE(u.created_at, 0) as user_created_at,
-			COALESCE(t.money, 0) as money,
-			COALESCE(t.create_time, 0) as create_time
-		FROM top_ups t
-		LEFT JOIN users u ON t.user_id = u.id
-		WHERE (%s) = 'success'
-		ORDER BY t.create_time ASC`, topUpStatusBucketSQL("t.status")))
+		SELECT w.user_id,
+			%s,
+			COALESCE(MIN(CASE WHEN COALESCE(all_t.create_time, 0) > 0 THEN all_t.create_time END), 0) as first_success,
+			w.window_count,
+			w.window_money
+		FROM (
+			SELECT t.user_id,
+				COUNT(*) as window_count,
+				COALESCE(SUM(COALESCE(t.money, 0)), 0) as window_money
+			FROM top_ups t
+			WHERE t.create_time >= ?
+				AND (%s) = 'success'
+				AND t.user_id > 0
+			GROUP BY t.user_id
+		) w
+		LEFT JOIN top_ups all_t ON all_t.user_id = w.user_id AND (%s) = 'success'
+		%s
+		GROUP BY w.user_id, w.window_count, w.window_money`,
+		userCreatedSelect, topUpStatusBucketSQL("t.status"), topUpStatusBucketSQL("all_t.status"), userJoin))
 
-	rows, err := db.QueryWithTimeout(15*time.Second, query)
+	rows, err := db.QueryWithTimeout(15*time.Second, query, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("payer cohorts query failed: %w", err)
 	}
@@ -128,26 +145,22 @@ func GetTopUpPayerCohorts(days int) (*TopUpPayerCohorts, error) {
 			continue
 		}
 		createdAt := toInt64(row["user_created_at"])
-		createTime := toInt64(row["create_time"])
-		money := toFloat64(row["money"])
+		firstSuccess := toInt64(row["first_success"])
+		windowCount := toInt64(row["window_count"])
+		windowMoney := toFloat64(row["window_money"])
 
 		agg := byUser[userID]
 		if agg == nil {
-			agg = &payerAgg{userCreatedAt: createdAt}
+			agg = &payerAgg{
+				userCreatedAt: createdAt,
+				firstSuccess:  firstSuccess,
+				windowCount:   windowCount,
+				windowMoney:   windowMoney,
+			}
 			byUser[userID] = agg
 		}
-		if agg.userCreatedAt == 0 && createdAt > 0 {
-			agg.userCreatedAt = createdAt
-		}
-		if agg.firstSuccess == 0 || (createTime > 0 && createTime < agg.firstSuccess) {
-			agg.firstSuccess = createTime
-		}
-		if createTime >= startTime {
-			agg.windowCount++
-			agg.windowMoney += money
-			totalOrders++
-			totalRevenue += money
-		}
+		totalOrders += windowCount
+		totalRevenue += windowMoney
 	}
 
 	var (
@@ -223,6 +236,49 @@ type providerAgg struct {
 	health      TopUpProviderHealth
 	durations   []int64
 	durationSum int64
+}
+
+type topUpAnomalySQLFilters struct {
+	overduePending       string
+	pending30m           string
+	pending2h            string
+	pending24h           string
+	completeBeforeCreate string
+	invalidMoney         string
+	invalidAmount        string
+	emptyTradeNo         string
+	unknownStatus        string
+	any                  string
+}
+
+func buildTopUpAnomalySQLFilters(statusBucketSQL string, now int64, pendingHours int) topUpAnomalySQLFilters {
+	if pendingHours < 1 {
+		pendingHours = defaultPendingAnomalyHours
+	}
+	pendingOlderThan := func(seconds int64) string {
+		return fmt.Sprintf("(%s) = 'pending' AND COALESCE(t.create_time, 0) > 0 AND t.create_time <= %d", statusBucketSQL, now-seconds)
+	}
+
+	filters := topUpAnomalySQLFilters{
+		overduePending:       pendingOlderThan(int64(pendingHours) * 3600),
+		pending30m:           pendingOlderThan(30 * 60),
+		pending2h:            pendingOlderThan(2 * 3600),
+		pending24h:           pendingOlderThan(24 * 3600),
+		completeBeforeCreate: "COALESCE(t.create_time, 0) > 0 AND COALESCE(t.complete_time, 0) > 0 AND t.complete_time < t.create_time",
+		invalidMoney:         "COALESCE(t.money, 0) <= 0",
+		invalidAmount:        "COALESCE(t.amount, 0) <= 0",
+		emptyTradeNo:         "TRIM(COALESCE(t.trade_no, '')) = ''",
+		unknownStatus:        fmt.Sprintf("(%s) = 'unknown'", statusBucketSQL),
+	}
+	filters.any = "(" + strings.Join([]string{
+		filters.overduePending,
+		filters.completeBeforeCreate,
+		filters.invalidMoney,
+		filters.invalidAmount,
+		filters.emptyTradeNo,
+		filters.unknownStatus,
+	}, " OR ") + ")"
+	return filters
 }
 
 func GetTopUpProviderHealth(days int) ([]TopUpProviderHealth, error) {
@@ -347,20 +403,66 @@ func GetTopUpAnomalies(days int, pendingHours int, limit int) (*TopUpAnomalies, 
 
 	db := database.Get()
 	startTime := time.Now().AddDate(0, 0, -days).Unix()
+	now := time.Now().Unix()
+	statusBucketSQL := topUpStatusBucketSQL("t.status")
+	filters := buildTopUpAnomalySQLFilters(statusBucketSQL, now, pendingHours)
+
+	summaryQuery := db.RebindQuery(fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as total_anomalies,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as overdue_pending,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as pending_30m,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as pending_2h,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as pending_24h,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as complete_before_create,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as invalid_money,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as invalid_amount,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as empty_trade_no,
+			COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) as unknown_status
+		FROM top_ups t
+		WHERE t.create_time >= ?`,
+		filters.any,
+		filters.overduePending,
+		filters.pending30m,
+		filters.pending2h,
+		filters.pending24h,
+		filters.completeBeforeCreate,
+		filters.invalidMoney,
+		filters.invalidAmount,
+		filters.emptyTradeNo,
+		filters.unknownStatus))
+
+	summaryRow, err := db.QueryOneWithTimeout(10*time.Second, summaryQuery, startTime)
+	if err != nil {
+		return nil, fmt.Errorf("top-up anomaly summary query failed: %w", err)
+	}
+	summary := TopUpAuditSummary{}
+	if summaryRow != nil {
+		summary.TotalAnomalies = toInt64(summaryRow["total_anomalies"])
+		summary.OverduePending = toInt64(summaryRow["overdue_pending"])
+		summary.Pending30m = toInt64(summaryRow["pending_30m"])
+		summary.Pending2h = toInt64(summaryRow["pending_2h"])
+		summary.Pending24h = toInt64(summaryRow["pending_24h"])
+		summary.CompleteBeforeCreate = toInt64(summaryRow["complete_before_create"])
+		summary.InvalidMoney = toInt64(summaryRow["invalid_money"])
+		summary.InvalidAmount = toInt64(summaryRow["invalid_amount"])
+		summary.EmptyTradeNo = toInt64(summaryRow["empty_trade_no"])
+		summary.UnknownStatus = toInt64(summaryRow["unknown_status"])
+	}
+
 	query := db.RebindQuery(fmt.Sprintf(`
 		SELECT %s
 		FROM top_ups t
 		LEFT JOIN users u ON t.user_id = u.id
-		WHERE t.create_time >= ?
-		ORDER BY t.create_time DESC`, topUpSelectColumns()))
+		WHERE t.create_time >= ? AND %s
+		ORDER BY t.create_time DESC
+		LIMIT ?`, topUpSelectColumns(), filters.any))
 
-	rows, err := db.QueryWithTimeout(15*time.Second, query, startTime)
+	rows, err := db.QueryWithTimeout(15*time.Second, query, startTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("top-up anomalies query failed: %w", err)
 	}
 
-	now := time.Now().Unix()
-	summary := TopUpAuditSummary{}
 	items := make([]TopUpAnomalyRecord, 0, limit)
 	for _, row := range rows {
 		rec := TopUpRecord{
@@ -382,50 +484,15 @@ func GetTopUpAnomalies(days int, pendingHours int, limit int) (*TopUpAnomalies, 
 		}
 		enrichTopUpRecord(&rec, now, pendingHours)
 
-		if rec.StatusBucket == "pending" && rec.CreateTime > 0 {
-			ageSecs := now - rec.CreateTime
-			if ageSecs >= 30*60 {
-				summary.Pending30m++
-			}
-			if ageSecs >= 2*3600 {
-				summary.Pending2h++
-			}
-			if ageSecs >= 24*3600 {
-				summary.Pending24h++
-			}
-		}
-
 		if len(rec.AnomalyReasons) == 0 {
 			continue
 		}
 
-		summary.TotalAnomalies++
-		for _, reason := range rec.AnomalyReasons {
-			switch reason {
-			case "超时待支付":
-				summary.OverduePending++
-			case "成功但无完成时间":
-				summary.SuccessMissingComplete++
-			case "完成早于创建":
-				summary.CompleteBeforeCreate++
-			case "金额异常":
-				summary.InvalidMoney++
-			case "额度异常":
-				summary.InvalidAmount++
-			case "空交易号":
-				summary.EmptyTradeNo++
-			case "未知状态":
-				summary.UnknownStatus++
-			}
+		ageHours := float64(0)
+		if rec.CreateTime > 0 && now >= rec.CreateTime {
+			ageHours = round2(float64(now-rec.CreateTime) / 3600)
 		}
-
-		if len(items) < limit {
-			ageHours := float64(0)
-			if rec.CreateTime > 0 && now >= rec.CreateTime {
-				ageHours = round2(float64(now-rec.CreateTime) / 3600)
-			}
-			items = append(items, TopUpAnomalyRecord{TopUpRecord: rec, AgeHours: ageHours})
-		}
+		items = append(items, TopUpAnomalyRecord{TopUpRecord: rec, AgeHours: ageHours})
 	}
 
 	result := &TopUpAnomalies{

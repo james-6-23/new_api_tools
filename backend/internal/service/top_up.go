@@ -147,9 +147,6 @@ func topUpAnomalyReasons(rec TopUpRecord, now int64, pendingHours int) []string 
 	if rec.Amount <= 0 {
 		reasons = append(reasons, "额度异常")
 	}
-	if bucket == "success" && rec.CompleteTime <= 0 {
-		reasons = append(reasons, "成功但无完成时间")
-	}
 	if rec.CreateTime > 0 && rec.CompleteTime > 0 && rec.CompleteTime < rec.CreateTime {
 		reasons = append(reasons, "完成早于创建")
 	}

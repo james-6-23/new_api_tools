@@ -197,6 +197,124 @@ func TestTopUpHeatmapGrid_FillsFullGridAndIgnoresInvalidCells(t *testing.T) {
 	}
 }
 
+func TestGetTopUpPayerCohorts_UsersCreatedAtIsOptional(t *testing.T) {
+	clearTopUpAnalyticsCache(t)
+	t.Cleanup(func() { clearTopUpAnalyticsCache(t) })
+
+	db := installSQLiteForTests(t)
+	db.MustExec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY,
+			username TEXT,
+			status INTEGER
+		);
+		CREATE TABLE top_ups (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER,
+			amount INTEGER,
+			money REAL,
+			create_time INTEGER,
+			status TEXT
+		);
+	`)
+
+	now := time.Now().Unix()
+	old := now - 60*86400
+	db.MustExec(`INSERT INTO users (id, username, status) VALUES (1, 'alice', 1), (2, 'bob', 1)`)
+	db.MustExec(`INSERT INTO top_ups (id, user_id, amount, money, create_time, status) VALUES
+		(1, 1, 100, 10, ?, 'success'),
+		(2, 1, 200, 20, ?, ' Completed '),
+		(3, 2, 300, 30, ?, 'success'),
+		(4, 2, 400, 5, ?, 'success'),
+		(5, 99, 500, 7, ?, '1')`,
+		now-5*86400,
+		now-4*86400,
+		old,
+		now-2*86400,
+		now-1*86400,
+	)
+
+	got, err := GetTopUpPayerCohorts(30)
+	if err != nil {
+		t.Fatalf("GetTopUpPayerCohorts returned error without users.created_at: %v", err)
+	}
+	if got.PayingUsers != 3 {
+		t.Fatalf("paying users = %d, want 3", got.PayingUsers)
+	}
+	if got.FirstTimePayers != 2 {
+		t.Fatalf("first-time payers = %d, want 2", got.FirstTimePayers)
+	}
+	if got.RepeatPayers != 1 {
+		t.Fatalf("repeat payers = %d, want 1", got.RepeatPayers)
+	}
+	if got.TotalRevenue != 42 {
+		t.Fatalf("total revenue = %v, want 42", got.TotalRevenue)
+	}
+	if got.AvgFirstPayDelayHours != 0 {
+		t.Fatalf("missing users.created_at should disable first-pay delay, got %v", got.AvgFirstPayDelayHours)
+	}
+}
+
+func TestGetTopUpAnomalies_CompleteTimeIsNullable(t *testing.T) {
+	clearTopUpAnalyticsCache(t)
+	t.Cleanup(func() { clearTopUpAnalyticsCache(t) })
+
+	db := installSQLiteForTests(t)
+	db.MustExec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY,
+			username TEXT
+		);
+		CREATE TABLE top_ups (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER,
+			amount INTEGER,
+			money REAL,
+			trade_no TEXT,
+			payment_method TEXT,
+			payment_provider TEXT,
+			create_time INTEGER,
+			complete_time INTEGER,
+			status TEXT
+		);
+	`)
+
+	now := time.Now().Unix()
+	db.MustExec(`INSERT INTO users (id, username) VALUES (1, 'alice')`)
+	db.MustExec(`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, payment_provider, create_time, complete_time, status) VALUES
+		(1, 1, 100, 10, 'ok-missing-complete', 'stripe', 'stripe', ?, NULL, 'success'),
+		(2, 1, 100, 10, 'bad-time', 'stripe', 'stripe', ?, ?, 'success'),
+		(3, 1, 100, 10, 'pending-old', 'stripe', 'stripe', ?, NULL, 'pending')`,
+		now-3600,
+		now-1000, now-2000,
+		now-3*3600,
+	)
+
+	got, err := GetTopUpAnomalies(30, 2, 50)
+	if err != nil {
+		t.Fatalf("GetTopUpAnomalies returned error: %v", err)
+	}
+	if got.Summary.SuccessMissingComplete != 0 {
+		t.Fatalf("success_missing_complete = %d, want 0", got.Summary.SuccessMissingComplete)
+	}
+	if got.Summary.TotalAnomalies != 2 {
+		t.Fatalf("total anomalies = %d, want 2", got.Summary.TotalAnomalies)
+	}
+	if len(got.Items) != 2 {
+		t.Fatalf("items = %d, want 2: %#v", len(got.Items), got.Items)
+	}
+	for _, item := range got.Items {
+		if item.TradeNo == "ok-missing-complete" {
+			t.Fatalf("nullable complete_time-only row should not be returned: %#v", item)
+		}
+		for _, reason := range item.AnomalyReasons {
+			if reason == "成功但无完成时间" {
+				t.Fatalf("nullable complete_time reason should not be emitted: %#v", item)
+			}
+		}
+	}
+}
+
 func seedTopUpAnalyticsTables(t *testing.T) {
 	t.Helper()
 	clearTopUpAnalyticsCache(t)

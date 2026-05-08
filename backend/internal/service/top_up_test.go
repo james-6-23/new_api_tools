@@ -95,3 +95,17 @@ func TestBuildTopUpWhere_NoParams(t *testing.T) {
 		t.Errorf("expected 0 args, got %d", len(args))
 	}
 }
+
+func TestTopUpAnomalyReasons_AllowsSuccessfulMissingCompleteTime(t *testing.T) {
+	reasons := topUpAnomalyReasons(TopUpRecord{
+		Amount:       100,
+		Money:        10,
+		TradeNo:      "trade-1",
+		CreateTime:   1710000000,
+		CompleteTime: 0,
+		StatusBucket: "success",
+	}, 1710003600, 2)
+	if len(reasons) != 0 {
+		t.Fatalf("successful top-up with nullable complete_time should not be anomalous, got %v", reasons)
+	}
+}

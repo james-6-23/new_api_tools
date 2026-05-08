@@ -195,7 +195,7 @@ export function TopUpAudit({ active }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <AuditMetric title="异常订单" value={summary?.total_anomalies || 0} detail={`${fmtNum(summary?.unknown_status || 0)} 个未知状态`} icon={AlertTriangle} tone="red" />
         <AuditMetric title="超时待支付" value={summary?.overdue_pending || 0} detail={`${fmtNum(summary?.pending_24h || 0)} 笔超过 24 小时`} icon={Clock} tone="amber" />
-        <AuditMetric title="时间异常" value={(summary?.success_missing_complete || 0) + (summary?.complete_before_create || 0)} detail="成功无完成时间 / 完成早于创建" icon={Activity} tone="blue" />
+        <AuditMetric title="时间异常" value={summary?.complete_before_create || 0} detail="完成时间早于创建时间" icon={Activity} tone="blue" />
         <AuditMetric title="金额异常" value={(summary?.invalid_money || 0) + (summary?.invalid_amount || 0)} detail={`${fmtNum(summary?.empty_trade_no || 0)} 笔空交易号`} icon={CreditCard} tone="slate" />
       </div>
 
