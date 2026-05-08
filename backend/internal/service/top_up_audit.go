@@ -293,15 +293,16 @@ func GetTopUpProviderHealth(days int) ([]TopUpProviderHealth, error) {
 
 	db := database.Get()
 	startTime := time.Now().AddDate(0, 0, -days).Unix()
-	query := db.RebindQuery(`
-		SELECT COALESCE(payment_provider, '') as payment_provider,
+	paymentProviderExpr := topUpPaymentProviderExpr("")
+	query := db.RebindQuery(fmt.Sprintf(`
+		SELECT COALESCE(%s, '') as payment_provider,
 			COALESCE(payment_method, '') as payment_method,
 			COALESCE(status, '') as status,
 			COALESCE(money, 0) as money,
 			COALESCE(create_time, 0) as create_time,
 			COALESCE(complete_time, 0) as complete_time
 		FROM top_ups
-		WHERE create_time >= ?`)
+		WHERE create_time >= ?`, paymentProviderExpr))
 
 	rows, err := db.QueryWithTimeout(15*time.Second, query, startTime)
 	if err != nil {

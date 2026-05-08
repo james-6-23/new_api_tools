@@ -315,6 +315,44 @@ func TestGetTopUpAnomalies_CompleteTimeIsNullable(t *testing.T) {
 	}
 }
 
+func TestGetTopUpProviderHealth_PaymentProviderColumnOptional(t *testing.T) {
+	clearTopUpAnalyticsCache(t)
+	t.Cleanup(func() { clearTopUpAnalyticsCache(t) })
+
+	db := installSQLiteForTests(t)
+	db.MustExec(`
+		CREATE TABLE top_ups (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER,
+			amount INTEGER,
+			money REAL,
+			trade_no TEXT,
+			payment_method TEXT,
+			create_time INTEGER,
+			complete_time INTEGER,
+			status TEXT
+		);
+	`)
+
+	now := time.Now().Unix()
+	db.MustExec(`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, create_time, complete_time, status)
+		VALUES (1, 1, 100, 10, 'trade-1', 'alipay', ?, ?, 'success')`, now-3600, now-3500)
+
+	got, err := GetTopUpProviderHealth(30)
+	if err != nil {
+		t.Fatalf("GetTopUpProviderHealth returned error without payment_provider column: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("provider health rows = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].Provider != "未知" {
+		t.Fatalf("provider = %q, want fallback 未知", got[0].Provider)
+	}
+	if got[0].Method != "alipay" {
+		t.Fatalf("method = %q, want alipay", got[0].Method)
+	}
+}
+
 func seedTopUpAnalyticsTables(t *testing.T) {
 	t.Helper()
 	clearTopUpAnalyticsCache(t)

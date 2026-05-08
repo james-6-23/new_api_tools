@@ -159,11 +159,22 @@ func topUpAnomalyReasons(rec TopUpRecord, now int64, pendingHours int) []string 
 	return reasons
 }
 
+func topUpPaymentProviderExpr(alias string) string {
+	db := database.Get()
+	if db.ColumnExists("top_ups", "payment_provider") {
+		if alias != "" {
+			return alias + ".payment_provider"
+		}
+		return "payment_provider"
+	}
+	return "''"
+}
+
 func topUpSelectColumns() string {
 	return fmt.Sprintf(`t.id, t.user_id, u.username, t.amount, t.money,
 		COALESCE(t.trade_no,'') as trade_no,
 		COALESCE(t.payment_method,'') as payment_method,
-		COALESCE(t.payment_provider,'') as payment_provider,
+		COALESCE(%s,'') as payment_provider,
 		COALESCE(t.create_time,0) as create_time,
 		COALESCE(t.complete_time,0) as complete_time,
 		COALESCE(t.status,'') as status,
@@ -171,7 +182,7 @@ func topUpSelectColumns() string {
 		CASE
 			WHEN t.create_time > 0 AND t.complete_time > 0 AND t.complete_time >= t.create_time THEN t.complete_time - t.create_time
 			ELSE 0
-		END as completion_seconds`, topUpStatusBucketSQL("t.status"))
+		END as completion_seconds`, topUpPaymentProviderExpr("t"), topUpStatusBucketSQL("t.status"))
 }
 
 // buildTopUpWhere translates filter params into a parameterised WHERE clause.
@@ -207,9 +218,13 @@ func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 	}
 
 	if params.PaymentProvider != "" {
-		where = append(where, fmt.Sprintf("t.payment_provider = %s", db.Placeholder(argIdx)))
-		args = append(args, params.PaymentProvider)
-		argIdx++
+		if db.ColumnExists("top_ups", "payment_provider") {
+			where = append(where, fmt.Sprintf("t.payment_provider = %s", db.Placeholder(argIdx)))
+			args = append(args, params.PaymentProvider)
+			argIdx++
+		} else {
+			where = append(where, "1=0")
+		}
 	}
 
 	if params.TradeNo != "" {
@@ -546,6 +561,9 @@ func GetPaymentMethods() ([]string, error) {
 // GetPaymentProviders returns distinct payment providers.
 func GetPaymentProviders() ([]string, error) {
 	db := database.Get()
+	if !db.ColumnExists("top_ups", "payment_provider") {
+		return []string{}, nil
+	}
 	var providers []string
 	err := db.DB.Select(&providers, "SELECT DISTINCT payment_provider FROM top_ups WHERE payment_provider IS NOT NULL AND payment_provider != '' ORDER BY payment_provider")
 	if err != nil {

@@ -84,6 +84,18 @@ func TestBuildTopUpWhere_FilterCombination(t *testing.T) {
 	}
 }
 
+func TestBuildTopUpWhere_PaymentProviderMissingColumnReturnsNoRows(t *testing.T) {
+	installSQLiteForTests(t)
+
+	where, args, _ := buildTopUpWhere(ListTopUpParams{PaymentProvider: "stripe"})
+	if where != "1=0" {
+		t.Fatalf("missing payment_provider column should produce an empty-match filter, got: %s", where)
+	}
+	if len(args) != 0 {
+		t.Fatalf("missing payment_provider column should not add args, got %v", args)
+	}
+}
+
 func TestBuildTopUpWhere_NoParams(t *testing.T) {
 	installSQLiteForTests(t)
 
@@ -93,6 +105,41 @@ func TestBuildTopUpWhere_NoParams(t *testing.T) {
 	}
 	if len(args) != 0 {
 		t.Errorf("expected 0 args, got %d", len(args))
+	}
+}
+
+func TestListTopUpRecords_PaymentProviderColumnOptional(t *testing.T) {
+	db := installSQLiteForTests(t)
+	db.MustExec(`
+		CREATE TABLE users (
+			id INTEGER PRIMARY KEY,
+			username TEXT
+		);
+		CREATE TABLE top_ups (
+			id INTEGER PRIMARY KEY,
+			user_id INTEGER,
+			amount INTEGER,
+			money REAL,
+			trade_no TEXT,
+			payment_method TEXT,
+			create_time INTEGER,
+			complete_time INTEGER,
+			status TEXT
+		);
+	`)
+	db.MustExec(`INSERT INTO users (id, username) VALUES (1, 'alice')`)
+	db.MustExec(`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, create_time, complete_time, status)
+		VALUES (1, 1, 100, 10, 'trade-1', 'alipay', 1710000000, 1710000010, 'success')`)
+
+	got, err := ListTopUpRecords(ListTopUpParams{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("ListTopUpRecords returned error without payment_provider column: %v", err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(got.Items))
+	}
+	if got.Items[0].PaymentProvider != "" {
+		t.Fatalf("payment_provider = %q, want empty fallback", got.Items[0].PaymentProvider)
 	}
 }
 
