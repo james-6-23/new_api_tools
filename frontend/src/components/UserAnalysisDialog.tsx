@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from './Toast'
 import {
     Eye, Loader2, AlertTriangle, ShieldCheck, ShieldBan, ShieldX,
-    Activity, Globe, Clock, ExternalLink,
+    Activity, Globe, Clock, ExternalLink, RadioTower,
 } from 'lucide-react'
 import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
@@ -104,6 +104,24 @@ export const UNBAN_REASONS = [
     { value: '临时解封观察', label: '临时解封观察' },
 ]
 
+export const REPORT_REASONS = [
+    { value: '', label: '请选择通报原因' },
+    { value: '多 IP 访问异常', label: '多 IP 访问异常' },
+    { value: 'IP 快速切换', label: 'IP 快速切换' },
+    { value: '账号共享嫌疑', label: '账号共享嫌疑' },
+    { value: '令牌泄露风险', label: '令牌泄露风险' },
+    { value: '滥用 API 资源', label: '滥用 API 资源' },
+    { value: 'LinuxDo 身份异常', label: 'LinuxDo 身份异常' },
+    { value: '其他', label: '其他' },
+]
+
+const REPORT_SEVERITIES = [
+    { value: 'low', label: '低' },
+    { value: 'medium', label: '中' },
+    { value: 'high', label: '高' },
+    { value: 'critical', label: '严重' },
+]
+
 const WINDOW_LABELS: Record<string, string> = {
     '1h': '1小时', '3h': '3小时', '6h': '6小时', '12h': '12小时',
     '24h': '24小时', '3d': '3天', '7d': '7天',
@@ -195,6 +213,14 @@ export function UserAnalysisDialog({
         disableTokens: boolean
         enableTokens: boolean
     }>({ open: false, type: 'ban', userId: 0, username: '', reason: '', disableTokens: true, enableTokens: false })
+    const [reportDialog, setReportDialog] = useState({
+        open: false,
+        reasonPreset: '',
+        reasonText: '',
+        severity: 'medium',
+    })
+    const [reportSubmitting, setReportSubmitting] = useState(false)
+    const [reportChecking, setReportChecking] = useState(false)
 
     // ── 获取分析数据 ──
     const fetchUserAnalysis = useCallback(async () => {
@@ -296,6 +322,61 @@ export function UserAnalysisDialog({
         finally { setLinuxDoLookupLoading(null) }
     }
 
+    const openReportDialog = async () => {
+        if (!analysis || reportChecking) return
+        setReportChecking(true)
+        try {
+            const response = await fetch(`${apiUrl}/api/abuse-broadcast/status`, { headers: getAuthHeaders() })
+            const res = await response.json()
+            const status = res.data
+            if (!res.success || !status?.enabled || !status?.configured) {
+                showToast('error', '未连接 Hub，请先到联合广播页配置并连接')
+                return
+            }
+            setReportDialog({ open: true, reasonPreset: '', reasonText: '', severity: 'medium' })
+        } catch {
+            showToast('error', '检查 Hub 连接失败')
+        } finally {
+            setReportChecking(false)
+        }
+    }
+
+    const submitReport = async () => {
+        if (!analysis || reportSubmitting) return
+        if (!reportDialog.reasonPreset && !reportDialog.reasonText.trim()) {
+            showToast('error', '请填写或选择通报原因')
+            return
+        }
+        setReportSubmitting(true)
+        try {
+            const response = await fetch(`${apiUrl}/api/abuse-broadcast/report-user`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({
+                    user_id: analysis.user.id,
+                    window: analysisWindow,
+                    end_time: endTime,
+                    reason_preset: reportDialog.reasonPreset,
+                    reason_text: reportDialog.reasonText.trim(),
+                    severity: reportDialog.severity,
+                }),
+            })
+            const res = await response.json()
+            if (res.success) {
+                setReportDialog(prev => ({ ...prev, open: false }))
+                showToast('success', res.message || '通报成功')
+            } else {
+                const message = typeof res.error === 'string' ? res.error : res.error?.message
+                showToast('error', message || '通报失败')
+            }
+        } catch (e) {
+            console.error('Failed to report user:', e)
+            showToast('error', '通报失败')
+        } finally {
+            setReportSubmitting(false)
+        }
+    }
+
     // ── 封禁/解封 API ──
     const handleBanConfirm = async () => {
         setMutating(true)
@@ -330,6 +411,8 @@ export function UserAnalysisDialog({
             setMutating(false)
         }
     }
+
+    const reportPreviewIPs = analysis?.top_ips.slice(0, 10) || []
 
     return (
         <>
@@ -751,6 +834,15 @@ export function UserAnalysisDialog({
                             </div>
                             <div className="flex gap-3">
                                 <Button variant="outline" onClick={() => onOpenChange(false)} disabled={mutating}>取消</Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => void openReportDialog()}
+                                    disabled={!analysis || mutating || analysisLoading || reportChecking}
+                                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                                >
+                                    {reportChecking ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RadioTower className="h-4 w-4 mr-2" />}
+                                    通报
+                                </Button>
                                 {analysis?.user.in_whitelist ? (
                                     <Button
                                         variant="outline"
@@ -809,6 +901,94 @@ export function UserAnalysisDialog({
                             </div>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Abuse Broadcast Report Dialog ── */}
+            <Dialog open={reportDialog.open} onOpenChange={(o) => setReportDialog(prev => ({ ...prev, open: o }))}>
+                <DialogContent className="max-w-[640px] w-full rounded-xl gap-5 p-6 overflow-visible">
+                    <DialogHeader className="space-y-2">
+                        <DialogTitle className="flex items-center gap-2 text-lg">
+                            <RadioTower className="h-5 w-5 text-blue-600" />
+                            通报到 Hub
+                        </DialogTitle>
+                        <DialogDescription className="text-sm">
+                            将当前用户的 LinuxDo ID、来源 IP 和风险摘要提交到联合广播 Hub。
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-4">
+                        <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                            <div className="text-sm font-medium">将上报的身份信息</div>
+                            <div className="flex flex-wrap gap-2 text-xs">
+                                {analysis?.user.linux_do_id && (
+                                    <Badge variant="warning" className="font-mono">LinuxDo: {analysis.user.linux_do_id}</Badge>
+                                )}
+                                {reportPreviewIPs.map((item) => (
+                                    <Badge key={item.ip} variant="secondary" className="font-mono">{item.ip}</Badge>
+                                ))}
+                                {!analysis?.user.linux_do_id && reportPreviewIPs.length === 0 && (
+                                    <span className="text-muted-foreground">暂无可上报的 LinuxDo ID 或 IP</span>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">预设通报原因</label>
+                            <Select
+                                value={reportDialog.reasonPreset}
+                                onChange={(e) => setReportDialog(prev => ({ ...prev, reasonPreset: e.target.value }))}
+                                className="w-full"
+                            >
+                                {REPORT_REASONS.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">严重级别</label>
+                            <Select
+                                value={reportDialog.severity}
+                                onChange={(e) => setReportDialog(prev => ({ ...prev, severity: e.target.value }))}
+                                className="w-full"
+                            >
+                                {REPORT_SEVERITIES.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </Select>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">补充说明</label>
+                            <textarea
+                                value={reportDialog.reasonText}
+                                onChange={(e) => setReportDialog(prev => ({ ...prev, reasonText: e.target.value }))}
+                                rows={4}
+                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                placeholder="可以补充为什么判断为异常，例如多站共享、IP 频繁跳动、LinuxDo 身份异常等。"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            variant="ghost"
+                            onClick={() => setReportDialog(prev => ({ ...prev, open: false }))}
+                            disabled={reportSubmitting}
+                            className="flex-1 sm:flex-none"
+                        >
+                            取消
+                        </Button>
+                        <Button
+                            onClick={() => void submitReport()}
+                            disabled={reportSubmitting || (!reportDialog.reasonPreset && !reportDialog.reasonText.trim())}
+                            className="flex-1 sm:flex-none min-w-[100px]"
+                        >
+                            {reportSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RadioTower className="h-4 w-4 mr-2" />}
+                            确认通报
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 

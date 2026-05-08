@@ -98,6 +98,7 @@ func main() {
 		handler.RegisterIPMonitoringRoutes(api)
 		handler.RegisterRiskMonitoringRoutes(api)
 		handler.RegisterModelStatusRoutes(api)
+		handler.RegisterAbuseBroadcastRoutes(api)
 
 		// Phase 2.4: Token Management
 		handler.RegisterTokenRoutes(api)
@@ -116,6 +117,9 @@ func main() {
 	// IP recording enforcement: check every 10 minutes, enable if any user disabled it
 	stopIPEnforce := make(chan struct{})
 	go backgroundEnforceIPRecording(stopIPEnforce)
+
+	stopAbuseBroadcast := make(chan struct{})
+	go backgroundSyncAbuseBroadcast(stopAbuseBroadcast)
 
 	// ========== 8. Start server with graceful shutdown ==========
 	srv := &http.Server{
@@ -143,6 +147,7 @@ func main() {
 
 	// Stop background tasks
 	close(stopIPEnforce)
+	close(stopAbuseBroadcast)
 
 	// Give the server 10 seconds to finish processing requests
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -220,6 +225,87 @@ func enforceIPRecordingOnce() {
 	}
 
 	logger.L.Success(fmt.Sprintf("[IP记录] %s", result["message"]))
+}
+
+// backgroundSyncAbuseBroadcast supervises the Hub pull loop. It re-reads the
+// runtime settings on every tick so admins can toggle enabled/interval from the
+// frontend without a restart.
+func backgroundSyncAbuseBroadcast(stop <-chan struct{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.L.Error(fmt.Sprintf("[违规广播] 后台同步任务 panic: %v", r))
+		}
+	}()
+
+	select {
+	case <-time.After(20 * time.Second):
+	case <-stop:
+		return
+	}
+
+	logger.L.System("[违规广播] Hub 同步监督任务已启动")
+
+	const idleInterval = 60 * time.Second
+	currentInterval := idleInterval
+	timer := time.NewTimer(currentInterval)
+	defer timer.Stop()
+
+	loadInterval := func() (time.Duration, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		settings, err := service.NewAbuseBroadcastService().GetSettings(ctx)
+		if err != nil {
+			logger.L.Debug("[违规广播] 读取配置失败: " + err.Error())
+			return idleInterval, false
+		}
+		if !settings.Enabled {
+			return idleInterval, false
+		}
+		seconds := settings.PullIntervalSeconds
+		if seconds <= 0 {
+			seconds = 300
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+
+	for {
+		select {
+		case <-timer.C:
+			next, active := loadInterval()
+			if active {
+				syncAbuseBroadcastOnce()
+			}
+			if next != currentInterval {
+				logger.L.System(fmt.Sprintf("[违规广播] 调整同步间隔为 %s (active=%v)", next, active))
+				currentInterval = next
+			}
+			timer.Reset(currentInterval)
+		case <-stop:
+			logger.L.System("[违规广播] Hub 同步监督任务已停止")
+			return
+		}
+	}
+}
+
+func syncAbuseBroadcastOnce() {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.L.Error(fmt.Sprintf("[违规广播] 同步执行 panic: %v", r))
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	result, err := service.NewAbuseBroadcastService().SyncOnce(ctx)
+	if err != nil {
+		logger.L.Warn("[违规广播] 同步失败: " + err.Error())
+		return
+	}
+	if result.PulledEvents > 0 {
+		logger.L.Success(fmt.Sprintf("[违规广播] 已同步 %d 个事件，写入 %d 条通报，cursor=%d",
+			result.PulledEvents, result.StoredReports, result.NextCursor))
+	}
 }
 
 func toInt64(v interface{}) int64 {

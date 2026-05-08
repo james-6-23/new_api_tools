@@ -70,7 +70,7 @@ func Load() *Config {
 		TimeZone:   getEnvStrMulti([]string{"TIMEZONE", "TZ"}, "Asia/Shanghai"),
 
 		// Database
-		SQLDSN: getEnvStr("SQL_DSN", ""),
+		SQLDSN:         getEnvStr("SQL_DSN", ""),
 		DBMaxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 50),
 		DBMaxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 15),
 
@@ -255,6 +255,18 @@ func getEnvInt(key string, defaultVal int) int {
 	if val := os.Getenv(key); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
 			return i
+		}
+	}
+	return defaultVal
+}
+
+func getEnvBool(key string, defaultVal bool) bool {
+	if val := os.Getenv(key); val != "" {
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		case "0", "false", "no", "n", "off":
+			return false
 		}
 	}
 	return defaultVal

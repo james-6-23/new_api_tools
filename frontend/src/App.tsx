@@ -15,9 +15,10 @@ const IPAnalysis = lazy(() => import('./components/IPAnalysis').then(m => ({ def
 const ModelStatusMonitor = lazy(() => import('./components/ModelStatusMonitor').then(m => ({ default: m.ModelStatusMonitor })))
 const AutoGroup = lazy(() => import('./components/AutoGroup').then(m => ({ default: m.AutoGroup })))
 const Tokens = lazy(() => import('./components/Tokens').then(m => ({ default: m.Tokens })))
+const AbuseBroadcast = lazy(() => import('./components/AbuseBroadcast').then(m => ({ default: m.AbuseBroadcast })))
 
 // Valid tabs
-const validTabs: TabType[] = ['dashboard', 'topups', 'risk', 'ip-analysis', 'analytics', 'model-status', 'users', 'tokens', 'auto-group', 'generator', 'redemptions', 'history']
+const validTabs: TabType[] = ['dashboard', 'topups', 'risk', 'abuse-broadcast', 'ip-analysis', 'analytics', 'model-status', 'users', 'tokens', 'auto-group', 'generator', 'redemptions', 'history']
 
 // Get initial tab from URL pathname (supports sub-routes like /risk/ip)
 const getInitialTab = (): TabType => {
@@ -152,6 +153,8 @@ function App() {
         return <TopUps />
       case 'risk':
         return <RealtimeRanking />
+      case 'abuse-broadcast':
+        return <AbuseBroadcast />
       case 'ip-analysis':
         return <IPAnalysis />
       case 'analytics':

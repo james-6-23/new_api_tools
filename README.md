@@ -94,6 +94,25 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 | **Docker配置** | | |
 | `NEWAPI_NETWORK` | NewAPI 所在的 Docker 网络名称 | `new-api_default` |
 
+### 联合违规广播接入
+
+广播站独立部署在 `newapi-tool-AbuseHub/` 目录，默认使用 SQLite 和 `8888` 端口。Hub 管理员在 `/admin/` 创建命名密钥后，会得到一次性 `Secret`；密钥名称就是 NewAPI-Tool 侧的节点名称。
+
+NewAPI-Tool 接入流程：
+
+1. 进入前端「联合违规广播 → 接入状态」页，填写 Hub URL（推荐使用 `/v1/live` 后缀）、节点名称、密钥、拉取间隔，并勾选「启用拉取」后保存。
+2. 配置变更立即生效，不需要重启后端进程。
+3. 点击「连接 Hub」，Hub 收到心跳后会把该密钥激活为已连接节点。
+
+之后 NewAPI-Tool 会定时拉取 `GET /v1/reports`，并把收到的通报写入本地 SQLite 缓存（`DATA_DIR/abuse-broadcast.db`），不修改 NewAPI 原有表结构。管理 API：
+
+- `GET  /api/abuse-broadcast/status`
+- `GET  /api/abuse-broadcast/settings`
+- `PUT  /api/abuse-broadcast/settings`
+- `POST /api/abuse-broadcast/connect`
+- `POST /api/abuse-broadcast/sync`
+- `GET  /api/abuse-broadcast/reports`
+
 ## 🛠️ 本地开发
 
 ### 后端 (Go)
