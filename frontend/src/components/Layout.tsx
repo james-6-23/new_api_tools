@@ -1,12 +1,12 @@
 import { ReactNode, useCallback, useEffect, useState, useRef } from 'react'
-import { LayoutDashboard, Plus, Ticket, Clock, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell } from 'lucide-react'
+import { LayoutDashboard, Ticket, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { cn } from '../lib/utils'
 import { useAuth } from '../contexts/AuthContext'
 import { apiFetch, createAuthHeaders } from '../lib/api'
 
-export type TabType = 'dashboard' | 'risk' | 'abuse-broadcast' | 'ip-analysis' | 'generator' | 'redemptions' | 'history' | 'topups' | 'analytics' | 'model-status' | 'users' | 'auto-group' | 'tokens'
+export type TabType = 'dashboard' | 'risk' | 'abuse-broadcast' | 'ip-analysis' | 'redemptions' | 'topups' | 'analytics' | 'model-status' | 'users' | 'auto-group' | 'tokens'
 
 interface DbStatus {
   connected: boolean
@@ -33,9 +33,7 @@ const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'users', label: '用户管理', icon: Users },
   { id: 'tokens', label: '令牌管理', icon: Key },
   { id: 'auto-group', label: '自动分组', icon: UserPlus },
-  { id: 'generator', label: '生成器', icon: Plus },
-  { id: 'redemptions', label: '兑换码', icon: Ticket },
-  { id: 'history', label: '生成记录', icon: Clock },
+  { id: 'redemptions', label: '兑换码管理', icon: Ticket },
 ]
 
 export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutProps) {
