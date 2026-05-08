@@ -21,7 +21,7 @@ import (
 	"github.com/new-api-tools/backend/internal/config"
 	"github.com/new-api-tools/backend/internal/database"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -1007,7 +1007,7 @@ func (s *AbuseBroadcastService) openStore() (*sql.DB, error) {
 			return nil, err
 		}
 	}
-	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -1576,7 +1576,7 @@ func sqliteDSN(path string) string {
 	if path == ":memory:" || strings.Contains(path, "?") {
 		return path
 	}
-	return path + "?_busy_timeout=5000&_journal_mode=WAL"
+	return path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 }
 
 func countAbuseRows(ctx context.Context, db *sql.DB, table string) int64 {

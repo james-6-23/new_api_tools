@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"github.com/new-api-tools/backend/internal/database"
 )
 
@@ -14,7 +14,7 @@ import (
 // (real query execution).
 func installSQLiteForTests(t *testing.T) *sqlx.DB {
 	t.Helper()
-	db, err := sqlx.Connect("sqlite3", ":memory:")
+	db, err := sqlx.Connect("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
