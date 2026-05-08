@@ -32,12 +32,12 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        // Mobile (< sm): edge-to-edge sheet hugging viewport. Desktop (sm+): centered modal.
+        // Desktop-first centering avoids the mobile sheet offsets leaking into wide viewports.
         "fixed z-50 grid gap-4 border border-border/50 bg-background/95 backdrop-blur-xl supports-[backdrop-filter]:bg-background/80 shadow-2xl duration-200 overflow-y-auto custom-scrollbar data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        // Mobile sheet
-        "inset-x-0 bottom-0 max-h-[92vh] rounded-t-2xl p-4",
         // Desktop modal
-        "sm:left-[50%] sm:top-[50%] sm:bottom-auto sm:inset-x-auto sm:translate-x-[-50%] sm:translate-y-[-50%] sm:w-full sm:max-w-lg sm:max-h-[85vh] sm:rounded-2xl sm:p-6 sm:data-[state=closed]:slide-out-to-left-1/2 sm:data-[state=closed]:slide-out-to-top-[48%] sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]",
+        "left-1/2 top-1/2 w-[calc(100vw-2rem)] max-w-lg max-h-[85vh] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 sm:data-[state=closed]:slide-out-to-left-1/2 sm:data-[state=closed]:slide-out-to-top-[48%] sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]",
+        // Mobile (< sm): edge-to-edge sheet hugging viewport.
+        "max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:bottom-0 max-sm:w-full max-sm:max-w-none max-sm:max-h-[92vh] max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:p-4 max-sm:data-[state=closed]:slide-out-to-bottom-1/2 max-sm:data-[state=open]:slide-in-from-bottom-1/2",
         className
       )}
       {...props}
