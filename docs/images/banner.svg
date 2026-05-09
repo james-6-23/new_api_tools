@@ -1,0 +1,60 @@
+<svg width="1440" height="420" viewBox="0 0 1440 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">newapi-tool banner</title>
+  <desc id="desc">A clean dark banner for NewAPI-Tool, a zero-intrusion management layer for NewAPI.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1440" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111F"/>
+      <stop offset="0.58" stop-color="#0A1827"/>
+      <stop offset="1" stop-color="#102017"/>
+    </linearGradient>
+    <linearGradient id="titleGradient" x1="384" y1="120" x2="1058" y2="215" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="0.55" stop-color="#A7F3D0"/>
+      <stop offset="1" stop-color="#FDE68A"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="354" y1="274" x2="1086" y2="274" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="0.56" stop-color="#34D399"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <radialGradient id="leftGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(380 172) rotate(25) scale(420 210)">
+      <stop stop-color="#22D3EE" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rightGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1020 238) rotate(155) scale(420 210)">
+      <stop stop-color="#F59E0B" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#F59E0B" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" stroke="#CBD5E1" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+    <filter id="titleShadow" x="260" y="74" width="920" height="170" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="24" flood-color="#22D3EE" flood-opacity="0.13"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="420" rx="32" fill="url(#bg)"/>
+  <rect width="1440" height="420" rx="32" fill="url(#grid)"/>
+  <rect width="1440" height="420" rx="32" fill="url(#leftGlow)"/>
+  <rect width="1440" height="420" rx="32" fill="url(#rightGlow)"/>
+
+  <rect x="72" y="72" width="1296" height="276" rx="24" stroke="#CBD5E1" stroke-opacity="0.08"/>
+  <path d="M354 274H1086" stroke="url(#rule)" stroke-width="4" stroke-linecap="round"/>
+
+  <g filter="url(#titleShadow)">
+    <text x="720" y="194" fill="url(#titleGradient)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="104" font-weight="900" text-anchor="middle" letter-spacing="-1.5">newapi-tool</text>
+  </g>
+  <text x="720" y="242" fill="#D7DEE9" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="24" font-weight="800" text-anchor="middle" letter-spacing="7">ZERO-INTRUSION NEWAPI MANAGEMENT LAYER</text>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="800" letter-spacing="1.5">
+    <rect x="486" y="303" width="122" height="34" rx="17" fill="#082F49" stroke="#38BDF8" stroke-opacity="0.42"/>
+    <text x="547" y="325" fill="#BAE6FD" text-anchor="middle">NEWAPI</text>
+    <rect x="626" y="303" width="94" height="34" rx="17" fill="#064E3B" stroke="#5EEAD4" stroke-opacity="0.38"/>
+    <text x="673" y="325" fill="#CCFBF1" text-anchor="middle">AUDIT</text>
+    <rect x="738" y="303" width="96" height="34" rx="17" fill="#422006" stroke="#FBBF24" stroke-opacity="0.35"/>
+    <text x="786" y="325" fill="#FEF3C7" text-anchor="middle">OPS</text>
+  </g>
+
+  <text x="136" y="326" fill="#94A3B8" fill-opacity="0.7" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700" letter-spacing="2">POSTGRESQL / MYSQL</text>
+  <text x="1160" y="326" fill="#94A3B8" fill-opacity="0.7" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700" letter-spacing="2">DOCKER READY</text>
+</svg>
