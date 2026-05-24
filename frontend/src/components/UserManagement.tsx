@@ -45,6 +45,8 @@ import {
 import { StatCard } from './StatCard'
 import { cn } from '../lib/utils'
 import { UserAnalysisDialog } from './UserAnalysisDialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
+import { AffiliateStats } from './AffiliateStats'
 
 
 
@@ -97,6 +99,7 @@ export function UserManagement() {
   const { token } = useAuth()
   const { showToast } = useToast()
 
+  const [activeTab, setActiveTab] = useState<'list' | 'affiliate'>('list')
   const [stats, setStats] = useState<ActivityStats | null>(null)
   const [users, setUsers] = useState<UserInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -703,6 +706,22 @@ export function UserManagement() {
           刷新
         </Button>
       </div>
+
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'list' | 'affiliate')} className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="list" className="gap-2">
+            <Users className="h-4 w-4" />
+            用户列表
+          </TabsTrigger>
+          <TabsTrigger value="affiliate" className="gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            邀请返利统计
+          </TabsTrigger>
+        </TabsList>
+
+        {/* forceMount + data-state hide：保留列表 tab 的状态/筛选/分页，
+            切到邀请返利统计再切回不会触发重新拉数据。 */}
+        <TabsContent value="list" forceMount className="data-[state=inactive]:hidden mt-6 space-y-6">
 
       {/* Activity Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1400,6 +1419,12 @@ export function UserManagement() {
           )}
         />
       )}
+        </TabsContent>
+
+        <TabsContent value="affiliate" className="mt-6">
+          <AffiliateStats />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

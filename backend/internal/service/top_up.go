@@ -59,6 +59,7 @@ type ListTopUpParams struct {
 	Page            int    `json:"page"`
 	PageSize        int    `json:"page_size"`
 	UserID          *int64 `json:"user_id"`
+	InviterID       *int64 `json:"inviter_id"`
 	Status          string `json:"status"`
 	PaymentMethod   string `json:"payment_method"`
 	PaymentProvider string `json:"payment_provider"`
@@ -202,6 +203,12 @@ func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 		argIdx++
 	}
 
+	if params.InviterID != nil {
+		where = append(where, fmt.Sprintf("u.inviter_id = %s", db.Placeholder(argIdx)))
+		args = append(args, *params.InviterID)
+		argIdx++
+	}
+
 	if params.Status != "" {
 		switch params.Status {
 		case "success", "failed", "pending", "expired", "unknown":
@@ -272,7 +279,7 @@ func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
 	whereSQL, args, argIdx := buildTopUpWhere(params)
 
 	// Count
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t WHERE %s", whereSQL)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t LEFT JOIN users u ON t.user_id = u.id WHERE %s", whereSQL)
 	var total int64
 	if err := db.DB.Get(&total, countSQL, args...); err != nil {
 		return nil, fmt.Errorf("count query failed: %w", err)
@@ -324,7 +331,7 @@ func ListTopUpRecords(params ListTopUpParams) (*PaginatedTopUps, error) {
 func CountTopUps(params ListTopUpParams) (int64, error) {
 	db := database.Get()
 	whereSQL, args, _ := buildTopUpWhere(params)
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t WHERE %s", whereSQL)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM top_ups t LEFT JOIN users u ON t.user_id = u.id WHERE %s", whereSQL)
 	var total int64
 	if err := db.DB.Get(&total, countSQL, args...); err != nil {
 		return 0, fmt.Errorf("count query failed: %w", err)

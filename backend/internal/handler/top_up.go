@@ -69,6 +69,14 @@ func ListTopUps(c *gin.Context) {
 		}
 	}
 
+	// Parse optional inviter_id (用于邀请返利统计行展开)
+	if inviterIDStr := c.Query("inviter_id"); inviterIDStr != "" {
+		iid, err := strconv.ParseInt(inviterIDStr, 10, 64)
+		if err == nil {
+			params.InviterID = &iid
+		}
+	}
+
 	result, err := service.ListTopUpRecords(params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
