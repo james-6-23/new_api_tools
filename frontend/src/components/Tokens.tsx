@@ -68,6 +68,7 @@ export function Tokens() {
   const [totalPages, setTotalPages] = useState(1)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [nameSearch, setNameSearch] = useState('')
+  const [keySearch, setKeySearch] = useState('')
   const [groupFilter, setGroupFilter] = useState('')
   const [availableGroups, setAvailableGroups] = useState<TokenGroup[]>([])
   const [refreshing, setRefreshing] = useState(false)
@@ -107,6 +108,7 @@ export function Tokens() {
       const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() })
       if (statusFilter) params.append('status', statusFilter)
       if (nameSearch) params.append('name', nameSearch)
+      if (keySearch.trim()) params.append('key', keySearch.trim())
       if (groupFilter) params.append('group', groupFilter)
 
       const response = await fetch(`${apiUrl}/api/tokens?${params.toString()}`, { headers: getAuthHeaders() })
@@ -123,12 +125,12 @@ export function Tokens() {
       showToast('error', '网络错误，请重试')
       console.error('Failed to fetch tokens:', error)
     } finally { setLoading(false) }
-  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, nameSearch, groupFilter, showToast])
+  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, nameSearch, keySearch, groupFilter, showToast])
 
   useEffect(() => { fetchTokens() }, [fetchTokens])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
   useEffect(() => { fetchGroups() }, [fetchGroups])
-  useEffect(() => { setPage(1) }, [statusFilter, nameSearch, groupFilter])
+  useEffect(() => { setPage(1) }, [statusFilter, nameSearch, keySearch, groupFilter])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -220,6 +222,32 @@ export function Tokens() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/* 令牌 Key 精确查找：粘贴完整 key（含或不含 sk- 前缀）即可定位所属用户 */}
+          <div className="mb-4 space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">令牌 Key 精确查找</label>
+            <div className="relative">
+              <Key className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                value={keySearch}
+                onChange={(e) => setKeySearch(e.target.value)}
+                placeholder="粘贴完整令牌 Key（如 sk-xxxx）精确查找所属用户..."
+                className="pl-9 pr-9 font-mono"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              {keySearch && (
+                <button
+                  type="button"
+                  onClick={() => setKeySearch('')}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  title="清除"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">名称搜索</label>
@@ -255,7 +283,7 @@ export function Tokens() {
               </Select>
             </div>
             <div className="flex items-end justify-end">
-              <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setNameSearch(''); setGroupFilter('') }} className="text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setNameSearch(''); setKeySearch(''); setGroupFilter('') }} className="text-muted-foreground hover:text-foreground">
                 重置筛选
               </Button>
             </div>

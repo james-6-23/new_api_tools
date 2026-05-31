@@ -42,6 +42,7 @@ type TokenListParams struct {
 	PageSize int
 	Status   string // "active", "disabled", "expired", ""
 	Name     string
+	Key      string // exact token key match (sk- prefix is stripped)
 	UserID   int64
 	Group    string
 	Expired  string // "yes", "no", ""
@@ -103,6 +104,13 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 	if params.Name != "" {
 		conditions = append(conditions, "t.name LIKE ?")
 		args = append(args, "%"+params.Name+"%")
+	}
+	// Exact token-key lookup. NewAPI stores the key without the "sk-" prefix,
+	// so strip it (and any surrounding whitespace) before matching the unique
+	// idx_tokens_key index.
+	if key := strings.TrimPrefix(strings.TrimSpace(params.Key), "sk-"); key != "" {
+		conditions = append(conditions, fmt.Sprintf("t.%s = ?", keyCol))
+		args = append(args, key)
 	}
 	if params.UserID > 0 {
 		conditions = append(conditions, "t.user_id = ?")

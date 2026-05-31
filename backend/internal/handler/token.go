@@ -29,6 +29,7 @@ func ListTokens(c *gin.Context) {
 		PageSize: pageSize,
 		Status:   c.Query("status"),
 		Name:     c.Query("name"),
+		Key:      c.Query("key"),
 		UserID:   userID,
 		Group:    c.Query("group"),
 		Expired:  c.Query("expired"),
