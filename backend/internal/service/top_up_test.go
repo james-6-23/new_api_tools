@@ -74,13 +74,48 @@ func TestBuildTopUpWhere_FilterCombination(t *testing.T) {
 	for _, frag := range []string{
 		"t.user_id = ?",
 		"t.payment_method = ?",
-		"t.trade_no LIKE ?",
+		"t.trade_no = ?", // "ABC" is a complete trade_no → exact match on the unique index
 		"t.create_time >= ?",
 		"t.create_time <= ?",
 	} {
 		if !strings.Contains(where, frag) {
 			t.Errorf("missing fragment %q in: %s", frag, where)
 		}
+	}
+}
+
+func TestBuildTopUpWhere_TradeNoSmartMatch(t *testing.T) {
+	installSQLiteForTests(t)
+
+	// Complete trade_no (no wildcard / whitespace) → exact equality, hits the
+	// unique top_ups_trade_no_key index.
+	where, args, _ := buildTopUpWhere(ListTopUpParams{TradeNo: "2026053112345678"})
+	if !strings.Contains(where, "t.trade_no = ?") {
+		t.Errorf("complete trade_no should use exact match, got: %s", where)
+	}
+	if len(args) != 1 || args[0] != "2026053112345678" {
+		t.Errorf("exact match arg should be the raw trade_no, got: %v", args)
+	}
+
+	// Fragment (contains a space) → LIKE substring match.
+	where, args, _ = buildTopUpWhere(ListTopUpParams{TradeNo: "2026 053"})
+	if !strings.Contains(where, "t.trade_no LIKE ?") {
+		t.Errorf("fragment trade_no should use LIKE, got: %s", where)
+	}
+	if len(args) != 1 || args[0] != "%2026 053%" {
+		t.Errorf("LIKE arg should be wrapped in %%, got: %v", args)
+	}
+}
+
+func TestBuildTopUpWhere_UsernameFuzzyMatch(t *testing.T) {
+	installSQLiteForTests(t)
+
+	where, args, _ := buildTopUpWhere(ListTopUpParams{Username: "alice"})
+	if !strings.Contains(where, "u.username LIKE ?") {
+		t.Errorf("username filter should LIKE-match against the joined users table, got: %s", where)
+	}
+	if len(args) != 1 || args[0] != "%alice%" {
+		t.Errorf("username LIKE arg should be wrapped in %%, got: %v", args)
 	}
 }
 

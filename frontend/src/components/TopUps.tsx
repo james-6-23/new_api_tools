@@ -97,6 +97,7 @@ export function TopUps() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('')
   const [paymentProviderFilter, setPaymentProviderFilter] = useState('')
   const [tradeNoSearch, setTradeNoSearch] = useState('')
+  const [usernameSearch, setUsernameSearch] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -147,6 +148,7 @@ export function TopUps() {
       if (paymentMethodFilter) params.append('payment_method', paymentMethodFilter)
       if (paymentProviderFilter) params.append('payment_provider', paymentProviderFilter)
       if (tradeNoSearch) params.append('trade_no', tradeNoSearch)
+      if (usernameSearch) params.append('username', usernameSearch)
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
 
@@ -162,11 +164,11 @@ export function TopUps() {
       showToast('error', '网络错误，请重试')
       console.error('Failed to fetch records:', error)
     } finally { setLoading(false) }
-  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, startDate, endDate, showToast])
+  }, [apiUrl, getAuthHeaders, page, pageSize, statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, usernameSearch, startDate, endDate, showToast])
 
   useEffect(() => { fetchRecords() }, [fetchRecords])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
-  useEffect(() => { setPage(1) }, [statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, startDate, endDate])
+  useEffect(() => { setPage(1) }, [statusFilter, paymentMethodFilter, paymentProviderFilter, tradeNoSearch, usernameSearch, startDate, endDate])
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -186,6 +188,7 @@ export function TopUps() {
       if (paymentMethodFilter) params.append('payment_method', paymentMethodFilter)
       if (paymentProviderFilter) params.append('payment_provider', paymentProviderFilter)
       if (tradeNoSearch) params.append('trade_no', tradeNoSearch)
+      if (usernameSearch) params.append('username', usernameSearch)
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
 
@@ -350,7 +353,7 @@ export function TopUps() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">状态</label>
                   <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
@@ -388,8 +391,25 @@ export function TopUps() {
                       type="text"
                       value={tradeNoSearch}
                       onChange={(e) => setTradeNoSearch(e.target.value)}
-                      placeholder="输入交易号..."
+                      placeholder="完整账单号精确查 / 片段模糊查"
+                      className="pl-9 font-mono"
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1 lg:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">用户名搜索</label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      value={usernameSearch}
+                      onChange={(e) => setUsernameSearch(e.target.value)}
+                      placeholder="按用户名查充值/账单号..."
                       className="pl-9"
+                      spellCheck={false}
+                      autoComplete="off"
                     />
                   </div>
                 </div>
@@ -409,7 +429,7 @@ export function TopUps() {
                 </div>
               </div>
               <div className="mt-4 flex justify-end">
-                <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setPaymentMethodFilter(''); setPaymentProviderFilter(''); setTradeNoSearch(''); setStartDate(''); setEndDate('') }} className="text-muted-foreground hover:text-foreground">
+                <Button variant="ghost" size="sm" onClick={() => { setStatusFilter(''); setPaymentMethodFilter(''); setPaymentProviderFilter(''); setTradeNoSearch(''); setUsernameSearch(''); setStartDate(''); setEndDate('') }} className="text-muted-foreground hover:text-foreground">
                   重置筛选
                 </Button>
               </div>

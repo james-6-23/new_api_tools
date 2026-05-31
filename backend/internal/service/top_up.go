@@ -59,6 +59,7 @@ type ListTopUpParams struct {
 	Page            int    `json:"page"`
 	PageSize        int    `json:"page_size"`
 	UserID          *int64 `json:"user_id"`
+	Username        string `json:"username"`
 	InviterID       *int64 `json:"inviter_id"`
 	Status          string `json:"status"`
 	PaymentMethod   string `json:"payment_method"`
@@ -116,6 +117,15 @@ func topUpCompletionSeconds(createTime, completeTime int64) int64 {
 		return 0
 	}
 	return completeTime - createTime
+}
+
+// isCompleteTradeNo reports whether the input looks like a full trade number
+// rather than a search fragment. A complete trade_no has no LIKE wildcards
+// (% / _) and no internal whitespace — in that case we match it with an exact
+// equality against the unique top_ups_trade_no_key index. Anything else falls
+// back to a substring LIKE.
+func isCompleteTradeNo(s string) bool {
+	return !strings.ContainsAny(s, "%_ \t")
 }
 
 func enrichTopUpRecord(rec *TopUpRecord, now int64, pendingHours int) {
@@ -209,6 +219,12 @@ func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 		argIdx++
 	}
 
+	if uname := strings.TrimSpace(params.Username); uname != "" {
+		where = append(where, fmt.Sprintf("u.username LIKE %s", db.Placeholder(argIdx)))
+		args = append(args, "%"+uname+"%")
+		argIdx++
+	}
+
 	if params.Status != "" {
 		switch params.Status {
 		case "success", "failed", "pending", "expired", "unknown":
@@ -234,9 +250,16 @@ func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 		}
 	}
 
-	if params.TradeNo != "" {
-		where = append(where, fmt.Sprintf("t.trade_no LIKE %s", db.Placeholder(argIdx)))
-		args = append(args, "%"+params.TradeNo+"%")
+	if tradeNo := strings.TrimSpace(params.TradeNo); tradeNo != "" {
+		// 账单号智能匹配：粘贴完整交易号（无空格、无 LIKE 通配符）时走精确等值，
+		// 命中唯一索引 top_ups_trade_no_key 做秒查；否则按片段 LIKE 模糊匹配。
+		if isCompleteTradeNo(tradeNo) {
+			where = append(where, fmt.Sprintf("t.trade_no = %s", db.Placeholder(argIdx)))
+			args = append(args, tradeNo)
+		} else {
+			where = append(where, fmt.Sprintf("t.trade_no LIKE %s", db.Placeholder(argIdx)))
+			args = append(args, "%"+tradeNo+"%")
+		}
 		argIdx++
 	}
 
