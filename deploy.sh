@@ -190,6 +190,33 @@ get_container_ipv4() {
   docker inspect -f "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$container" 2>/dev/null || true
 }
 
+# 判断一个字符串是否是 IPv4 字面量
+is_ipv4_literal() {
+  [[ "${1:-}" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
+}
+
+# 给定一个 IPv4，在所有运行中的容器里反查“谁在某个 docker 网络上持有这个 IP”。
+# 命中则输出 "<网络名>\t<容器名>"（取第一个匹配），否则无输出。
+# 用于：NewAPI 是 host 模式、但数据库其实是另一条 bridge 网络上的容器（如 1Panel 托管的 PG），
+#       DSN 里硬编码了该容器的 bridge IP（172.x.x.x）——此时 newapi-tools 需要挂进那条网络。
+find_container_by_network_ip() {
+  local target_ip="${1:-}"
+  [[ -z "$target_ip" ]] && return 0
+  local cid name net ip
+  while IFS= read -r cid; do
+    [[ -z "$cid" ]] && continue
+    name="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
+    while IFS=$'\t' read -r net ip; do
+      [[ -z "$net" ]] && continue
+      if [[ "$ip" == "$target_ip" ]]; then
+        printf '%s\t%s\n' "$net" "$name"
+        return 0
+      fi
+    done < <(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\t"}}{{$v.IPAddress}}{{"\n"}}{{end}}' "$cid" 2>/dev/null)
+  done < <(docker ps -q)
+  return 0
+}
+
 #######################################
 # 检测 NewAPI 环境
 #######################################
@@ -227,18 +254,14 @@ detect_environment() {
 
   if [[ "$network_mode" == "host" ]]; then
     # ===== Host 网络模式 =====
+    # 注意：NewAPI 用 host 网络，不代表数据库也在宿主机上。
+    # 常见反例：数据库是 1Panel / 另一套 compose 托管的容器，挂在某条 bridge 网络上，
+    # DSN 里写的是它的 bridge IP（172.x）。这种 IP 只有 host 网络的 NewAPI 碰得到，
+    # bridge 里的 newapi-tools 跨不过去。真正的网络方案要等解析完 DSN host 再定（见下方）。
     log_warn "检测到 NewAPI 使用 host 网络模式"
-    log_info "newapi-tools 仍跑在 bridge 网络里，通过 host.docker.internal 访问宿主机数据库"
     USE_HOST_MODE=true
     NEWAPI_NETWORK=""
     ORIGINAL_NETWORK="host"
-
-    # 加载 host 模式 overlay（去掉 external newapi-network 依赖）
-    if [[ -f "$COMPOSE_HOST_FILE" ]]; then
-      COMPOSE_FILES=("-f" "$COMPOSE_FILE" "-f" "$COMPOSE_HOST_FILE")
-    else
-      log_warn "未找到 $COMPOSE_HOST_FILE，host 模式可能启动失败"
-    fi
   else
     NEWAPI_NETWORK="${NEWAPI_NETWORK:-}"
     if [[ -z "$NEWAPI_NETWORK" ]]; then
@@ -285,10 +308,32 @@ detect_environment() {
     [[ -n "$detected_dsn" ]] || die "host 模式下必须能从 NewAPI 容器读取 SQL_DSN，但未检测到"
     [[ -n "$DB_ENGINE" ]] || die "无法从 DSN 识别数据库引擎: $detected_dsn"
 
-    # 把 127.0.0.1 / localhost 替换为宿主机网关
+    # ===== 决定 newapi-tools 怎么连到这个数据库 =====
+    # 三种情形：
+    #  (a) DSN host 是 127.0.0.1/localhost → 数据库真在宿主机回环上，用 host.docker.internal。
+    #  (b) DSN host 是某条 bridge 网络上某容器的 IP（如 1Panel 托管的 PG）→ 把 newapi-tools
+    #      挂进那条网络，并把 host 改写成容器名（同网络 Docker DNS 可解析，且重启不变 IP）。
+    #  (c) 其它（外部 DB、真实 LAN IP、域名）→ 原样保留，靠 extra_hosts / 宿主路由可达。
     if [[ "$DB_DNS" == "127.0.0.1" || "$DB_DNS" == "localhost" || "$DB_DNS" == "::1" ]]; then
       DB_DNS="host.docker.internal"
-      log_info "数据库地址改写: 127.0.0.1 → host.docker.internal"
+      log_info "数据库地址改写: 127.0.0.1 → host.docker.internal（数据库在宿主机回环上）"
+    elif is_ipv4_literal "$DB_DNS"; then
+      local _hit _hit_net _hit_name
+      _hit="$(find_container_by_network_ip "$DB_DNS")"
+      _hit_net="$(printf '%s' "$_hit" | cut -f1)"
+      _hit_name="$(printf '%s' "$_hit" | cut -f2)"
+      if [[ -n "$_hit_net" && -n "$_hit_name" ]]; then
+        NEWAPI_NETWORK="$_hit_net"
+        log_warn "数据库 ${DB_DNS} 是容器 '${_hit_name}' 在 bridge 网络 '${_hit_net}' 上的 IP"
+        log_info "将把 newapi-tools 接入网络 '${_hit_net}'，并用容器名连接（IP 重启会变，容器名不会）"
+        DB_DNS="$_hit_name"
+        USE_HOST_MODE=false   # 不再走 host overlay：我们要挂进 external 网络，而非脱离它
+        ORIGINAL_NETWORK="$_hit_net"
+      else
+        log_warn "数据库地址 ${DB_DNS} 是 IP 但不属于任何已知 docker 网络容器，按外部地址原样使用"
+      fi
+    else
+      log_info "数据库地址为主机名/外部地址，原样使用: ${DB_DNS}"
     fi
 
     DB_USER="$(extract_dsn_user "$detected_dsn")"
@@ -306,7 +351,20 @@ detect_environment() {
       DB_NAME="${DB_NAME:-new-api}"
     fi
 
-    log_success "检测到数据库 (host 模式): $DB_ENGINE @ $DB_DNS:$DB_PORT/$DB_NAME"
+    if [[ "$USE_HOST_MODE" == "true" ]]; then
+      # 情形 (a)/(c)：数据库走宿主机（host.docker.internal）或外部地址，
+      # newapi-tools 无需任何 external 网络 → 加载 host overlay 去掉 newapi-network 依赖。
+      if [[ -f "$COMPOSE_HOST_FILE" ]]; then
+        COMPOSE_FILES=("-f" "$COMPOSE_FILE" "-f" "$COMPOSE_HOST_FILE")
+      else
+        log_warn "未找到 $COMPOSE_HOST_FILE，host 模式可能启动失败"
+      fi
+      log_success "检测到数据库 (host 模式): $DB_ENGINE @ $DB_DNS:$DB_PORT/$DB_NAME"
+    else
+      # 情形 (b)：数据库在另一条 bridge 网络上，newapi-tools 已改为挂进该网络（NEWAPI_NETWORK）。
+      # 用主 compose（newapi-network=external 指向该网络），不加载 host overlay。
+      log_success "检测到数据库 (跨网 bridge): $DB_ENGINE @ $DB_DNS:$DB_PORT/$DB_NAME (网络: $NEWAPI_NETWORK)"
+    fi
     return 0
   fi
 
