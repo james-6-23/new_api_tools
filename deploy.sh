@@ -132,13 +132,15 @@ extract_dsn_dbname() {
 
 detect_newapi_container() {
   local found=""
-  found="$(docker ps --format '{{.Names}}' | awk '$0=="new-api"{print; exit}')"
+  # 按容器名匹配：new-api / new-api-master / new-api-my ...（不含 newapi-tools）
+  found="$(docker ps --format '{{.Names}}' | awk 'tolower($0) ~ /(^|[-_])new-api([-_]|$)/ {print; exit}')"
   if [[ -n "$found" ]]; then echo "$found"; return 0; fi
 
   found="$(docker ps -q --filter 'label=com.docker.compose.service=new-api' | head -n 1 || true)"
   if [[ -n "$found" ]]; then echo "$found"; return 0; fi
 
-  found="$(docker ps --format '{{.ID}}\t{{.Image}}' | awk 'tolower($2) ~ /(^|\/)new-api(:|$)/ {print $1; exit}')"
+  # 按镜像名匹配：允许 fork 后缀（new-api-my:latest 也能命中）
+  found="$(docker ps --format '{{.ID}}\t{{.Image}}' | awk 'tolower($2) ~ /(^|\/)new-api([-_:]|$)/ {print $1; exit}')"
   if [[ -n "$found" ]]; then echo "$found"; return 0; fi
 
   return 1
@@ -197,7 +199,7 @@ detect_environment() {
   # 检测 NewAPI 容器
   NEWAPI_CONTAINER="${NEWAPI_CONTAINER:-}"
   if [[ -z "$NEWAPI_CONTAINER" ]]; then
-    NEWAPI_CONTAINER="$(detect_newapi_container)" || die "找不到运行中的 NewAPI 容器 (期望容器名为 'new-api')"
+    NEWAPI_CONTAINER="$(detect_newapi_container)" || die "找不到运行中的 NewAPI 容器（可设置环境变量 NEWAPI_CONTAINER=<容器名或ID> 手动指定）"
   fi
   log_success "找到 NewAPI 容器: $NEWAPI_CONTAINER"
 

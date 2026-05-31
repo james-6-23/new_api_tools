@@ -106,22 +106,45 @@ check_requirements() {
 }
 
 #######################################
+# 查找运行中的 NewAPI 容器，输出容器名（找不到则输出空并返回 1）。
+# 兼容自定义命名 / fork 镜像：容器名或镜像名包含 new-api 词元即可
+#   （例如 new-api-master、ghcr.io/xxx/new-api-my:latest）。
+# 注意不会误伤本项目自身容器 newapi-tools（无连字符，不含 new-api 子串）。
+# 可用环境变量 NEWAPI_CONTAINER=<容器名或ID> 强制指定，跳过自动检测。
+#######################################
+find_newapi_container() {
+  # 1) 环境变量显式指定，优先级最高
+  if [[ -n "${NEWAPI_CONTAINER:-}" ]]; then
+    echo "$NEWAPI_CONTAINER"
+    return 0
+  fi
+
+  local found=""
+
+  # 2) 按容器名匹配：new-api / new-api-master / new-api-my ...
+  found=$(docker ps --format '{{.Names}}' | awk 'tolower($0) ~ /(^|[-_])new-api([-_]|$)/ {print; exit}')
+  [[ -n "$found" ]] && { echo "$found"; return 0; }
+
+  # 3) 按 compose service 标签匹配
+  found=$(docker ps --filter 'label=com.docker.compose.service=new-api' --format '{{.Names}}' | head -n 1)
+  [[ -n "$found" ]] && { echo "$found"; return 0; }
+
+  # 4) 按镜像名匹配：允许 fork 后缀（new-api-my:latest 也能命中）
+  found=$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' 'tolower($2) ~ /(^|\/)new-api([-_:]|$)/ {print $1; exit}')
+  [[ -n "$found" ]] && { echo "$found"; return 0; }
+
+  return 1
+}
+
+#######################################
 # 检测 NewAPI 容器和目录
 #######################################
 detect_newapi_location() {
   log_info "正在检测 NewAPI 安装位置..."
 
-  # 查找 new-api 容器
+  # 查找 new-api 容器（兼容自定义命名 / fork 镜像，详见 find_newapi_container）
   local container_id
-  container_id=$(docker ps --format '{{.ID}}\t{{.Names}}' | awk '$2=="new-api"{print $1; exit}')
-
-  if [[ -z "$container_id" ]]; then
-    container_id=$(docker ps -q --filter 'label=com.docker.compose.service=new-api' | head -n 1)
-  fi
-
-  if [[ -z "$container_id" ]]; then
-    container_id=$(docker ps --format '{{.ID}}\t{{.Image}}' | awk 'tolower($2) ~ /(^|\/)new-api(:|$)/ {print $1; exit}')
-  fi
+  container_id=$(find_newapi_container || true)
 
   if [[ -z "$container_id" ]]; then
     log_warn "未找到运行中的 NewAPI 容器"
@@ -172,10 +195,9 @@ show_initial_env_detection() {
   echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
   echo ""
 
-  # 检测 NewAPI 容器信息
+  # 检测 NewAPI 容器信息（兼容自定义命名 / fork 镜像，详见 find_newapi_container）
   local newapi_container=""
-  newapi_container=$(docker ps --format '{{.Names}}' | awk '$0=="new-api"{print; exit}')
-  [[ -z "$newapi_container" ]] && newapi_container=$(docker ps --format '{{.ID}}\t{{.Image}}' | awk 'tolower($2) ~ /(^|\/)new-api(:|$)/ {print $1; exit}')
+  newapi_container=$(find_newapi_container || true)
 
   if [[ -n "$newapi_container" ]]; then
     echo -e "  ${GREEN}✓${NC} NewAPI 容器: ${GREEN}${newapi_container}${NC}"
