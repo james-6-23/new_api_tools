@@ -704,7 +704,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       setLoading(false)
       setRefreshing(false)
     }
-  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, timeWindow, isEmbed, showToast, groupFilter, tokenGroups, availableModels.length])
+  }, [apiUrl, getApiPrefix, getAuthHeaders, selectedModels, timeWindow, isEmbed, showToast, groupFilter, tokenGroups, availableModels?.length])
 
   // Initial load
   useEffect(() => {
@@ -981,7 +981,7 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
     saveSelectedModelsToBackend([])
   }
 
-  if (loading && modelStatuses.length === 0) {
+  if (loading && !modelStatuses?.length) {
     return (
       <div className={cn("space-y-6", isEmbed && "p-4")}>
         {/* Skeleton Header */}

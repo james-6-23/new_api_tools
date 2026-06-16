@@ -196,7 +196,7 @@ export function Dashboard() {
       )
       const data = await response.json()
 
-      if (data.success && data.data.length > 0) {
+      if (data.success && data.data?.length > 0) {
         const sortedByRequest = [...data.data].sort((a: any, b: any) => b.request_count - a.request_count)
         const sortedByQuota = [...data.data].sort((a: any, b: any) => b.quota_used - a.quota_used)
 
@@ -752,7 +752,7 @@ export function Dashboard() {
             <CardDescription>{getPeriodLabel()}内 Top 8 活跃模型</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden">
-            {models.length > 0 ? (
+            {models?.length > 0 ? (
               <div className="h-full flex flex-col justify-around min-h-[300px] py-2">
                 {models.map((model, index) => {
                   const maxRequests = getMaxValue(models.map(m => m.request_count))
