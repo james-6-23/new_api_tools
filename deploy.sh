@@ -217,6 +217,36 @@ find_container_by_network_ip() {
   return 0
 }
 
+# 给定一个宿主机端口，找出"把该端口发布到宿主机(0.0.0.0 / 127.0.0.1 / [::])"的容器，
+# 并返回它所在的【用户自定义】网络、容器名、以及容器内端口："<网络名>\t<容器名>\t<容器内端口>"。
+# 用于：NewAPI 是 host 模式、DSN host 写的是 127.0.0.1，但数据库其实是个容器、
+#       端口只发布在宿主机回环上（1Panel / 宝塔默认就这么发布）。这种情况下
+#       host.docker.internal(网关 IP) 连不通（docker-proxy 只绑回环），必须把
+#       newapi-tools 挂进该容器的网络、用容器名直连。
+# 注意：返回的是容器内端口（PortBindings 的 key 侧），而非宿主机映射端口——
+#       例如 127.0.0.1:5433->5432 时，同网络直连要用 5432 而不是 5433。
+# 排除默认 bridge / host / none：它们不支持按容器名做 DNS 解析。
+find_container_by_published_port() {
+  local target_port="${1:-}"
+  [[ -z "$target_port" ]] && return 0
+  local cid name net cport
+  while IFS= read -r cid; do
+    [[ -z "$cid" ]] && continue
+    # docker port 输出形如 "5432/tcp -> 127.0.0.1:5432"；取宿主机端口==target 的那条的容器内端口
+    cport="$(docker port "$cid" 2>/dev/null | awk -F' -> ' -v p="$target_port" '
+      { n=split($2,h,":"); if (h[n]==p) { split($1,c,"/"); print c[1]; exit } }')"
+    [[ -z "$cport" ]] && continue
+    name="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
+    while IFS= read -r net; do
+      [[ -z "$net" ]] && continue
+      case "$net" in bridge|host|none) continue ;; esac
+      printf '%s\t%s\t%s\n' "$net" "$name" "$cport"
+      return 0
+    done < <(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$cid" 2>/dev/null)
+  done < <(docker ps -q)
+  return 0
+}
+
 #######################################
 # 检测 NewAPI 环境
 #######################################
@@ -308,15 +338,51 @@ detect_environment() {
     [[ -n "$detected_dsn" ]] || die "host 模式下必须能从 NewAPI 容器读取 SQL_DSN，但未检测到"
     [[ -n "$DB_ENGINE" ]] || die "无法从 DSN 识别数据库引擎: $detected_dsn"
 
+    # 先解析出完整凭证（下面判断"怎么连"时要用到端口）
+    DB_USER="$(extract_dsn_user "$detected_dsn")"
+    DB_PASSWORD="$(extract_dsn_password "$detected_dsn")"
+    DB_PORT="$(extract_dsn_port "$detected_dsn")"
+    DB_NAME="$(extract_dsn_dbname "$detected_dsn")"
+
+    if [[ "$DB_ENGINE" == "postgres" ]]; then
+      DB_PORT="${DB_PORT:-5432}"
+      DB_USER="${DB_USER:-postgres}"
+      DB_NAME="${DB_NAME:-new-api}"
+    elif [[ "$DB_ENGINE" == "mysql" ]]; then
+      DB_PORT="${DB_PORT:-3306}"
+      DB_USER="${DB_USER:-root}"
+      DB_NAME="${DB_NAME:-new-api}"
+    fi
+
     # ===== 决定 newapi-tools 怎么连到这个数据库 =====
-    # 三种情形：
-    #  (a) DSN host 是 127.0.0.1/localhost → 数据库真在宿主机回环上，用 host.docker.internal。
-    #  (b) DSN host 是某条 bridge 网络上某容器的 IP（如 1Panel 托管的 PG）→ 把 newapi-tools
-    #      挂进那条网络，并把 host 改写成容器名（同网络 Docker DNS 可解析，且重启不变 IP）。
-    #  (c) 其它（外部 DB、真实 LAN IP、域名）→ 原样保留，靠 extra_hosts / 宿主路由可达。
+    # 四种情形：
+    #  (a1) DSN host 是 127.0.0.1/localhost，但数据库其实是个容器、端口只发布在宿主机
+    #       回环上（127.0.0.1:PORT，1Panel/宝塔最常见）→ host.docker.internal(网关)连不通，
+    #       把 newapi-tools 挂进该容器的网络、用容器名直连，端口改用容器内端口。
+    #  (a2) DSN host 是 127.0.0.1/localhost，数据库是宿主机裸装进程(或发布到 0.0.0.0)
+    #       → 用 host.docker.internal 走宿主机网关。
+    #  (b)  DSN host 是某条 bridge 网络上某容器的 IP → 挂进那条网络，host 改成容器名。
+    #  (c)  其它（外部 DB、真实 LAN IP、域名）→ 原样保留，靠 extra_hosts / 宿主路由可达。
     if [[ "$DB_DNS" == "127.0.0.1" || "$DB_DNS" == "localhost" || "$DB_DNS" == "::1" ]]; then
-      DB_DNS="host.docker.internal"
-      log_info "数据库地址改写: 127.0.0.1 → host.docker.internal（数据库在宿主机回环上）"
+      local _hit _hit_net _hit_name _hit_port
+      _hit="$(find_container_by_published_port "$DB_PORT")"
+      _hit_net="$(printf '%s' "$_hit" | cut -f1)"
+      _hit_name="$(printf '%s' "$_hit" | cut -f2)"
+      _hit_port="$(printf '%s' "$_hit" | cut -f3)"
+      if [[ -n "$_hit_net" && -n "$_hit_name" ]]; then
+        # 情形 (a1)：DB 是容器，端口仅发布在宿主机回环 → 挂进它的网络、用容器名连
+        NEWAPI_NETWORK="$_hit_net"
+        log_warn "数据库 127.0.0.1:${DB_PORT} 实为容器 '${_hit_name}'（端口仅发布在宿主机回环，网关不可达）"
+        log_info "将把 newapi-tools 接入网络 '${_hit_net}'，用容器名 '${_hit_name}:${_hit_port}' 直连（绕开回环端口映射）"
+        DB_DNS="$_hit_name"
+        DB_PORT="$_hit_port"
+        USE_HOST_MODE=false   # 不再脱离 external 网络：我们要挂进它，而非走 host overlay
+        ORIGINAL_NETWORK="$_hit_net"
+      else
+        # 情形 (a2)：DB 在宿主机回环但非容器（或发布到 0.0.0.0）→ 走宿主机网关
+        DB_DNS="host.docker.internal"
+        log_info "数据库地址改写: 127.0.0.1 → host.docker.internal（数据库在宿主机回环上）"
+      fi
     elif is_ipv4_literal "$DB_DNS"; then
       local _hit _hit_net _hit_name
       _hit="$(find_container_by_network_ip "$DB_DNS")"
@@ -334,21 +400,6 @@ detect_environment() {
       fi
     else
       log_info "数据库地址为主机名/外部地址，原样使用: ${DB_DNS}"
-    fi
-
-    DB_USER="$(extract_dsn_user "$detected_dsn")"
-    DB_PASSWORD="$(extract_dsn_password "$detected_dsn")"
-    DB_PORT="$(extract_dsn_port "$detected_dsn")"
-    DB_NAME="$(extract_dsn_dbname "$detected_dsn")"
-
-    if [[ "$DB_ENGINE" == "postgres" ]]; then
-      DB_PORT="${DB_PORT:-5432}"
-      DB_USER="${DB_USER:-postgres}"
-      DB_NAME="${DB_NAME:-new-api}"
-    elif [[ "$DB_ENGINE" == "mysql" ]]; then
-      DB_PORT="${DB_PORT:-3306}"
-      DB_USER="${DB_USER:-root}"
-      DB_NAME="${DB_NAME:-new-api}"
     fi
 
     if [[ "$USE_HOST_MODE" == "true" ]]; then
