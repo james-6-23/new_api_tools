@@ -157,7 +157,7 @@ export function Dashboard() {
         { headers: getAuthHeaders(), signal },
       )
       const data = await response.json()
-      if (data.success) setModels(data.data)
+      if (data.success) setModels(data.data ?? [])
       return true
     } catch (error) { console.error('Failed to fetch models:', error) }
     return false
@@ -181,7 +181,7 @@ export function Dashboard() {
         )
       }
       const data = await response.json()
-      if (data.success) setDailyTrends(data.data)
+      if (data.success) setDailyTrends(data.data ?? [])
       return true
     } catch (error) { console.error('Failed to fetch trends:', error) }
     return false
@@ -196,7 +196,7 @@ export function Dashboard() {
       )
       const data = await response.json()
 
-      if (data.success && data.data.length > 0) {
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
         const sortedByRequest = [...data.data].sort((a: any, b: any) => b.request_count - a.request_count)
         const sortedByQuota = [...data.data].sort((a: any, b: any) => b.quota_used - a.quota_used)
 
