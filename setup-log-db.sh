@@ -26,10 +26,11 @@ set -euo pipefail
 #   LOG_SQL_DSN        直接指定日志库 DSN（跳过从 NewAPI 容器读取）
 #######################################
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.env"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 TOOLS_CONTAINER="newapi-tools"
+# ENV_FILE / COMPOSE_FILE 在 resolve_project_dir() 中确定（支持 curl 直跑）
+ENV_FILE=""
+COMPOSE_FILE=""
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 log_info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
@@ -44,6 +45,50 @@ detect_docker_compose() {
   if docker compose version >/dev/null 2>&1; then DOCKER_COMPOSE="docker compose"
   elif command -v docker-compose >/dev/null 2>&1; then DOCKER_COMPOSE="docker-compose"
   else die "缺少 docker compose / docker-compose"; fi
+}
+
+#######################################
+# 定位本工具的项目目录（含 .env 与 docker-compose.yml）。
+# 支持三种运行方式：
+#   1. 在项目目录里直接 ./setup-log-db.sh        → 用脚本所在目录
+#   2. bash <(curl ...) 一键运行（无文件路径）   → 从运行中的 newapi-tools 容器
+#      的 compose 工作目录标签反查，或扫描常见路径
+#######################################
+resolve_project_dir() {
+  local candidates=()
+
+  # (a) 脚本自身所在目录（普通 clone 后执行）
+  if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
+    candidates+=("$SCRIPT_DIR")
+  fi
+
+  # (b) 从运行中的 newapi-tools 容器读取 compose 工作目录标签
+  local wd
+  wd="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$TOOLS_CONTAINER" 2>/dev/null || true)"
+  [[ -n "$wd" && -f "${wd}/docker-compose.yml" ]] && candidates+=("$wd")
+
+  # (c) 当前工作目录
+  [[ -f "./docker-compose.yml" ]] && candidates+=("$(pwd)")
+
+  # (d) 常见安装路径
+  local guess
+  for guess in "$HOME/new_api_tools" "/root/new-api/new_api_tools" "/opt/new_api_tools" "./new_api_tools"; do
+    [[ -f "${guess}/docker-compose.yml" ]] && candidates+=("$guess")
+  done
+
+  local dir
+  for dir in "${candidates[@]}"; do
+    if [[ -f "${dir}/.env" ]]; then
+      PROJECT_DIR="$dir"; ENV_FILE="${dir}/.env"; COMPOSE_FILE="${dir}/docker-compose.yml"
+      return 0
+    fi
+  done
+  # 没找到带 .env 的；退而取第一个有 compose 的目录（.env 可能尚未生成）
+  if [[ ${#candidates[@]} -gt 0 ]]; then
+    PROJECT_DIR="${candidates[0]}"; ENV_FILE="${PROJECT_DIR}/.env"; COMPOSE_FILE="${PROJECT_DIR}/docker-compose.yml"
+    return 0
+  fi
+  die "找不到 NewAPI-Tool 项目目录（含 docker-compose.yml/.env）。请 cd 到该目录后再运行本脚本。"
 }
 
 #######################################
@@ -158,6 +203,7 @@ MODE="${1:-}"
 main() {
   need_cmd docker
   detect_docker_compose
+  resolve_project_dir
 
   echo ""
   echo -e "${BLUE}========================================${NC}"
@@ -245,13 +291,13 @@ main() {
 
   if [[ "$MODE" == "--no-restart" ]]; then
     log_info "--no-restart：已写入 .env，未重建容器。稍后请手动："
-    echo "    cd $SCRIPT_DIR && $DOCKER_COMPOSE --env-file .env up -d --force-recreate $TOOLS_CONTAINER"
+    echo "    cd $PROJECT_DIR && $DOCKER_COMPOSE --env-file .env up -d --force-recreate $TOOLS_CONTAINER"
     exit 0
   fi
 
   # 6) 重建工具容器使其生效
   log_info "重建 $TOOLS_CONTAINER 以加载新配置..."
-  ( cd "$SCRIPT_DIR" && $DOCKER_COMPOSE --env-file .env up -d --force-recreate "$TOOLS_CONTAINER" )
+  ( cd "$PROJECT_DIR" && $DOCKER_COMPOSE --env-file .env up -d --force-recreate "$TOOLS_CONTAINER" )
   # 重建会重置网络连接，需重新接入
   [[ -n "$need_network" ]] && ensure_tool_on_network "$need_network"
 

@@ -83,6 +83,25 @@ vim .env
 docker-compose up -d
 ```
 
+### 日志分库（LOG_SQL_DSN）兼容
+
+部分 NewAPI fork（如 `new-api-my`）支持 `LOG_SQL_DSN`，把 `logs` 表整张分离到**独立日志数据库**。这种部署下主库的 `logs` 表会被冻结、不再更新——本工具若只连主库，则**仪表盘流量分析、使用日志、模型监控、风控 / IP 分析全部显示为 0**（其余如用户、令牌、兑换码数据正常）。
+
+若你的 NewAPI 启用了 `LOG_SQL_DSN`，在**已完成上面任一种部署之后**，再跑一键日志库兼容脚本即可：
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main/setup-log-db.sh)
+```
+
+脚本会自动：从 NewAPI 容器读取 `LOG_SQL_DSN` → 解析并对「日志库是容器、端口只发布在宿主机回环」「日志库是某条 bridge 网络上容器的 IP」等情形做容器名 / 网络改写 → 写入本工具 `.env` 的 `LOG_SQL_DSN` → 把工具容器接入日志库网络并重建生效。
+
+```bash
+# 仅检测并打印将写入的 LOG_SQL_DSN，不改动任何文件 / 容器
+bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main/setup-log-db.sh) --print
+```
+
+> 它**只**处理日志库这一特例，不改动通用的 `install.sh` / `deploy.sh` 流程。NewAPI 未设置 `LOG_SQL_DSN` 时无需运行（本工具会直接从主库读取日志）。
+
 ## 配置说明
 
 推荐优先使用 `SQL_DSN` 配置完整数据库连接串；设置了 `SQL_DSN` 后，分离式 `DB_*` 配置会作为兼容兜底。
@@ -96,6 +115,7 @@ docker-compose up -d
 | `JWT_SECRET` | JWT 签名密钥 | 部署脚本自动生成 |
 | `JWT_EXPIRE_HOURS` | JWT 过期时间（小时） | `24` |
 | `SQL_DSN` | 推荐的完整数据库连接串 | `host=... port=5432 user=...` |
+| `LOG_SQL_DSN` | 日志专用库连接串（NewAPI 用 `LOG_SQL_DSN` 分库时才需要；留空则日志查询回落主库）。建议用 `setup-log-db.sh` 自动生成 | 可选 |
 | `DB_ENGINE` | 兼容旧版分离配置的数据库类型 | `postgres` / `mysql` |
 | `DB_DNS` | 数据库主机或容器服务名 | `postgres` |
 | `DB_PORT` | 数据库端口 | `5432` / `3306` |
