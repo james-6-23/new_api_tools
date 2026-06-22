@@ -908,7 +908,7 @@ export function ModelStatusEmbed({
       const response = await fetch(`${apiUrl}/api/model-status/embed/config/selected`)
       const data = await response.json()
       if (data.success) {
-        if (data.data.length > 0) {
+        if (Array.isArray(data.data) && data.data.length > 0) {
           setSelectedModels(data.data)
         }
         if (data.time_window) {
@@ -983,7 +983,7 @@ export function ModelStatusEmbed({
       })
       const data = await response.json()
       if (data.success) {
-        setModelStatuses(data.data)
+        setModelStatuses(data.data ?? [])
         setLastUpdate(new Date())
       }
     } catch (error) {
