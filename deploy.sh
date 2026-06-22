@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 COMPOSE_HOST_FILE="${SCRIPT_DIR}/docker-compose.host.yml"
+COMPOSE_LOGDB_FILE="${SCRIPT_DIR}/docker-compose.logdb.yml"
 
 # 由 detect_environment() 设置：host 模式下需要追加 overlay compose 文件
 COMPOSE_FILES=("-f" "$COMPOSE_FILE")
@@ -531,6 +532,88 @@ detect_environment() {
 }
 
 #######################################
+# 检测日志分库（LOG_SQL_DSN）
+#
+# 部分 NewAPI fork 用 LOG_SQL_DSN 把 logs 表整张分离到独立库。本工具需读取该库
+# 才能看到实时日志/流量。本函数从 NewAPI 容器读取 LOG_SQL_DSN，解析并做与主库
+# 同款的「容器名/网络」改写，产出：
+#   LOG_SQL_DSN_FINAL  写入工具 .env 的最终 DSN（容器名直连/host.docker.internal）
+#   LOG_NETWORK        日志库容器所在网络（与主库不同时需把工具接入它）
+# NewAPI 未启用 LOG_SQL_DSN 时全部留空，工具自动回落主库（向后兼容）。
+#######################################
+detect_log_database() {
+  LOG_SQL_DSN_FINAL=""
+  LOG_NETWORK=""
+
+  local raw=""
+  raw="$(docker_inspect_env_value "$NEWAPI_CONTAINER" 'LOG_SQL_DSN' || true)"
+  if [[ -z "$raw" ]]; then
+    log_info "NewAPI 未启用日志分库（无 LOG_SQL_DSN），工具将从主库读取日志"
+    return 0
+  fi
+  log_info "检测到 NewAPI 启用了日志分库（LOG_SQL_DSN），开始配置独立日志库连接..."
+
+  local engine host port user pass db
+  engine="$(extract_dsn_engine "$raw" || true)"
+  host="$(extract_dsn_host "$raw" || true)"
+  port="$(extract_dsn_port "$raw" || true)"
+  user="$(extract_dsn_user "$raw" || true)"
+  pass="$(extract_dsn_password "$raw" || true)"
+  db="$(extract_dsn_dbname "$raw" || true)"
+  [[ -n "$host" && -n "$db" ]] || { log_warn "无法解析 LOG_SQL_DSN（host/dbname 缺失），跳过日志库配置"; return 0; }
+  if [[ "$engine" == "mysql" ]]; then port="${port:-3306}"; else engine="postgres"; port="${port:-5432}"; fi
+
+  # 与主库同款的连接方式改写
+  if [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]; then
+    local _hit _net _name _port
+    _hit="$(find_container_by_published_port "$port")"
+    _net="$(printf '%s' "$_hit" | cut -f1)"; _name="$(printf '%s' "$_hit" | cut -f2)"; _port="$(printf '%s' "$_hit" | cut -f3)"
+    if [[ -n "$_net" && -n "$_name" ]]; then
+      log_warn "日志库 127.0.0.1:${port} 实为容器 '${_name}'（端口仅发布在宿主机回环）"
+      log_info "将把 newapi-tools 接入网络 '${_net}'，用容器名 '${_name}:${_port}' 直连"
+      host="$_name"; port="$_port"; LOG_NETWORK="$_net"
+    else
+      host="host.docker.internal"
+      log_info "日志库在宿主机回环上，改写为 host.docker.internal"
+    fi
+  elif is_ipv4_literal "$host"; then
+    local _hit _net _name
+    _hit="$(find_container_by_network_ip "$host")"
+    _net="$(printf '%s' "$_hit" | cut -f1)"; _name="$(printf '%s' "$_hit" | cut -f2)"
+    if [[ -n "$_net" && -n "$_name" ]]; then
+      log_warn "日志库 ${host} 是容器 '${_name}' 在网络 '${_net}' 上的 IP"
+      log_info "将把 newapi-tools 接入网络 '${_net}'，用容器名直连"
+      host="$_name"; LOG_NETWORK="$_net"
+    else
+      log_info "日志库地址 ${host} 是 IP 但不属于已知 docker 网络容器，按外部地址原样使用"
+    fi
+  else
+    log_info "日志库地址为主机名/外部地址，原样使用: ${host}"
+  fi
+
+  if [[ "$engine" == "mysql" ]]; then
+    LOG_SQL_DSN_FINAL="${user}:${pass}@tcp(${host}:${port})/${db}?charset=utf8mb4&parseTime=True"
+  else
+    LOG_SQL_DSN_FINAL="host=${host} port=${port} user=${user} password=${pass} dbname=${db} sslmode=disable"
+  fi
+
+  # 日志库网络与主库不同时，追加日志叠加层并接入网络（相同则工具已在该网络上）
+  if [[ -n "$LOG_NETWORK" && "$LOG_NETWORK" != "${NEWAPI_NETWORK:-}" ]]; then
+    if [[ -f "$COMPOSE_LOGDB_FILE" ]]; then
+      COMPOSE_FILES+=("-f" "$COMPOSE_LOGDB_FILE")
+      log_success "已启用日志库网络叠加层（network=${LOG_NETWORK}）"
+    else
+      log_warn "未找到 $COMPOSE_LOGDB_FILE，日志库网络持久化可能失效（仍会用 docker network connect 兜底）"
+    fi
+  elif [[ -n "$LOG_NETWORK" ]]; then
+    log_info "日志库与主库同在网络 '${LOG_NETWORK}'，无需额外网络配置"
+    LOG_NETWORK=""  # 已通过主库网络可达，无需重复接入
+  fi
+
+  log_success "检测到日志分库: ${engine} @ ${host}:${port}/${db}${LOG_NETWORK:+ (网络: ${LOG_NETWORK})}"
+}
+
+#######################################
 # 交互式配置
 #######################################
 interactive_config() {
@@ -635,6 +718,11 @@ DB_PORT=${DB_PORT}
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
+
+# 日志分库 (NewAPI 启用 LOG_SQL_DSN 时自动检测；为空则日志查询回落主库)
+LOG_SQL_DSN=${LOG_SQL_DSN_FINAL:-}
+# 日志库容器所在网络 (与主库不同时由 docker-compose.logdb.yml 叠加层接入)
+LOG_NETWORK=${LOG_NETWORK:-}
 
 # 认证配置
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
@@ -751,6 +839,12 @@ start_services() {
   elif [[ "$USE_BRIDGE_MODE" != "true" && -n "$NEWAPI_NETWORK" ]]; then
     log_info "连接到 NewAPI 网络: $NEWAPI_NETWORK"
     docker network connect "$NEWAPI_NETWORK" newapi-tools 2>/dev/null || log_warn "网络已连接"
+  fi
+
+  # 日志库在另一条网络上时，把工具也接入（叠加层已配置，这里双重保障）
+  if [[ -n "${LOG_NETWORK:-}" ]]; then
+    log_info "连接到日志库网络: $LOG_NETWORK"
+    docker network connect "$LOG_NETWORK" newapi-tools 2>/dev/null || log_warn "日志库网络已连接"
   fi
 
   log_success "服务已启动!"
@@ -909,6 +1003,7 @@ main() {
       echo ""
 
       detect_environment
+      detect_log_database
       interactive_config
       generate_env_file
       check_compose_file

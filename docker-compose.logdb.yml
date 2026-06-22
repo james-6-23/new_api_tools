@@ -1,0 +1,16 @@
+# 日志分库网络叠加层 —— 由 deploy.sh 在检测到 NewAPI 启用了 LOG_SQL_DSN，
+# 且日志库位于与主库【不同】的 docker 网络上时，自动以 -f 追加：
+#   docker compose -f docker-compose.yml [-f docker-compose.host.yml] -f docker-compose.logdb.yml up -d
+#
+# 作用：把 newapi-tools 接入日志库所在的 docker 网络，使其能用容器名连接独立日志库。
+# LOG_NETWORK 由 deploy.sh 写入 .env（日志库容器所在网络名）。
+
+services:
+  newapi-tools:
+    networks:
+      - log-db-network
+
+networks:
+  log-db-network:
+    external: true
+    name: ${LOG_NETWORK}
