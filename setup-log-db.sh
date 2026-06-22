@@ -183,6 +183,46 @@ ensure_tool_on_network() {
   fi
 }
 
+# 读取 .env 里某 key 的值（无则空）
+read_env_value() {
+  [[ -f "$ENV_FILE" ]] || { echo ""; return 0; }
+  grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d'=' -f2- || echo ""
+}
+
+# 写 docker-compose.override.yml，把日志库网络固化进工具服务。
+# docker compose 默认会自动叠加 override 文件，使「纯 docker compose up」重建后
+# 网络依然挂着（setup-log-db.sh 自己用纯 compose 重建，故能吃到它）。
+# 注意：deploy.sh / install.sh 用显式 -f / COMPOSE_FILE，不会加载 override —— 那种
+# 情况下网络会掉，但后端已做降级（不再崩），重跑本脚本即可恢复。
+LOG_OVERRIDE_NET_NAME="log-db-network"
+write_log_network_override() {
+  local net="$1"
+  local override="${PROJECT_DIR}/docker-compose.override.yml"
+  local main_net; main_net="$(read_env_value NEWAPI_NETWORK)"
+
+  # 日志库网络与主库网络相同 → 工具已经在上面，无需 override（避免重复挂同一网络报错）
+  if [[ -n "$main_net" && "$net" == "$main_net" ]]; then
+    log_info "日志库与主库同在网络 '$net'，无需额外网络配置"
+    [[ -f "$override" ]] && grep -q "$LOG_OVERRIDE_NET_NAME" "$override" 2>/dev/null && \
+      log_warn "检测到旧的 $override 仍引用日志库网络，如不再需要可手动删除"
+    return 0
+  fi
+
+  cat > "$override" <<EOF
+# 由 setup-log-db.sh 自动生成：把 newapi-tools 接入日志库所在的 docker 网络，
+# 使「docker compose up」重建后日志库连接依然可用。请勿手改；重跑 setup-log-db.sh 会覆盖。
+services:
+  ${TOOLS_CONTAINER}:
+    networks:
+      - ${LOG_OVERRIDE_NET_NAME}
+networks:
+  ${LOG_OVERRIDE_NET_NAME}:
+    external: true
+    name: ${net}
+EOF
+  log_success "已写入 $override（固化日志库网络 '${net}'）"
+}
+
 # 把 KEY=VALUE 写入 .env（已存在则替换该行）
 upsert_env() {
   local key="$1" value="$2"
@@ -286,8 +326,11 @@ main() {
   upsert_env "LOG_SQL_DSN" "$final_dsn"
   log_success "已写入 $ENV_FILE"
 
-  # 5) 接入网络（如需）
-  [[ -n "$need_network" ]] && ensure_tool_on_network "$need_network"
+  # 5) 固化网络：写 override（持久）+ 立即接入（当前生效）
+  if [[ -n "$need_network" ]]; then
+    write_log_network_override "$need_network"
+    ensure_tool_on_network "$need_network"
+  fi
 
   if [[ "$MODE" == "--no-restart" ]]; then
     log_info "--no-restart：已写入 .env，未重建容器。稍后请手动："
@@ -295,10 +338,10 @@ main() {
     exit 0
   fi
 
-  # 6) 重建工具容器使其生效
+  # 6) 重建工具容器使其生效（纯 compose，会自动叠加 override，网络随之挂上）
   log_info "重建 $TOOLS_CONTAINER 以加载新配置..."
   ( cd "$PROJECT_DIR" && $DOCKER_COMPOSE --env-file .env up -d --force-recreate "$TOOLS_CONTAINER" )
-  # 重建会重置网络连接，需重新接入
+  # 兜底：override 未生效时（极少数）也把网络补上
   [[ -n "$need_network" ]] && ensure_tool_on_network "$need_network"
 
   echo ""

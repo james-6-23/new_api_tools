@@ -94,7 +94,12 @@ func initLogDB(cfg *config.Config, maxOpen, maxIdle int) error {
 
 	db, err := sqlx.Connect(driverName, dsn)
 	if err != nil {
-		return fmt.Errorf("log database connection failed: %w", err)
+		// 日志库是增强功能（读独立的 logs 库），连不上时绝不能拖垮整个后端。
+		// 优雅降级：回退到主库（日志类查询将读主库那张可能已冻结的 logs 表），
+		// 并告警提示用户修复网络/DSN（通常重跑 setup-log-db.sh 即可）。
+		logger.L.Warn(fmt.Sprintf("日志库连接失败，已降级为读取主库（日志/流量可能为空）: %v", err), logger.CatSystem)
+		logMgr = mgr
+		return nil
 	}
 
 	db.SetMaxOpenConns(maxOpen)
