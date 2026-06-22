@@ -60,41 +60,52 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const login = useCallback(async (password: string): Promise<boolean> => {
+    const apiUrl = import.meta.env.VITE_API_URL || ''
+
+    let response: Response
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || ''
-      const response = await fetch(`${apiUrl}/api/auth/login`, {
+      response = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ password }),
       })
-
-      if (!response.ok) {
-        return false
-      }
-
-      const data = await response.json()
-      if (data.success && data.token) {
-        const newToken = data.token
-        // Parse expires_at or default 24 hours
-        let expiryTime: number
-        if (data.expires_at) {
-          expiryTime = new Date(data.expires_at).getTime()
-        } else {
-          expiryTime = Date.now() + 86400 * 1000
-        }
-
-        setToken(newToken)
-        localStorage.setItem(TOKEN_KEY, newToken)
-        localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString())
-        return true
-      }
-      return false
     } catch (error) {
-      console.error('Login error:', error)
+      // 网络层失败（断网、DNS、连接被拒等）→ 视为服务不可用，而非密码错误
+      console.error('Login request failed:', error)
+      throw new Error('service_unavailable')
+    }
+
+    // 401：密码确实错误（后端 auth.go 对错误密码返回 401）
+    if (response.status === 401) {
       return false
     }
+
+    // 其它非 2xx（502/503/504 后端不可达、500 内部错误等）→ 服务不可用，
+    // 不能笼统报成“密码错误”误导用户反复试密码
+    if (!response.ok) {
+      throw new Error('service_unavailable')
+    }
+
+    const data = await response.json()
+    if (data.success && data.token) {
+      const newToken = data.token
+      // Parse expires_at or default 24 hours
+      let expiryTime: number
+      if (data.expires_at) {
+        expiryTime = new Date(data.expires_at).getTime()
+      } else {
+        expiryTime = Date.now() + 86400 * 1000
+      }
+
+      setToken(newToken)
+      localStorage.setItem(TOKEN_KEY, newToken)
+      localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString())
+      return true
+    }
+    // 2xx 但 success=false：按密码/凭证错误处理
+    return false
   }, [])
 
   const logout = useCallback(() => {

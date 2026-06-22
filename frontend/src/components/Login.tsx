@@ -28,7 +28,9 @@ export function Login({ onLogin }: LoginProps) {
         setError('密码错误，请重试')
       }
     } catch {
-      setError('登录失败，请稍后重试')
+      // onLogin 对后端不可达/网络错误（502/503/504、断网等）抛异常，
+      // 与“密码错误”区分开，避免误导用户反复尝试密码
+      setError('服务暂时不可用，请稍后重试')
     } finally {
       setIsLoading(false)
     }
