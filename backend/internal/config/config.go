@@ -33,6 +33,12 @@ type Config struct {
 	DBMaxOpenConns int            `json:"db_max_open_conns"`
 	DBMaxIdleConns int            `json:"db_max_idle_conns"`
 
+	// Log database (optional). NewAPI 的 fork 可通过 LOG_SQL_DSN 把 logs 表
+	// 分离到独立数据库；本工具需读取该库才能看到实时日志/流量。
+	// 为空时日志库 == 主库（行为与上游一致，完全向后兼容）。
+	LogSQLDSN         string         `json:"log_sql_dsn"`
+	LogDatabaseEngine DatabaseEngine `json:"log_database_engine"`
+
 	// Redis
 	RedisConnString string `json:"redis_conn_string"`
 
@@ -74,6 +80,9 @@ func Load() *Config {
 		DBMaxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 50),
 		DBMaxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 15),
 
+		// Log database (optional, see field doc). Empty → falls back to main DB.
+		LogSQLDSN: getEnvStr("LOG_SQL_DSN", ""),
+
 		// Redis
 		RedisConnString: getEnvStr("REDIS_CONN_STRING", ""),
 
@@ -111,6 +120,13 @@ func Load() *Config {
 
 	// Auto-detect database engine from DSN
 	cfg.DatabaseEngine = detectEngine(cfg.SQLDSN)
+
+	// Log database engine: detect from LOG_SQL_DSN if set, else mirror main DB.
+	if cfg.LogSQLDSN != "" {
+		cfg.LogDatabaseEngine = detectEngine(cfg.LogSQLDSN)
+	} else {
+		cfg.LogDatabaseEngine = cfg.DatabaseEngine
+	}
 
 	// Generate random JWT secret if not explicitly configured
 	if cfg.JWTSecretKey == "" {
@@ -230,6 +246,35 @@ func (c *Config) DSN() string {
 // DriverName returns the database driver name for sqlx
 func (c *Config) DriverName() string {
 	switch c.DatabaseEngine {
+	case PostgreSQL:
+		return "pgx"
+	default:
+		return "mysql"
+	}
+}
+
+// HasSeparateLogDB reports whether a dedicated log database is configured
+// (LOG_SQL_DSN set and different from the main DSN).
+func (c *Config) HasSeparateLogDB() bool {
+	return c.LogSQLDSN != "" && c.LogSQLDSN != c.SQLDSN
+}
+
+// LogDSN returns a driver-compatible DSN for the log database.
+// Falls back to the main DSN when LOG_SQL_DSN is not configured.
+func (c *Config) LogDSN() string {
+	dsn := c.LogSQLDSN
+	if dsn == "" {
+		return c.DSN()
+	}
+	if strings.HasPrefix(dsn, "mysql://") {
+		dsn = strings.TrimPrefix(dsn, "mysql://")
+	}
+	return dsn
+}
+
+// LogDriverName returns the database driver name for the log database.
+func (c *Config) LogDriverName() string {
+	switch c.LogDatabaseEngine {
 	case PostgreSQL:
 		return "pgx"
 	default:

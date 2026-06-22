@@ -20,6 +20,9 @@ services:
     environment:
       # 数据库配置 (Go 版本统一使用 SQL_DSN)
       - SQL_DSN=${SQL_DSN:-}
+      # 日志专用库（可选）：NewAPI 若用 LOG_SQL_DSN 把 logs 表分离到独立库，
+      # 本工具需读取该库才能看到实时日志/流量。为空时日志查询回落到主库。
+      - LOG_SQL_DSN=${LOG_SQL_DSN:-}
       # 兼容旧版本分离配置
       - DB_ENGINE=${DB_ENGINE:-}
       - DB_DNS=${DB_DNS:-}

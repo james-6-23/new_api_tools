@@ -50,12 +50,13 @@ type TokenListParams struct {
 
 // TokenService handles token-related queries
 type TokenService struct {
-	db *database.Manager
+	db    *database.Manager
+	logDB *database.Manager
 }
 
 // NewTokenService creates a new TokenService
 func NewTokenService() *TokenService {
-	return &TokenService{db: database.Get()}
+	return &TokenService{db: database.Get(), logDB: database.GetLog()}
 }
 
 // keyCol returns the properly quoted column name for 'key' (reserved word)
@@ -192,7 +193,7 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 		aggArgs := make([]interface{}, 0, len(tokenIDs)+1)
 		aggArgs = append(aggArgs, windowStart)
 		for i, tokenID := range tokenIDs {
-			placeholders = append(placeholders, s.db.Placeholder(i+2))
+			placeholders = append(placeholders, s.logDB.Placeholder(i+2))
 			aggArgs = append(aggArgs, tokenID)
 		}
 
@@ -200,9 +201,9 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 			SELECT token_id, MAX(created_at) as accessed_time
 			FROM logs
 			WHERE created_at >= %s AND type IN (2, 5) AND token_id IN (%s)
-			GROUP BY token_id`, s.db.Placeholder(1), strings.Join(placeholders, ","))
+			GROUP BY token_id`, s.logDB.Placeholder(1), strings.Join(placeholders, ","))
 
-		lastUsedRows, err := s.db.Query(lastUsedQuery, aggArgs...)
+		lastUsedRows, err := s.logDB.Query(lastUsedQuery, aggArgs...)
 		if err != nil {
 			return nil, err
 		}

@@ -17,12 +17,13 @@ import (
 
 // AIAutoBanService handles AI-assisted automatic user banning
 type AIAutoBanService struct {
-	db *database.Manager
+	db    *database.Manager
+	logDB *database.Manager
 }
 
 // NewAIAutoBanService creates a new AIAutoBanService
 func NewAIAutoBanService() *AIAutoBanService {
-	return &AIAutoBanService{db: database.Get()}
+	return &AIAutoBanService{db: database.Get(), logDB: database.GetLog()}
 }
 
 // Default config
@@ -150,9 +151,10 @@ func (s *AIAutoBanService) ClearAuditLogs() map[string]interface{} {
 	}
 }
 
-// groupCol returns the properly quoted column name for 'group' (reserved word)
+// groupCol returns the properly quoted column name for 'group' (reserved word).
+// Uses the log DB engine since 'group' only appears in logs-table queries.
 func (s *AIAutoBanService) groupCol() string {
-	if s.db.IsPG {
+	if s.logDB.IsPG {
 		return `"group"`
 	}
 	return "`group`"
@@ -162,14 +164,14 @@ func (s *AIAutoBanService) groupCol() string {
 func (s *AIAutoBanService) GetAvailableGroups(days int) ([]map[string]interface{}, error) {
 	startTime := time.Now().Unix() - int64(days*86400)
 	groupCol := s.groupCol()
-	query := s.db.RebindQuery(fmt.Sprintf(`
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT %s as name, COUNT(*) as count
 		FROM logs
 		WHERE created_at >= ? AND %s IS NOT NULL AND %s != ''
 		GROUP BY %s
 		ORDER BY count DESC`, groupCol, groupCol, groupCol, groupCol))
 
-	rows, err := s.db.Query(query, startTime)
+	rows, err := s.logDB.Query(query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -179,14 +181,14 @@ func (s *AIAutoBanService) GetAvailableGroups(days int) ([]map[string]interface{
 // GetAvailableModelsForExclude returns models used in recent logs
 func (s *AIAutoBanService) GetAvailableModelsForExclude(days int) ([]map[string]interface{}, error) {
 	startTime := time.Now().Unix() - int64(days*86400)
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT DISTINCT model_name as name, COUNT(*) as count
 		FROM logs
 		WHERE created_at >= ? AND model_name IS NOT NULL AND model_name != ''
 		GROUP BY model_name
 		ORDER BY count DESC`)
 
-	rows, err := s.db.Query(query, startTime)
+	rows, err := s.logDB.Query(query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -209,23 +211,23 @@ func (s *AIAutoBanService) GetSuspiciousUsers(window string, limit int) ([]map[s
 		return cached, nil
 	}
 
-	// Find users with high failure rates or unusual patterns
-	query := s.db.RebindQuery(`
-		SELECT l.user_id, COALESCE(u.username, '') as username,
+	// Find users with high failure rates or unusual patterns.
+	// logs 自带 username，无需 JOIN users（兼容日志独立库）。
+	query := s.logDB.RebindQuery(`
+		SELECT l.user_id, COALESCE(l.username, '') as username,
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_count,
 			COALESCE(SUM(l.quota), 0) as total_quota,
 			COUNT(DISTINCT l.ip) as unique_ips,
 			COUNT(DISTINCT l.model_name) as unique_models
 		FROM logs l
-		LEFT JOIN users u ON l.user_id = u.id
 		WHERE l.created_at >= ? AND l.type IN (2, 5)
-		GROUP BY l.user_id, u.username
+		GROUP BY l.user_id, l.username
 		HAVING COUNT(*) >= 10
 		ORDER BY failure_count DESC, total_requests DESC
 		LIMIT ?`)
 
-	rows, err := s.db.Query(query, startTime, limit)
+	rows, err := s.logDB.Query(query, startTime, limit)
 	if err != nil {
 		return nil, err
 	}

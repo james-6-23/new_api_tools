@@ -18,12 +18,13 @@ const (
 
 // LogAnalyticsService handles log analytics via direct DB queries + cache
 type LogAnalyticsService struct {
-	db *database.Manager
+	db    *database.Manager
+	logDB *database.Manager
 }
 
 // NewLogAnalyticsService creates a new LogAnalyticsService
 func NewLogAnalyticsService() *LogAnalyticsService {
-	return &LogAnalyticsService{db: database.Get()}
+	return &LogAnalyticsService{db: database.Get(), logDB: database.GetLog()}
 }
 
 // GetAnalyticsState returns current processing state from DB
@@ -80,7 +81,7 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 	} else {
 		// Fallback: scan logs with 30-day filter
 		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
-		query := s.db.RebindQuery(`
+		query := s.logDB.RebindQuery(`
 			SELECT l.user_id,
 				COALESCE(l.username, '') as username,
 				COUNT(*) as request_count,
@@ -90,7 +91,7 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 			GROUP BY l.user_id, l.username
 			ORDER BY request_count DESC
 			LIMIT ?`)
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
 	}
 	if err != nil {
 		return nil, err
@@ -130,7 +131,7 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 		rows, err = s.db.QueryWithTimeout(30*time.Second, query, limit)
 	} else {
 		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
-		query := s.db.RebindQuery(`
+		query := s.logDB.RebindQuery(`
 			SELECT l.user_id,
 				COALESCE(l.username, '') as username,
 				COUNT(*) as request_count,
@@ -140,7 +141,7 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 			GROUP BY l.user_id, l.username
 			ORDER BY quota_used DESC
 			LIMIT ?`)
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
 	}
 	if err != nil {
 		return nil, err
@@ -163,7 +164,7 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 	}
 
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT model_name,
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_count,
@@ -175,7 +176,7 @@ func (s *LogAnalyticsService) GetModelStatistics(limit int) ([]map[string]interf
 		ORDER BY total_requests DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+	rows, err := s.logDB.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -349,17 +350,17 @@ func (s *LogAnalyticsService) clearAllCaches() {
 // The estimate is for the whole table — not filtered by `type IN (2,5)` — since the
 // dashboard/sync indicators only need a ballpark. Over-estimate is acceptable per CLAUDE.md.
 func (s *LogAnalyticsService) getLogsApproxStats() (total int64, maxID int64) {
-	if row, err := s.db.QueryOne(`SELECT COALESCE(MAX(id), 0) as max_id FROM logs`); err == nil && row != nil {
+	if row, err := s.logDB.QueryOne(`SELECT COALESCE(MAX(id), 0) as max_id FROM logs`); err == nil && row != nil {
 		maxID = toInt64(row["max_id"])
 	}
 
 	var statsQuery string
-	if s.db.IsPG {
+	if s.logDB.IsPG {
 		statsQuery = `SELECT reltuples::bigint as total FROM pg_class WHERE relname = 'logs'`
 	} else {
 		statsQuery = `SELECT TABLE_ROWS as total FROM information_schema.TABLES WHERE TABLE_NAME = 'logs' AND TABLE_SCHEMA = DATABASE()`
 	}
-	if row, err := s.db.QueryOne(statsQuery); err == nil && row != nil {
+	if row, err := s.logDB.QueryOne(statsQuery); err == nil && row != nil {
 		total = toInt64(row["total"])
 	}
 	return

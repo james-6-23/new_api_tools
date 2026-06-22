@@ -22,7 +22,8 @@ var WindowSeconds = map[string]int64{
 
 // IPMonitoringService handles IP analysis queries
 type IPMonitoringService struct {
-	db *database.Manager
+	db    *database.Manager
+	logDB *database.Manager
 }
 
 const (
@@ -34,7 +35,7 @@ const (
 
 // NewIPMonitoringService creates a new IPMonitoringService
 func NewIPMonitoringService() *IPMonitoringService {
-	return &IPMonitoringService{db: database.Get()}
+	return &IPMonitoringService{db: database.Get(), logDB: database.GetLog()}
 }
 
 // GetIPStats returns IP recording statistics matching the Python format:
@@ -91,7 +92,7 @@ func (s *IPMonitoringService) GetIPStats() (map[string]interface{}, error) {
 
 	// Get unique IPs in last 24h
 	startTime := time.Now().Unix() - 86400
-	ipRow, _ := s.db.QueryOneWithTimeout(ipMonitoringQueryTimeout, s.db.RebindQuery(
+	ipRow, _ := s.logDB.QueryOneWithTimeout(ipMonitoringQueryTimeout, s.logDB.RebindQuery(
 		"SELECT COUNT(DISTINCT ip) as unique_ips FROM logs WHERE created_at >= ? AND ip IS NOT NULL AND ip <> ''"),
 		startTime)
 	uniqueIPs := int64(0)
@@ -128,7 +129,7 @@ func (s *IPMonitoringService) GetSharedIPs(window string, minTokens, limit int, 
 	}
 
 	// Get IPs with multiple tokens — use parameterized queries
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT ip, COUNT(DISTINCT token_id) as token_count,
 			COUNT(DISTINCT user_id) as user_count,
 			COUNT(*) as request_count
@@ -139,7 +140,7 @@ func (s *IPMonitoringService) GetSharedIPs(window string, minTokens, limit int, 
 		ORDER BY token_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minTokens, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minTokens, limit)
 	if err != nil {
 		return map[string]interface{}{
 			"items":      []interface{}{},
@@ -159,32 +160,31 @@ func (s *IPMonitoringService) GetSharedIPs(window string, minTokens, limit int, 
 		}
 
 		if len(ips) > 0 {
-			placeholders := buildPlaceholders(s.db.IsPG, len(ips), 2) // start at $2 for PG
+			placeholders := buildPlaceholders(s.logDB.IsPG, len(ips), 2) // start at $2 for PG
 			args := []interface{}{startTime}
 			args = append(args, ips...)
 
-			tokenQuery := s.db.RebindQuery(fmt.Sprintf(`
+			// logs 已反范式存 token_name/username，直接用，无需 JOIN tokens/users（兼容日志独立库）
+			tokenQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 					SELECT ip, token_id, token_name, user_id, username, request_count
 					FROM (
 						SELECT grouped.*,
 							ROW_NUMBER() OVER (PARTITION BY grouped.ip ORDER BY grouped.request_count DESC) as rn
 						FROM (
 							SELECT l.ip, l.token_id,
-								COALESCE(t.name, '') as token_name,
+								COALESCE(l.token_name, '') as token_name,
 								l.user_id,
-								COALESCE(u.username, '') as username,
+								COALESCE(l.username, '') as username,
 								COUNT(*) as request_count
 							FROM logs l
-							LEFT JOIN tokens t ON l.token_id = t.id
-							LEFT JOIN users u ON l.user_id = u.id
 							WHERE l.created_at >= ? AND l.ip IN (%s)
-							GROUP BY l.ip, l.token_id, t.name, l.user_id, u.username
+							GROUP BY l.ip, l.token_id, l.token_name, l.user_id, l.username
 						) grouped
 					) ranked
 					WHERE rn <= %d
 					ORDER BY ip, request_count DESC`, placeholders, sharedIPTokenDetailLimit))
 
-			tokenRows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, tokenQuery, args...)
+			tokenRows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, tokenQuery, args...)
 			if err == nil {
 				// Group tokens by IP
 				tokensByIP := map[string][]map[string]interface{}{}
@@ -238,20 +238,18 @@ func (s *IPMonitoringService) GetMultiIPTokens(window string, minIPs, limit int,
 		}
 	}
 
-	query := s.db.RebindQuery(`
-		SELECT l.token_id, COALESCE(t.name, '') as token_name,
-			l.user_id, COALESCE(u.username, '') as username,
+	query := s.logDB.RebindQuery(`
+		SELECT l.token_id, COALESCE(l.token_name, '') as token_name,
+			l.user_id, COALESCE(l.username, '') as username,
 			COUNT(DISTINCT l.ip) as ip_count, COUNT(*) as request_count
 		FROM logs l
-		LEFT JOIN tokens t ON l.token_id = t.id
-		LEFT JOIN users u ON l.user_id = u.id
 		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''
-		GROUP BY l.token_id, t.name, l.user_id, u.username
+		GROUP BY l.token_id, l.token_name, l.user_id, l.username
 		HAVING COUNT(DISTINCT l.ip) >= ?
 		ORDER BY ip_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
 	if err != nil {
 		return map[string]interface{}{
 			"items":   []interface{}{},
@@ -268,11 +266,11 @@ func (s *IPMonitoringService) GetMultiIPTokens(window string, minIPs, limit int,
 			tokenIDs = append(tokenIDs, toInt64(row["token_id"]))
 		}
 
-		placeholders := buildPlaceholders(s.db.IsPG, len(tokenIDs), 2)
+		placeholders := buildPlaceholders(s.logDB.IsPG, len(tokenIDs), 2)
 		args := []interface{}{startTime}
 		args = append(args, tokenIDs...)
 
-		ipQuery := s.db.RebindQuery(fmt.Sprintf(`
+		ipQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 				SELECT token_id, ip, request_count
 				FROM (
 					SELECT grouped.*,
@@ -287,7 +285,7 @@ func (s *IPMonitoringService) GetMultiIPTokens(window string, minIPs, limit int,
 				WHERE rn <= %d
 				ORDER BY token_id, request_count DESC`, placeholders, tokenIPDetailLimit))
 
-		ipRows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, ipQuery, args...)
+		ipRows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, ipQuery, args...)
 		if err == nil {
 			// Group IPs by token_id. SQL already limits each group.
 			ipsByToken := map[int64][]map[string]interface{}{}
@@ -340,18 +338,17 @@ func (s *IPMonitoringService) GetMultiIPUsers(window string, minIPs, limit int, 
 		}
 	}
 
-	query := s.db.RebindQuery(`
-		SELECT l.user_id, COALESCE(u.username, '') as username,
+	query := s.logDB.RebindQuery(`
+		SELECT l.user_id, COALESCE(l.username, '') as username,
 			COUNT(DISTINCT l.ip) as ip_count, COUNT(*) as request_count
 		FROM logs l
-		LEFT JOIN users u ON l.user_id = u.id
 		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''
-		GROUP BY l.user_id, u.username
+		GROUP BY l.user_id, l.username
 		HAVING COUNT(DISTINCT l.ip) >= ?
 		ORDER BY ip_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
 	if err != nil {
 		return map[string]interface{}{
 			"items":   []interface{}{},
@@ -368,11 +365,11 @@ func (s *IPMonitoringService) GetMultiIPUsers(window string, minIPs, limit int, 
 			userIDs = append(userIDs, toInt64(row["user_id"]))
 		}
 
-		placeholders := buildPlaceholders(s.db.IsPG, len(userIDs), 2)
+		placeholders := buildPlaceholders(s.logDB.IsPG, len(userIDs), 2)
 		args := []interface{}{startTime}
 		args = append(args, userIDs...)
 
-		ipQuery := s.db.RebindQuery(fmt.Sprintf(`
+		ipQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 				SELECT user_id, ip, request_count
 				FROM (
 					SELECT grouped.*,
@@ -387,7 +384,7 @@ func (s *IPMonitoringService) GetMultiIPUsers(window string, minIPs, limit int, 
 				WHERE rn <= %d
 				ORDER BY user_id, request_count DESC`, placeholders, userIPDetailLimit))
 
-		ipRows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, ipQuery, args...)
+		ipRows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, ipQuery, args...)
 		if err == nil {
 			// Group IPs by user_id. SQL already limits each group.
 			ipsByUser := map[int64][]map[string]interface{}{}
@@ -430,31 +427,29 @@ func (s *IPMonitoringService) LookupIPUsers(ip, window string, limit int, includ
 	}
 	startTime := time.Now().Unix() - seconds
 
-	statsQuery := s.db.RebindQuery(`
+	statsQuery := s.logDB.RebindQuery(`
 		SELECT COUNT(*) as total_requests,
 			COUNT(DISTINCT user_id) as unique_users,
 			COUNT(DISTINCT token_id) as unique_tokens
 		FROM logs
 		WHERE created_at >= ? AND ip = ?`)
-	statsRow, err := s.db.QueryOneWithTimeout(ipMonitoringQueryTimeout, statsQuery, startTime, ip)
+	statsRow, err := s.logDB.QueryOneWithTimeout(ipMonitoringQueryTimeout, statsQuery, startTime, ip)
 	if err != nil {
 		return nil, err
 	}
 
-	query := s.db.RebindQuery(`
-		SELECT l.user_id, COALESCE(u.username, '') as username,
-			l.token_id, COALESCE(t.name, '') as token_name,
+	query := s.logDB.RebindQuery(`
+		SELECT l.user_id, COALESCE(l.username, '') as username,
+			l.token_id, COALESCE(l.token_name, '') as token_name,
 			COUNT(*) as request_count,
 			MIN(l.created_at) as first_seen, MAX(l.created_at) as last_seen
 		FROM logs l
-		LEFT JOIN users u ON l.user_id = u.id
-		LEFT JOIN tokens t ON l.token_id = t.id
 		WHERE l.created_at >= ? AND l.ip = ?
-		GROUP BY l.user_id, u.username, l.token_id, t.name
+		GROUP BY l.user_id, l.username, l.token_id, l.token_name
 			ORDER BY request_count DESC
 			LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, ip, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, ip, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -464,14 +459,14 @@ func (s *IPMonitoringService) LookupIPUsers(ip, window string, limit int, includ
 	uniqueTokens := toInt64(statsRow["unique_tokens"])
 
 	// Get model usage for this IP
-	modelQuery := s.db.RebindQuery(`
+	modelQuery := s.logDB.RebindQuery(`
 		SELECT model_name as model, COUNT(*) as count
 		FROM logs
 		WHERE created_at >= ? AND ip = ? AND model_name IS NOT NULL AND model_name <> ''
 		GROUP BY model_name
 		ORDER BY count DESC
 		LIMIT 20`)
-	modelRows, _ := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, modelQuery, startTime, ip)
+	modelRows, _ := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, modelQuery, startTime, ip)
 	if modelRows == nil {
 		modelRows = []map[string]interface{}{}
 	}
@@ -500,7 +495,7 @@ func (s *IPMonitoringService) GetUserIPs(userID int64, window string) (map[strin
 	}
 	startTime := time.Now().Unix() - seconds
 
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT ip, COUNT(*) as request_count,
 			MIN(created_at) as first_seen, MAX(created_at) as last_seen
 		FROM logs
@@ -508,7 +503,7 @@ func (s *IPMonitoringService) GetUserIPs(userID int64, window string) (map[strin
 		GROUP BY ip
 		ORDER BY request_count DESC`)
 
-	rows, err := s.db.QueryWithTimeout(ipMonitoringQueryTimeout, query, userID, startTime)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, userID, startTime)
 	if err != nil {
 		return nil, err
 	}

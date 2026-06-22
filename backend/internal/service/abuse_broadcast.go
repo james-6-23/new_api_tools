@@ -875,22 +875,21 @@ func (s *AbuseBroadcastService) matchLocalUsers(ctx context.Context, identities 
 			ips = ips[:50]
 		}
 		startTime := time.Now().AddDate(0, 0, -days).Unix()
+		logDB := database.GetLog()
+		// Step 1: aggregate from logs by user (logs may live in a separate DB →
+		// no JOIN users; use logs' own denormalized username, enrich below).
 		ipAgg := "GROUP_CONCAT(DISTINCT l.ip)"
-		if appDB.IsPG {
+		if logDB.IsPG {
 			ipAgg = "STRING_AGG(DISTINCT l.ip, ',')"
 		}
 		query := fmt.Sprintf(`
 			SELECT l.user_id AS user_id,
-				COALESCE(MAX(u.username), '') AS username,
-				COALESCE(MAX(u.display_name), '') AS display_name,
-				COALESCE(MAX(u.status), 0) AS status,
-				COALESCE(MAX(u.linux_do_id), '') AS linux_do_id,
+				COALESCE(MAX(l.username), '') AS username,
 				COUNT(*) AS request_count,
 				MIN(l.created_at) AS first_seen,
 				MAX(l.created_at) AS last_seen,
 				%s AS matched_ips
 			FROM logs l
-			LEFT JOIN users u ON u.id = l.user_id AND u.deleted_at IS NULL
 			WHERE l.created_at >= ? AND l.ip IN (%s) AND l.user_id IS NOT NULL
 			GROUP BY l.user_id
 			ORDER BY request_count DESC
@@ -901,27 +900,53 @@ func (s *AbuseBroadcastService) matchLocalUsers(ctx context.Context, identities 
 			args = append(args, value)
 		}
 		args = append(args, limit)
-		rows, err := appDB.QueryWithTimeout(30*time.Second, appDB.RebindQuery(query), args...)
+		rows, err := logDB.QueryWithTimeout(30*time.Second, logDB.RebindQuery(query), args...)
 		if err != nil {
 			return nil, err
 		}
+
+		// Step 2: fetch user details (display_name/status/linux_do_id) from main DB.
+		userIDs := make([]interface{}, 0, len(rows))
+		for _, row := range rows {
+			if uid := toInt64(row["user_id"]); uid != 0 {
+				userIDs = append(userIDs, uid)
+			}
+		}
+		userDetails := map[int64]map[string]interface{}{}
+		if len(userIDs) > 0 {
+			detailQuery := fmt.Sprintf(`
+				SELECT id, COALESCE(username, '') AS username, COALESCE(display_name, '') AS display_name,
+					COALESCE(status, 0) AS status, COALESCE(linux_do_id, '') AS linux_do_id
+				FROM users WHERE deleted_at IS NULL AND id IN (%s)`, placeholders(len(userIDs)))
+			if dRows, dErr := appDB.QueryWithTimeout(30*time.Second, appDB.RebindQuery(detailQuery), userIDs...); dErr == nil {
+				for _, dr := range dRows {
+					userDetails[toInt64(dr["id"])] = dr
+				}
+			}
+		}
+
 		for _, row := range rows {
 			userID := toInt64(row["user_id"])
 			if userID == 0 {
 				continue
 			}
+			detail := userDetails[userID]
 			user := upsertMatchedUser(matched, userID)
 			if user.Username == "" {
-				user.Username = toString(row["username"])
+				if detail != nil && toString(detail["username"]) != "" {
+					user.Username = toString(detail["username"])
+				} else {
+					user.Username = toString(row["username"])
+				}
 			}
-			if user.DisplayName == "" {
-				user.DisplayName = toString(row["display_name"])
+			if user.DisplayName == "" && detail != nil {
+				user.DisplayName = toString(detail["display_name"])
 			}
-			if user.Status == 0 {
-				user.Status = toInt64(row["status"])
+			if user.Status == 0 && detail != nil {
+				user.Status = toInt64(detail["status"])
 			}
-			if user.LinuxDoID == "" {
-				user.LinuxDoID = toString(row["linux_do_id"])
+			if user.LinuxDoID == "" && detail != nil {
+				user.LinuxDoID = toString(detail["linux_do_id"])
 			}
 			user.MatchTypes = appendUniqueString(user.MatchTypes, "ip")
 			user.RequestCount += toInt64(row["request_count"])

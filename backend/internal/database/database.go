@@ -24,6 +24,11 @@ type Manager struct {
 // Global database manager
 var mgr *Manager
 
+// Global log database manager. Points at the dedicated log DB (LOG_SQL_DSN) when
+// configured, otherwise aliases the main manager (mgr). Queries against the
+// `logs` table go through GetLog(); everything else uses Get().
+var logMgr *Manager
+
 // Init creates and configures the database connection pool
 func Init(cfg *config.Config) (*Manager, error) {
 	driverName := cfg.DriverName()
@@ -67,7 +72,51 @@ func Init(cfg *config.Config) (*Manager, error) {
 	}
 	logger.L.DBConnected(engineStr, extractHost(dsn), extractDB(dsn))
 
+	// Initialize the log database connection (or alias the main one).
+	if err := initLogDB(cfg, maxOpen, maxIdle); err != nil {
+		return nil, err
+	}
+
 	return mgr, nil
+}
+
+// initLogDB sets up logMgr. When LOG_SQL_DSN is unset or identical to the main
+// DSN, the log manager simply aliases mgr (zero extra connections). Otherwise it
+// opens a dedicated pool against the log database.
+func initLogDB(cfg *config.Config, maxOpen, maxIdle int) error {
+	if !cfg.HasSeparateLogDB() {
+		logMgr = mgr
+		return nil
+	}
+
+	driverName := cfg.LogDriverName()
+	dsn := cfg.LogDSN()
+
+	db, err := sqlx.Connect(driverName, dsn)
+	if err != nil {
+		return fmt.Errorf("log database connection failed: %w", err)
+	}
+
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxIdle)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(3 * time.Minute)
+
+	isPG := cfg.LogDatabaseEngine == config.PostgreSQL
+
+	logMgr = &Manager{
+		DB:     db,
+		Config: cfg,
+		IsPG:   isPG,
+	}
+
+	engineStr := "MySQL"
+	if isPG {
+		engineStr = "PostgreSQL"
+	}
+	logger.L.DBConnected(engineStr+" [日志库]", extractHost(dsn), extractDB(dsn))
+
+	return nil
 }
 
 // Get returns the global database manager
@@ -78,14 +127,30 @@ func Get() *Manager {
 	return mgr
 }
 
+// GetLog returns the manager for the log database. It is the dedicated log DB
+// when LOG_SQL_DSN is configured, otherwise it falls back to the main manager.
+// Use this for any query that reads the `logs` table.
+func GetLog() *Manager {
+	if logMgr == nil {
+		// Init not called, or log DB not wired — fall back to main manager.
+		return Get()
+	}
+	return logMgr
+}
+
 // SetForTesting overrides the package-level manager. Tests use this to inject
 // an in-memory SQLite backend or a stub Manager — production code never calls it.
 func SetForTesting(m *Manager) {
 	mgr = m
+	logMgr = m
 }
 
-// Close closes the database connection
+// Close closes the database connection(s)
 func Close() error {
+	// Close the dedicated log DB first if it is a distinct connection.
+	if logMgr != nil && logMgr != mgr && logMgr.DB != nil {
+		_ = logMgr.DB.Close()
+	}
 	if mgr != nil && mgr.DB != nil {
 		logger.L.DBDisconnected("正常关闭")
 		return mgr.DB.Close()

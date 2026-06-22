@@ -151,7 +151,8 @@ func TestAbuseBroadcastMatchReportFindsLinuxDoAndIP(t *testing.T) {
 			user_id INTEGER,
 			created_at INTEGER,
 			type INTEGER,
-			ip TEXT
+			ip TEXT,
+			username TEXT DEFAULT ''
 		)`,
 	}
 	for _, stmt := range stmts {
@@ -166,8 +167,8 @@ func TestAbuseBroadcastMatchReportFindsLinuxDoAndIP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := appDB.Exec(`
-		INSERT INTO logs (user_id, created_at, type, ip)
-		VALUES (1, ?, 2, '198.51.100.8'), (1, ?, 2, '198.51.100.8'), (2, ?, 2, '198.51.100.8')`,
+		INSERT INTO logs (user_id, created_at, type, ip, username)
+		VALUES (1, ?, 2, '198.51.100.8', 'alice'), (1, ?, 2, '198.51.100.8', 'alice'), (2, ?, 2, '198.51.100.8', 'bob')`,
 		now, now-60, now-120); err != nil {
 		t.Fatal(err)
 	}

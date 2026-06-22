@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/new-api-tools/backend/internal/cache"
@@ -12,7 +13,8 @@ import (
 
 // DashboardService handles dashboard analytics queries
 type DashboardService struct {
-	db *database.Manager
+	db    *database.Manager
+	logDB *database.Manager
 }
 
 var ipDistributionSampleLimit = 3000
@@ -21,7 +23,7 @@ const ipDistributionQueryTimeout = 30 * time.Second
 
 // NewDashboardService creates a new DashboardService
 func NewDashboardService() *DashboardService {
-	return &DashboardService{db: database.Get()}
+	return &DashboardService{db: database.Get(), logDB: database.GetLog()}
 }
 
 // parsePeriodToTimestamps converts period strings like "24h", "7d" to start/end timestamps
@@ -70,15 +72,21 @@ func (s *DashboardService) GetSystemOverview(period string, noCache bool) (map[s
 	userTokenQuery := s.db.RebindQuery(`
 		SELECT
 			(SELECT COUNT(*) FROM users WHERE deleted_at IS NULL) as total_users,
-			(SELECT COUNT(DISTINCT user_id) FROM logs WHERE created_at >= ? AND type IN (2, 5)) as active_users,
 			(SELECT COUNT(*) FROM tokens WHERE deleted_at IS NULL) as total_tokens,
 			(SELECT COUNT(*) FROM tokens WHERE deleted_at IS NULL AND status = 1) as active_tokens`)
-	row, err := s.db.QueryOneWithTimeout(15*time.Second, userTokenQuery, startTime)
+	row, err := s.db.QueryOneWithTimeout(15*time.Second, userTokenQuery)
 	if err == nil && row != nil {
 		result["total_users"] = row["total_users"]
-		result["active_users"] = row["active_users"]
 		result["total_tokens"] = row["total_tokens"]
 		result["active_tokens"] = row["active_tokens"]
+	}
+
+	// active_users lives in the logs table → query the log DB separately
+	// (logs may be on a different database via LOG_SQL_DSN, so it can't be a
+	// subquery alongside the users/tokens counts above).
+	activeQuery := s.logDB.RebindQuery(`SELECT COUNT(DISTINCT user_id) as active_users FROM logs WHERE created_at >= ? AND type IN (2, 5)`)
+	if activeRow, aErr := s.logDB.QueryOneWithTimeout(15*time.Second, activeQuery, startTime); aErr == nil && activeRow != nil {
+		result["active_users"] = activeRow["active_users"]
 	}
 
 	// Combined query 2: channels
@@ -133,7 +141,7 @@ func (s *DashboardService) GetUsageStatistics(period string, noCache bool) (map[
 	startTime, endTime := parsePeriodToTimestamps(period)
 
 	// Only type=2 (success) for usage stats, matching Python backend
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT
 			COUNT(*) as total_requests,
 			COALESCE(SUM(quota), 0) as total_quota_used,
@@ -143,7 +151,7 @@ func (s *DashboardService) GetUsageStatistics(period string, noCache bool) (map[
 		FROM logs
 		WHERE created_at >= ? AND created_at <= ? AND type = 2`)
 
-	row, err := s.db.QueryOneWithTimeout(15*time.Second, query, startTime, endTime)
+	row, err := s.logDB.QueryOneWithTimeout(15*time.Second, query, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +193,7 @@ func (s *DashboardService) GetModelUsage(period string, limit int, noCache bool)
 
 	startTime, endTime := parsePeriodToTimestamps(period)
 
-	query := s.db.RebindQuery(`
+	query := s.logDB.RebindQuery(`
 		SELECT model_name,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used,
@@ -197,7 +205,7 @@ func (s *DashboardService) GetModelUsage(period string, limit int, noCache bool)
 		ORDER BY request_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
+	rows, err := s.logDB.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +253,7 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 			dayGroupExpr, dayGroupExpr))
 		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
 	} else {
-		query := s.db.RebindQuery(fmt.Sprintf(`
+		query := s.logDB.RebindQuery(fmt.Sprintf(`
 			SELECT %s as day_group,
 				COUNT(*) as request_count,
 				COALESCE(SUM(quota), 0) as quota_used,
@@ -255,7 +263,7 @@ func (s *DashboardService) GetDailyTrends(days int, noCache bool) ([]map[string]
 			GROUP BY %s
 			ORDER BY day_group ASC`,
 			dayGroupExpr, dayGroupExpr))
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, startTime)
+		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, startTime)
 	}
 
 	if err != nil {
@@ -285,7 +293,7 @@ func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[strin
 	// Group by local-time hour using pure unix arithmetic — timezone-safe
 	hourGroupExpr := fmt.Sprintf("FLOOR((created_at + %d) / 3600)", tzOffset)
 
-	query := s.db.RebindQuery(fmt.Sprintf(`
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT %s as hour_group,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used
@@ -295,7 +303,7 @@ func (s *DashboardService) GetHourlyTrends(hours int, noCache bool) ([]map[strin
 		ORDER BY hour_group ASC`,
 		hourGroupExpr, hourGroupExpr))
 
-	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime)
+	rows, err := s.logDB.QueryWithTimeout(15*time.Second, query, startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -319,34 +327,25 @@ func (s *DashboardService) GetTopUsers(period string, limit int, noCache bool) (
 
 	startTime, endTime := parsePeriodToTimestamps(period)
 
-	castExpr := "CAST(sub.user_id AS CHAR)"
-	if s.db.IsPG {
-		castExpr = "CAST(sub.user_id AS TEXT)"
-	}
+	// logs 表已反范式存有 username，直接聚合，无需 JOIN users（兼容 logs 独立库）。
+	query := s.logDB.RebindQuery(`
+		SELECT user_id,
+			COALESCE(MAX(username), '') as username,
+			COUNT(*) as request_count,
+			COALESCE(SUM(quota), 0) as quota_used
+		FROM logs
+		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5)
+		GROUP BY user_id
+		ORDER BY quota_used DESC
+		LIMIT ?`)
 
-	// Subquery aggregates first, then JOINs users — avoids scanning users table during GROUP BY
-	query := s.db.RebindQuery(fmt.Sprintf(`
-		SELECT sub.user_id,
-			COALESCE(u.username, %s) as username,
-			sub.request_count,
-			sub.quota_used
-		FROM (
-			SELECT user_id,
-				COUNT(*) as request_count,
-				COALESCE(SUM(quota), 0) as quota_used
-			FROM logs
-			WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5)
-			GROUP BY user_id
-			ORDER BY quota_used DESC
-			LIMIT ?
-		) sub
-		LEFT JOIN users u ON sub.user_id = u.id
-		ORDER BY sub.quota_used DESC`, castExpr))
-
-	rows, err := s.db.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
+	rows, err := s.logDB.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
 	if err != nil {
 		return nil, err
 	}
+
+	// username 可能为空（老日志未回填）→ 用主库补齐
+	s.fillUsernames(rows)
 	cm.Set(cacheKey, rows, 3*time.Minute)
 	return rows, nil
 }
@@ -355,6 +354,55 @@ func (s *DashboardService) GetTopUsers(period string, limit int, noCache bool) (
 func (s *DashboardService) InvalidateDashboardCache() {
 	cm := cache.Get()
 	cm.DeleteByPrefix("dashboard:")
+}
+
+// fillUsernames backfills empty "username" fields in log-derived rows by looking
+// them up in the main users table. This handles rows whose denormalized
+// logs.username was empty (older log entries) — and works across a separate log
+// DB, since the lookup is a second query against the main DB rather than a JOIN.
+func (s *DashboardService) fillUsernames(rows []map[string]interface{}) {
+	// Collect user_ids that still lack a username.
+	missing := make([]int64, 0)
+	seen := make(map[int64]bool)
+	for _, r := range rows {
+		name, _ := r["username"].(string)
+		if name != "" {
+			continue
+		}
+		uid := toInt64(r["user_id"])
+		if uid <= 0 || seen[uid] {
+			continue
+		}
+		seen[uid] = true
+		missing = append(missing, uid)
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	placeholders := make([]string, len(missing))
+	args := make([]interface{}, len(missing))
+	for i, uid := range missing {
+		placeholders[i] = s.db.Placeholder(i + 1)
+		args[i] = uid
+	}
+	query := fmt.Sprintf("SELECT id, username FROM users WHERE id IN (%s)", strings.Join(placeholders, ","))
+	nameRows, err := s.db.Query(query, args...)
+	if err != nil {
+		return
+	}
+	byID := make(map[int64]string, len(nameRows))
+	for _, nr := range nameRows {
+		byID[toInt64(nr["id"])] = fmt.Sprintf("%v", nr["username"])
+	}
+	for _, r := range rows {
+		if name, _ := r["username"].(string); name != "" {
+			continue
+		}
+		if name, ok := byID[toInt64(r["user_id"])]; ok {
+			r["username"] = name
+		}
+	}
 }
 
 // GetChannelStatus returns channel status overview
@@ -386,13 +434,13 @@ func (s *DashboardService) GetIPDistribution(window string, noCache bool) (map[s
 	startTime, endTime := parsePeriodToTimestamps(window)
 	geoAvailable := IsIPGeoAvailable()
 
-	statsQuery := s.db.RebindQuery(`
+	statsQuery := s.logDB.RebindQuery(`
 		SELECT
 			COUNT(DISTINCT ip) as total_ips,
 			COUNT(*) as total_requests
 		FROM logs
 		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5) AND ip IS NOT NULL AND ip <> ''`)
-	statsRow, err := s.db.QueryOneWithTimeout(ipDistributionQueryTimeout, statsQuery, startTime, endTime)
+	statsRow, err := s.logDB.QueryOneWithTimeout(ipDistributionQueryTimeout, statsQuery, startTime, endTime)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +448,7 @@ func (s *DashboardService) GetIPDistribution(window string, noCache bool) (map[s
 	totalRequests := toInt64(statsRow["total_requests"])
 
 	// Step 1: Query distinct IPs with request counts and user counts
-	ipQuery := s.db.RebindQuery(`
+	ipQuery := s.logDB.RebindQuery(`
 		SELECT ip,
 			COUNT(*) as request_count,
 			COUNT(DISTINCT user_id) as user_count
@@ -410,7 +458,7 @@ func (s *DashboardService) GetIPDistribution(window string, noCache bool) (map[s
 		ORDER BY request_count DESC
 		LIMIT ?`)
 
-	rows, err := s.db.QueryWithTimeout(ipDistributionQueryTimeout, ipQuery, startTime, endTime, ipDistributionSampleLimit)
+	rows, err := s.logDB.QueryWithTimeout(ipDistributionQueryTimeout, ipQuery, startTime, endTime, ipDistributionSampleLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,8 @@ func installIPMonitoringSchema(t *testing.T) {
 			type INTEGER,
 			ip TEXT,
 			token_id INTEGER,
+			token_name TEXT DEFAULT '',
+			username TEXT DEFAULT '',
 			model_name TEXT
 		)`,
 		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)`,
@@ -68,9 +70,14 @@ func TestLookupIPUsersIncludesGeoAndFullAggregates(t *testing.T) {
 		{1, 10, "gpt-a"},
 		{2, 20, "gpt-b"},
 	} {
+		username := "alice"
+		tokenName := "alpha"
+		if row.userID == 2 {
+			username, tokenName = "bob", "beta"
+		}
 		if _, err := db.Exec(
-			`INSERT INTO logs (user_id, created_at, type, ip, token_id, model_name) VALUES (?, ?, 2, '10.0.0.1', ?, ?)`,
-			row.userID, now, row.tokenID, row.model,
+			`INSERT INTO logs (user_id, created_at, type, ip, token_id, token_name, username, model_name) VALUES (?, ?, 2, '10.0.0.1', ?, ?, ?, ?)`,
+			row.userID, now, row.tokenID, tokenName, username, row.model,
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +192,7 @@ func TestMultiIPTokenDetailsAreLimitedInSQL(t *testing.T) {
 	for i := 1; i <= 25; i++ {
 		ip := fmt.Sprintf("10.0.0.%d", i)
 		if _, err := db.Exec(
-			`INSERT INTO logs (user_id, created_at, type, ip, token_id) VALUES (1, ?, 2, ?, 10)`,
+			`INSERT INTO logs (user_id, created_at, type, ip, token_id, token_name, username) VALUES (1, ?, 2, ?, 10, 'alpha', 'alice')`,
 			now, ip,
 		); err != nil {
 			t.Fatal(err)
