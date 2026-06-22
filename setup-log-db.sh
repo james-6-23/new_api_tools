@@ -5,7 +5,7 @@ set -euo pipefail
 # NewAPI Middleware Tool - 日志分库（LOG_SQL_DSN）兼容脚本
 #
 # 背景：
-#   NewAPI 的部分 fork（如 new-api-my）支持 LOG_SQL_DSN，把 logs 表整张分离到
+#   NewAPI 的部分 fork 支持 LOG_SQL_DSN，把 logs 表整张分离到
 #   独立数据库。此时主库的 logs 表会被冻结、不再更新，本工具若只连主库就读不到
 #   实时日志（dashboard 流量分析、使用日志、模型监控、风控/IP 分析全为 0）。
 #
