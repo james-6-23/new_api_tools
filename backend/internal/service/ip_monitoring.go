@@ -593,12 +593,14 @@ func (s *IPMonitoringService) GetIPIndexStatus() (map[string]interface{}, error)
 
 	existingNames := map[string]bool{}
 	var query string
-	if s.db.IsPG {
+	if s.logDB.IsCH {
+		query = `SELECT name FROM system.data_skipping_indices WHERE database = currentDatabase() AND table = 'logs'`
+	} else if s.logDB.IsPG {
 		query = `SELECT indexname as name FROM pg_indexes WHERE tablename = 'logs'`
 	} else {
 		query = `SELECT DISTINCT index_name as name FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'logs'`
 	}
-	rows, err := s.db.QueryWithTimeout(10*time.Second, query)
+	rows, err := s.logDB.QueryWithTimeout(10*time.Second, query)
 	if err == nil {
 		for _, row := range rows {
 			name := toString(row["name"])

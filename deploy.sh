@@ -90,6 +90,8 @@ extract_dsn_engine() {
     echo "postgres"
   elif [[ "$dsn" =~ ^mysql:// ]]; then
     echo "mysql"
+  elif [[ "$dsn" =~ ^clickhouse:// ]]; then
+    echo "clickhouse"
   fi
 }
 
@@ -561,7 +563,18 @@ detect_log_database() {
   pass="$(extract_dsn_password "$raw" || true)"
   db="$(extract_dsn_dbname "$raw" || true)"
   [[ -n "$host" && -n "$db" ]] || { log_warn "无法解析 LOG_SQL_DSN（host/dbname 缺失），跳过日志库配置"; return 0; }
-  if [[ "$engine" == "mysql" ]]; then port="${port:-3306}"; else engine="postgres"; port="${port:-5432}"; fi
+  case "$engine" in
+    mysql)
+      port="${port:-3306}"
+      ;;
+    clickhouse)
+      port="${port:-9000}"
+      ;;
+    *)
+      engine="postgres"
+      port="${port:-5432}"
+      ;;
+  esac
 
   # 与主库同款的连接方式改写
   if [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]; then
@@ -591,11 +604,17 @@ detect_log_database() {
     log_info "日志库地址为主机名/外部地址，原样使用: ${host}"
   fi
 
-  if [[ "$engine" == "mysql" ]]; then
-    LOG_SQL_DSN_FINAL="${user}:${pass}@tcp(${host}:${port})/${db}?charset=utf8mb4&parseTime=True"
-  else
-    LOG_SQL_DSN_FINAL="host=${host} port=${port} user=${user} password=${pass} dbname=${db} sslmode=disable"
-  fi
+  case "$engine" in
+    mysql)
+      LOG_SQL_DSN_FINAL="${user}:${pass}@tcp(${host}:${port})/${db}?charset=utf8mb4&parseTime=True"
+      ;;
+    clickhouse)
+      LOG_SQL_DSN_FINAL="clickhouse://${user}:${pass}@${host}:${port}/${db}"
+      ;;
+    *)
+      LOG_SQL_DSN_FINAL="host=${host} port=${port} user=${user} password=${pass} dbname=${db} sslmode=disable"
+      ;;
+  esac
 
   # 日志库网络与主库不同时，追加日志叠加层并接入网络（相同则工具已在该网络上）
   if [[ -n "$LOG_NETWORK" && "$LOG_NETWORK" != "${NEWAPI_NETWORK:-}" ]]; then

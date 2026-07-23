@@ -80,6 +80,43 @@ func (s *RiskMonitoringService) enrichUserInfo(rows []map[string]interface{}) {
 	}
 }
 
+func (s *RiskMonitoringService) enrichChannelNames(rows []map[string]interface{}) {
+	if len(rows) == 0 {
+		return
+	}
+	ids := make([]interface{}, 0, len(rows))
+	seen := make(map[int64]bool)
+	for _, row := range rows {
+		id := toInt64(row["channel_id"])
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	ph := make([]string, len(ids))
+	for i := range ids {
+		ph[i] = s.db.Placeholder(i + 1)
+	}
+	query := fmt.Sprintf("SELECT id, COALESCE(name, '') as name FROM channels WHERE id IN (%s)", strings.Join(ph, ","))
+	channelRows, err := s.db.Query(query, ids...)
+	if err != nil {
+		return
+	}
+	names := make(map[int64]string, len(channelRows))
+	for _, row := range channelRows {
+		names[toInt64(row["id"])] = toString(row["name"])
+	}
+	for _, row := range rows {
+		if name, ok := names[toInt64(row["channel_id"])]; ok {
+			row["channel_name"] = name
+		}
+	}
+}
+
 // GetLeaderboards returns usage leaderboards across multiple time windows
 func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sortBy string) (map[string]interface{}, error) {
 	cm := cache.Get()
@@ -110,6 +147,7 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 
 		// Aggregate from logs first (logs may live in a separate DB → no JOIN users).
 		// display_name / status come from the main DB in a second step below.
+		uniqueIPsExpr := s.logDB.CountDistinctNonEmpty("l.ip")
 		query := s.logDB.RebindQuery(fmt.Sprintf(`
 			SELECT l.user_id as user_id,
 				COALESCE(NULLIF(MAX(l.username), ''), '') as username,
@@ -119,14 +157,14 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 				COALESCE(SUM(l.quota), 0) as quota_used,
 				COALESCE(SUM(l.prompt_tokens), 0) as prompt_tokens,
 				COALESCE(SUM(l.completion_tokens), 0) as completion_tokens,
-				COALESCE(COUNT(DISTINCT NULLIF(l.ip, '')), 0) as unique_ips
+				COALESCE(%s, 0) as unique_ips
 			FROM logs l
 			WHERE l.created_at >= ? AND l.created_at <= ?
 				AND l.type IN (2, 5)
 				AND l.user_id IS NOT NULL
 			GROUP BY l.user_id
 			ORDER BY %s
-			LIMIT ?`, orderBy))
+			LIMIT ?`, uniqueIPsExpr, orderBy))
 
 		rows, err := s.logDB.Query(query, startTime, now, limit)
 		if err != nil {
@@ -158,10 +196,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	startTime := now - windowSeconds
 
 	// User info
-	groupCol := "`group`"
-	if s.db.IsPG {
-		groupCol = `"group"`
-	}
+	groupCol := s.db.QuoteIdentifier("group")
 	userRow, _ := s.db.QueryOne(s.db.RebindQuery(
 		fmt.Sprintf("SELECT id, username, display_name, email, status, %s, remark, linux_do_id, request_count FROM users WHERE id = ? AND deleted_at IS NULL", groupCol)), userID)
 
@@ -188,20 +223,21 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	}
 
 	// Usage stats in window
-	statsQuery := s.logDB.RebindQuery(`
+	uniqueIPsExpr := s.logDB.CountDistinctNonEmpty("l.ip")
+	statsQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT COUNT(*) as total_requests,
-			SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) as success_requests,
-			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure_requests,
-			COALESCE(SUM(quota), 0) as quota_used,
-			COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-			COALESCE(SUM(completion_tokens), 0) as completion_tokens,
-			COUNT(DISTINCT NULLIF(ip, '')) as unique_ips,
-			COUNT(DISTINCT token_id) as unique_tokens,
-			COUNT(DISTINCT model_name) as unique_models,
-			COUNT(DISTINCT channel_id) as unique_channels,
-			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
-		FROM logs
-		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)`)
+			SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END) as success_requests,
+			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_requests,
+			COALESCE(SUM(l.quota), 0) as quota_used,
+			COALESCE(SUM(l.prompt_tokens), 0) as prompt_tokens,
+			COALESCE(SUM(l.completion_tokens), 0) as completion_tokens,
+			%s as unique_ips,
+			COUNT(DISTINCT l.token_id) as unique_tokens,
+			COUNT(DISTINCT l.model_name) as unique_models,
+			COUNT(DISTINCT l.channel_id) as unique_channels,
+			SUM(CASE WHEN l.type = 2 AND l.completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
+		FROM logs l
+		WHERE l.user_id = ? AND l.created_at >= ? AND l.created_at <= ? AND l.type IN (2, 5)`, uniqueIPsExpr))
 
 	statsRow, _ := s.logDB.QueryOne(statsQuery, userID, startTime, now)
 
@@ -372,20 +408,27 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		topModels = []map[string]interface{}{}
 	}
 
-	// Top channels
-	channelsQuery := s.logDB.RebindQuery(`
-		SELECT channel_id, COALESCE(MAX(channel_name), '') as channel_name,
+	// ClickHouse logs omit channel_name, so enrich those rows from the main DB.
+	channelNameExpr := "COALESCE(MAX(channel_name), '')"
+	if s.logDB.IsCH {
+		channelNameExpr = "''"
+	}
+	channelsQuery := s.logDB.RebindQuery(fmt.Sprintf(`
+		SELECT channel_id, %s as channel_name,
 			COUNT(*) as requests,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
 		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)
 		GROUP BY channel_id
 		ORDER BY requests DESC
-		LIMIT 10`)
+		LIMIT 10`, channelNameExpr))
 
 	topChannels, _ := s.logDB.Query(channelsQuery, userID, startTime, now)
 	if topChannels == nil {
 		topChannels = []map[string]interface{}{}
+	}
+	if s.logDB.IsCH {
+		s.enrichChannelNames(topChannels)
 	}
 
 	// Top IPs
@@ -402,8 +445,14 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		topIPs = []map[string]interface{}{}
 	}
 
-	// Recent logs (token_name and channel_name are directly in logs table)
-	recentLogsQuery := s.logDB.RebindQuery(`
+	// ClickHouse compatibility ids are commonly zero, so use the real sort key.
+	recentChannelNameExpr := "COALESCE(channel_name, '')"
+	recentOrder := "id DESC"
+	if s.logDB.IsCH {
+		recentChannelNameExpr = "''"
+		recentOrder = "created_at DESC, request_id DESC"
+	}
+	recentLogsQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT id, created_at, type, COALESCE(model_name,'') as model_name,
 			COALESCE(quota, 0) as quota,
 			COALESCE(prompt_tokens, 0) as prompt_tokens,
@@ -411,17 +460,20 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 			COALESCE(use_time, 0) as use_time,
 			COALESCE(ip, '') as ip,
 			COALESCE(channel_id, 0) as channel_id,
-			COALESCE(channel_name, '') as channel_name,
+			%s as channel_name,
 			COALESCE(token_id, 0) as token_id,
 			COALESCE(token_name, '') as token_name
 		FROM logs
 		WHERE user_id = ? AND created_at >= ? AND created_at <= ? AND type IN (2, 5)
-		ORDER BY id DESC
-		LIMIT 50`)
+		ORDER BY %s
+		LIMIT 50`, recentChannelNameExpr, recentOrder))
 
 	recentLogs, _ := s.logDB.Query(recentLogsQuery, userID, startTime, now)
 	if recentLogs == nil {
 		recentLogs = []map[string]interface{}{}
+	}
+	if s.logDB.IsCH {
+		s.enrichChannelNames(recentLogs)
 	}
 
 	result := map[string]interface{}{

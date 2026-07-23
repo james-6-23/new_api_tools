@@ -355,7 +355,9 @@ func (s *LogAnalyticsService) getLogsApproxStats() (total int64, maxID int64) {
 	}
 
 	var statsQuery string
-	if s.logDB.IsPG {
+	if s.logDB.IsCH {
+		statsQuery = `SELECT count() as total FROM logs`
+	} else if s.logDB.IsPG {
 		statsQuery = `SELECT reltuples::bigint as total FROM pg_class WHERE relname = 'logs'`
 	} else {
 		statsQuery = `SELECT TABLE_ROWS as total FROM information_schema.TABLES WHERE TABLE_NAME = 'logs' AND TABLE_SCHEMA = DATABASE()`

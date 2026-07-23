@@ -18,6 +18,7 @@ type DatabaseEngine string
 const (
 	MySQL      DatabaseEngine = "mysql"
 	PostgreSQL DatabaseEngine = "postgresql"
+	ClickHouse DatabaseEngine = "clickhouse"
 )
 
 // Config holds all application configuration
@@ -36,6 +37,7 @@ type Config struct {
 	// Log database (optional). NewAPI 的 fork 可通过 LOG_SQL_DSN 把 logs 表
 	// 分离到独立数据库；本工具需读取该库才能看到实时日志/流量。
 	// 为空时日志库 == 主库（行为与上游一致，完全向后兼容）。
+	// 支持 MySQL/PostgreSQL/ClickHouse。
 	LogSQLDSN         string         `json:"log_sql_dsn"`
 	LogDatabaseEngine DatabaseEngine `json:"log_database_engine"`
 
@@ -118,12 +120,13 @@ func Load() *Config {
 		cfg.RedisConnString = buildRedisConnString()
 	}
 
-	// Auto-detect database engine from DSN
+	// Auto-detect the main database engine. NewAPI stores operational data in
+	// MySQL/PostgreSQL; ClickHouse is supported only for the separate log DB.
 	cfg.DatabaseEngine = detectEngine(cfg.SQLDSN)
 
 	// Log database engine: detect from LOG_SQL_DSN if set, else mirror main DB.
 	if cfg.LogSQLDSN != "" {
-		cfg.LogDatabaseEngine = detectEngine(cfg.LogSQLDSN)
+		cfg.LogDatabaseEngine = detectLogEngine(cfg.LogSQLDSN)
 	} else {
 		cfg.LogDatabaseEngine = cfg.DatabaseEngine
 	}
@@ -231,6 +234,14 @@ func detectEngine(dsn string) DatabaseEngine {
 	return MySQL
 }
 
+// detectLogEngine extends main database detection with ClickHouse log stores.
+func detectLogEngine(dsn string) DatabaseEngine {
+	if strings.HasPrefix(strings.ToLower(dsn), "clickhouse://") {
+		return ClickHouse
+	}
+	return detectEngine(dsn)
+}
+
 // DSN returns a driver-compatible DSN string
 func (c *Config) DSN() string {
 	dsn := c.SQLDSN
@@ -277,6 +288,8 @@ func (c *Config) LogDriverName() string {
 	switch c.LogDatabaseEngine {
 	case PostgreSQL:
 		return "pgx"
+	case ClickHouse:
+		return "clickhouse"
 	default:
 		return "mysql"
 	}

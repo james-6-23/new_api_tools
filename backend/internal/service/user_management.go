@@ -107,11 +107,11 @@ func (s *UserManagementService) GetActivityStats(quick bool) (map[string]interfa
 	// Logs may live in a separate DB, so we can't use a cross-DB EXISTS subquery.
 	// Instead: pull the active/recent user-id sets from the log DB, then count
 	// against the users table in Go.
-	activeSet, err := s.activeUserIDsSince(activeThreshold)        // active in last 7d
+	activeSet, err := s.activeUserIDsSince(activeThreshold) // active in last 7d
 	if err != nil {
 		return nil, err
 	}
-	recentSet, err := s.activeUserIDsSince(inactiveThreshold)      // active in last 30d
+	recentSet, err := s.activeUserIDsSince(inactiveThreshold) // active in last 30d
 	if err != nil {
 		return nil, err
 	}
@@ -194,10 +194,7 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 		orderDir = "DESC"
 	}
 
-	groupCol := "`group`"
-	if s.db.IsPG {
-		groupCol = `"group"`
-	}
+	groupCol := s.db.QuoteIdentifier("group")
 
 	// Detect which OAuth columns exist in the database
 	oauthCols := s.getAvailableOAuthColumns()
@@ -726,6 +723,20 @@ func toInt64(v interface{}) int64 {
 	case int:
 		return int64(val)
 	case int32:
+		return int64(val)
+	case int16:
+		return int64(val)
+	case int8:
+		return int64(val)
+	case uint64:
+		return int64(val)
+	case uint:
+		return int64(val)
+	case uint32:
+		return int64(val)
+	case uint16:
+		return int64(val)
+	case uint8:
 		return int64(val)
 	case float64:
 		return int64(val)

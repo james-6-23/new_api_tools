@@ -54,10 +54,7 @@ var reservedWords = map[string]bool{
 // quoteColumn quotes a column name if it is a SQL reserved word
 func (m *Manager) quoteColumn(col string) string {
 	if reservedWords[strings.ToLower(col)] {
-		if m.IsPG {
-			return fmt.Sprintf(`"%s"`, col)
-		}
-		return fmt.Sprintf("`%s`", col)
+		return m.QuoteIdentifier(col)
 	}
 	return col
 }
