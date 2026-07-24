@@ -335,28 +335,30 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	}
 	ipSwitchAnalysis := analyzeIPSwitches(ipSequence)
 
-	// Risk flags
+	// Geo 聚合：distinct IP batch lookup，用于「同城抖动 vs 跨城跳跃」分层（#20）
+	distinctIPs := collectDistinctIPs(ipSequence)
+	geoAvailable := IsIPGeoAvailable()
+	var geoMap map[string]IPGeoInfo
+	if geoAvailable && len(distinctIPs) > 0 {
+		geoMap = LookupIPGeoBatch(distinctIPs)
+	} else {
+		geoMap = map[string]IPGeoInfo{}
+	}
+	geoAnalysis := analyzeIPGeoFromSequence(ipSequence, geoMap, geoAvailable)
+	if details, ok := ipSwitchAnalysis["switch_details"].([]map[string]interface{}); ok && len(details) > 0 {
+		enrichSwitchDetailsWithGeo(details, geoMap)
+	}
+
+	// Risk flags（非 IP 类）
 	riskFlags := []string{}
 	if requestsPerMinute > 5.0 {
 		riskFlags = append(riskFlags, "HIGH_RPM")
 	}
-	if uniqueIPs > 10 {
-		riskFlags = append(riskFlags, "MANY_IPS")
-	}
 	if failureRate > 50.0 && totalRequests > 10 {
 		riskFlags = append(riskFlags, "HIGH_FAILURE_RATE")
 	}
-
-	// IP switch risk flags (matching Python logic)
-	avgIPDuration := toFloat64(ipSwitchAnalysis["avg_ip_duration"])
-	rapidSwitchCount := toInt64(ipSwitchAnalysis["rapid_switch_count"])
-	realSwitchCount := toInt64(ipSwitchAnalysis["real_switch_count"])
-	if rapidSwitchCount >= 3 && avgIPDuration < 300 {
-		riskFlags = append(riskFlags, "IP_RAPID_SWITCH")
-	}
-	if avgIPDuration < 30 && realSwitchCount >= 3 {
-		riskFlags = append(riskFlags, "IP_HOPPING")
-	}
+	// IP / 地理相关 flags（同城多 IP 不再直接 MANY_IPS）
+	riskFlags = appendGeoAwareIPRiskFlags(riskFlags, uniqueIPs, ipSwitchAnalysis, geoAnalysis)
 
 	// Checkin anomaly detection
 	checkin := analyzeCheckins(s.db, userID, startTime, now)
@@ -385,6 +387,7 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 		"avg_quota_per_request": avgQuotaPerRequest,
 		"risk_flags":            riskFlags,
 		"ip_switch_analysis":    ipSwitchAnalysis,
+		"ip_geo_analysis":       geoAnalysis,
 	}
 	if checkinAnalysisMap != nil {
 		risk["checkin_analysis"] = checkinAnalysisMap
@@ -443,6 +446,34 @@ func (s *RiskMonitoringService) GetUserAnalysis(userID int64, windowSeconds int6
 	topIPs, _ := s.logDB.QueryWithTimeout(30*time.Second, ipsQuery, userID, startTime, now)
 	if topIPs == nil {
 		topIPs = []map[string]interface{}{}
+	}
+	// 给 Top IP 补地理标签（复用上面的 geoMap；Top 里可能有序列外 IP，再查一次缺口）
+	if geoAvailable && len(topIPs) > 0 {
+		need := make([]string, 0)
+		for _, row := range topIPs {
+			ip := fmt.Sprintf("%v", row["ip"])
+			if ip == "" {
+				continue
+			}
+			if _, ok := geoMap[ip]; !ok {
+				need = append(need, ip)
+			}
+		}
+		if len(need) > 0 {
+			extra := LookupIPGeoBatch(need)
+			for ip, info := range extra {
+				geoMap[ip] = info
+			}
+		}
+		for _, row := range topIPs {
+			ip := fmt.Sprintf("%v", row["ip"])
+			info := geoMap[ip]
+			row["city"] = info.City
+			row["region"] = info.Region
+			row["country"] = info.Country
+			row["country_code"] = info.CountryCode
+			row["geo_label"] = geoDisplayLabel(info)
+		}
 	}
 
 	// ClickHouse compatibility ids are commonly zero, so use the real sort key.

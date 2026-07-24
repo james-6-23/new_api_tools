@@ -32,6 +32,34 @@ interface IPSwitchAnalysis {
         is_dual_stack?: boolean
         from_version?: string
         to_version?: string
+        from_city?: string
+        to_city?: string
+        from_country?: string
+        to_country?: string
+        is_geo_jump?: boolean
+        is_same_city?: boolean
+    }>
+}
+
+interface IPGeoAnalysis {
+    geo_available: boolean
+    unique_cities: number
+    unique_regions: number
+    unique_countries: number
+    cross_city_switches: number
+    same_city_switches: number
+    rapid_cross_city_count: number
+    unknown_geo_ips?: number
+    min_cross_city_interval?: number
+    locations?: Array<{
+        key: string
+        label: string
+        country?: string
+        country_code?: string
+        region?: string
+        city?: string
+        ip_count: number
+        ips?: string[]
     }>
 }
 
@@ -52,6 +80,7 @@ export interface UserAnalysis {
     risk: {
         requests_per_minute: number; avg_quota_per_request?: number
         risk_flags: string[]; ip_switch_analysis?: IPSwitchAnalysis
+        ip_geo_analysis?: IPGeoAnalysis
         checkin_analysis?: {
             checkin_count: number
             total_quota_awarded: number
@@ -60,7 +89,10 @@ export interface UserAnalysis {
     }
     top_models: Array<{ model_name: string; requests: number }>
     top_channels?: Array<{ channel_id: number; channel_name: string; requests: number; quota_used: number }>
-    top_ips: Array<{ ip: string; requests: number }>
+    top_ips: Array<{
+        ip: string; requests: number
+        city?: string; region?: string; country?: string; country_code?: string; geo_label?: string
+    }>
     recent_logs?: Array<{
         id: number; created_at: number; type: number; model_name: string
         quota: number; prompt_tokens: number; completion_tokens: number
@@ -73,6 +105,9 @@ export interface UserAnalysis {
 export const RISK_FLAG_LABELS: Record<string, string> = {
     'HIGH_RPM': '请求频率过高',
     'MANY_IPS': '多IP访问',
+    'MANY_CITIES': '多城市访问',
+    'GEO_JUMP': '跨城跳跃',
+    'CROSS_BORDER': '跨境访问',
     'HIGH_FAILURE_RATE': '失败率过高',
     'HIGH_EMPTY_RATE': '空回复率过高',
     'IP_RAPID_SWITCH': 'IP快速切换',
@@ -84,6 +119,9 @@ export const BAN_REASONS = [
     { value: '', label: '请选择封禁原因' },
     { value: '请求频率过高 (HIGH_RPM)', label: '请求频率过高 (HIGH_RPM)' },
     { value: '多 IP 访问异常 (MANY_IPS)', label: '多 IP 访问异常 (MANY_IPS)' },
+    { value: '多城市访问 (MANY_CITIES)', label: '多城市访问 (MANY_CITIES)' },
+    { value: '跨城跳跃 (GEO_JUMP)', label: '跨城跳跃 (GEO_JUMP)' },
+    { value: '跨境访问 (CROSS_BORDER)', label: '跨境访问 (CROSS_BORDER)' },
     { value: '失败率过高 (HIGH_FAILURE_RATE)', label: '失败率过高 (HIGH_FAILURE_RATE)' },
     { value: '空回复率过高 (HIGH_EMPTY_RATE)', label: '空回复率过高 (HIGH_EMPTY_RATE)' },
     { value: 'IP快速切换 (IP_RAPID_SWITCH)', label: 'IP快速切换 (IP_RAPID_SWITCH)' },
@@ -516,9 +554,77 @@ export function UserAnalysisDialog({
                                         <CardContent className="p-4 text-center">
                                             <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">IP 来源</div>
                                             <div className="text-2xl font-bold tabular-nums">{formatAnalysisNumber(analysis.summary.unique_ips)}</div>
+                                            {analysis.risk.ip_geo_analysis?.geo_available && (
+                                                <div className="text-[11px] text-muted-foreground mt-1">
+                                                    城 {analysis.risk.ip_geo_analysis.unique_cities}
+                                                    {analysis.risk.ip_geo_analysis.unique_countries > 1 && (
+                                                        <span> · 国 {analysis.risk.ip_geo_analysis.unique_countries}</span>
+                                                    )}
+                                                </div>
+                                            )}
                                         </CardContent>
                                     </Card>
                                 </div>
+
+                                {/* 地理分布：同城抖动 vs 跨城 */}
+                                {analysis.risk.ip_geo_analysis?.geo_available && (
+                                    <div className="space-y-3">
+                                        <h4 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                                            <Globe className="w-4 h-4" />
+                                            地理分布
+                                            {analysis.risk.ip_geo_analysis.unique_cities <= 1 && analysis.summary.unique_ips > 5 && (
+                                                <Badge variant="outline" className="text-xs px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200">
+                                                    同城 IP 抖动（一般不风控）
+                                                </Badge>
+                                            )}
+                                            {(analysis.risk.ip_geo_analysis.cross_city_switches > 0 || analysis.risk.ip_geo_analysis.unique_cities >= 2) && (
+                                                <Badge variant="destructive" className="text-xs px-1.5 py-0">
+                                                    存在跨城
+                                                </Badge>
+                                            )}
+                                        </h4>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                            <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                                                <div className="text-lg font-bold">{analysis.risk.ip_geo_analysis.unique_cities}</div>
+                                                <div className="text-xs text-muted-foreground">城市数</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                                                <div className="text-lg font-bold">{analysis.risk.ip_geo_analysis.unique_countries}</div>
+                                                <div className="text-xs text-muted-foreground">国家数</div>
+                                            </div>
+                                            <div className={cn(
+                                                "rounded-lg border p-2.5 text-center",
+                                                analysis.risk.ip_geo_analysis.cross_city_switches > 0
+                                                    ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                                                    : "bg-muted/30"
+                                            )}>
+                                                <div className={cn(
+                                                    "text-lg font-bold",
+                                                    analysis.risk.ip_geo_analysis.cross_city_switches > 0 && "text-red-600"
+                                                )}>
+                                                    {analysis.risk.ip_geo_analysis.cross_city_switches}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">跨城切换</div>
+                                            </div>
+                                            <div className="rounded-lg border bg-muted/30 p-2.5 text-center">
+                                                <div className="text-lg font-bold text-emerald-600">
+                                                    {analysis.risk.ip_geo_analysis.same_city_switches}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">同城切换</div>
+                                            </div>
+                                        </div>
+                                        {(analysis.risk.ip_geo_analysis.locations?.length ?? 0) > 0 && (
+                                            <div className="flex flex-wrap gap-2">
+                                                {analysis.risk.ip_geo_analysis.locations!.slice(0, 8).map((loc) => (
+                                                    <Badge key={loc.key} variant="secondary" className="px-2 py-1 font-normal">
+                                                        {loc.label || loc.key}
+                                                        <span className="ml-1 text-muted-foreground tabular-nums">{loc.ip_count} IP</span>
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Models and IPs */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -554,8 +660,13 @@ export function UserAnalysisDialog({
                                                 return (
                                                     <div key={ipItem.ip} className="space-y-1.5">
                                                         <div className="flex justify-between text-xs">
-                                                            <div className="flex items-center gap-1.5">
+                                                            <div className="flex items-center gap-1.5 min-w-0">
                                                                 <span className="font-medium font-mono truncate">{ipItem.ip}</span>
+                                                                {ipItem.geo_label && (
+                                                                    <span className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={ipItem.geo_label}>
+                                                                        {ipItem.geo_label}
+                                                                    </span>
+                                                                )}
                                                                 {isCloudflareIp(ipItem.ip) && (
                                                                     <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded shrink-0">CF</span>
                                                                 )}
@@ -642,16 +753,16 @@ export function UserAnalysisDialog({
                                                 <div className="flex items-center justify-between">
                                                     <div className="text-xs font-semibold text-muted-foreground">最近切换记录:</div>
                                                     <div className="text-xs text-muted-foreground italic flex items-center gap-1">
-                                                        <AlertTriangle className="w-3 h-3" /> 蓝色为双栈切换（正常），红色为异常切换
+                                                        <AlertTriangle className="w-3 h-3" /> 蓝=双栈 · 绿=同城 · 红=跨城/异常
                                                     </div>
                                                 </div>
                                                 <div className="rounded-lg border overflow-hidden shadow-sm">
                                                     <div className="bg-muted/30 px-3 py-2 flex text-xs uppercase tracking-wider font-bold text-muted-foreground border-b border-border/60">
                                                         <div className="w-[120px]">切换时间</div>
-                                                        <div className="flex-1 px-2 text-center">源 IP 地址</div>
+                                                        <div className="flex-1 px-2 text-center">源 IP / 城市</div>
                                                         <div className="w-8"></div>
-                                                        <div className="flex-1 px-2 text-center">目标 IP 地址</div>
-                                                        <div className="w-28 text-right">切换间隔</div>
+                                                        <div className="flex-1 px-2 text-center">目标 IP / 城市</div>
+                                                        <div className="w-28 text-right">间隔 / 类型</div>
                                                     </div>
                                                     <div className="max-h-[220px] overflow-y-auto overflow-x-hidden bg-background">
                                                         {analysis.risk.ip_switch_analysis.switch_details.slice(-12).reverse().map((detail, idx) => (
@@ -661,28 +772,37 @@ export function UserAnalysisDialog({
                                                                     "flex items-center px-3 py-2.5 text-xs border-b last:border-b-0 hover:bg-muted/5 transition-colors group",
                                                                     detail.is_dual_stack
                                                                         ? "bg-blue-50/40 dark:bg-blue-900/10"
-                                                                        : detail.interval <= 60
+                                                                        : detail.is_geo_jump
                                                                             ? "bg-red-50/40 dark:bg-red-900/10"
-                                                                            : "bg-background"
+                                                                            : detail.is_same_city
+                                                                                ? "bg-emerald-50/40 dark:bg-emerald-900/10"
+                                                                                : detail.interval <= 60
+                                                                                    ? "bg-red-50/40 dark:bg-red-900/10"
+                                                                                    : "bg-background"
                                                                 )}
                                                             >
                                                                 <div className="w-[120px] text-muted-foreground font-mono tabular-nums">
                                                                     {formatTime(detail.time)}
                                                                 </div>
-                                                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
-                                                                    <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                                                        {detail.from_ip}
-                                                                    </code>
-                                                                    {isCloudflareIp(detail.from_ip) && (
-                                                                        <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
-                                                                    )}
-                                                                    {detail.from_version && (
-                                                                        <span className={cn(
-                                                                            "text-[10px] px-1 py-0.5 rounded",
-                                                                            detail.from_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                                                                        )}>
-                                                                            {detail.from_version}
-                                                                        </span>
+                                                                <div className="flex-1 px-2 flex flex-col items-center gap-0.5 min-w-0">
+                                                                    <div className="flex items-center gap-1">
+                                                                        <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                                                            {detail.from_ip}
+                                                                        </code>
+                                                                        {isCloudflareIp(detail.from_ip) && (
+                                                                            <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
+                                                                        )}
+                                                                        {detail.from_version && (
+                                                                            <span className={cn(
+                                                                                "text-[10px] px-1 py-0.5 rounded",
+                                                                                detail.from_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                                                                            )}>
+                                                                                {detail.from_version}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {detail.from_city && (
+                                                                        <span className="text-[10px] text-muted-foreground truncate max-w-full">{detail.from_city}</span>
                                                                     )}
                                                                 </div>
                                                                 <div className="w-8 flex justify-center">
@@ -691,23 +811,28 @@ export function UserAnalysisDialog({
                                                                         detail.is_dual_stack ? "text-blue-400" : "text-muted-foreground/50 group-hover:text-primary"
                                                                     )}>→</span>
                                                                 </div>
-                                                                <div className="flex-1 px-2 flex justify-center items-center gap-1">
-                                                                    <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
-                                                                        {detail.to_ip}
-                                                                    </code>
-                                                                    {isCloudflareIp(detail.to_ip) && (
-                                                                        <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
-                                                                    )}
-                                                                    {detail.to_version && (
-                                                                        <span className={cn(
-                                                                            "text-[10px] px-1 py-0.5 rounded",
-                                                                            detail.to_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                                                                        )}>
-                                                                            {detail.to_version}
-                                                                        </span>
+                                                                <div className="flex-1 px-2 flex flex-col items-center gap-0.5 min-w-0">
+                                                                    <div className="flex items-center gap-1">
+                                                                        <code className="px-1.5 py-0.5 rounded bg-muted/50 border border-border/80 font-mono text-xs text-foreground inline-block whitespace-nowrap">
+                                                                            {detail.to_ip}
+                                                                        </code>
+                                                                        {isCloudflareIp(detail.to_ip) && (
+                                                                            <span className="bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0 text-[9px] font-bold rounded">CF</span>
+                                                                        )}
+                                                                        {detail.to_version && (
+                                                                            <span className={cn(
+                                                                                "text-[10px] px-1 py-0.5 rounded",
+                                                                                detail.to_version === 'v6' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                                                                            )}>
+                                                                                {detail.to_version}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    {detail.to_city && (
+                                                                        <span className="text-[10px] text-muted-foreground truncate max-w-full">{detail.to_city}</span>
                                                                     )}
                                                                 </div>
-                                                                <div className="w-28 text-right">
+                                                                <div className="w-28 text-right flex flex-col items-end gap-0.5">
                                                                     {detail.is_dual_stack ? (
                                                                         <Badge
                                                                             variant="outline"
@@ -715,6 +840,18 @@ export function UserAnalysisDialog({
                                                                         >
                                                                             <span className="mr-1">⇄</span>
                                                                             双栈
+                                                                        </Badge>
+                                                                    ) : detail.is_geo_jump ? (
+                                                                        <Badge variant="destructive" className="px-2 py-0.5 h-6 text-xs font-mono">
+                                                                            <AlertTriangle className="w-3 h-3 mr-1" />
+                                                                            跨城 {detail.interval}s
+                                                                        </Badge>
+                                                                    ) : detail.is_same_city ? (
+                                                                        <Badge
+                                                                            variant="outline"
+                                                                            className="px-2 py-0.5 h-6 text-xs font-mono bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400"
+                                                                        >
+                                                                            同城 {detail.interval}s
                                                                         </Badge>
                                                                     ) : (
                                                                         <Badge

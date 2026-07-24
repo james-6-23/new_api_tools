@@ -36,6 +36,12 @@ const REASON_STYLES: Record<string, string> = {
   'HIGH_RPM': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
   '多IP访问': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
   'MANY_IPS': 'bg-orange-50 text-orange-700 border-orange-100 dark:bg-orange-900/20 dark:text-orange-400',
+  '多城市访问': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
+  'MANY_CITIES': 'bg-red-50 text-red-700 border-red-100 dark:bg-red-900/20 dark:text-red-400',
+  '跨城跳跃': 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400',
+  'GEO_JUMP': 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400',
+  '跨境访问': 'bg-violet-50 text-violet-700 border-violet-100 dark:bg-violet-900/20 dark:text-violet-400',
+  'CROSS_BORDER': 'bg-violet-50 text-violet-700 border-violet-100 dark:bg-violet-900/20 dark:text-violet-400',
   '失败率过高': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
   'HIGH_FAILURE_RATE': 'bg-yellow-50 text-yellow-700 border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400',
   '空回复率过高': 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400',
@@ -3766,7 +3772,7 @@ export function RealtimeRanking() {
                           <div className="w-1 h-1 rounded-full bg-orange-400"></div>
                           命中 IP 异常标签
                         </div>
-                        <p className="text-[10px] text-slate-500 pl-3">仅对出现多IP、快速切换或地域跳变等风险特征的用户进行研判。</p>
+                        <p className="text-[10px] text-slate-500 pl-3">优先研判跨城/跨境、多城市访问；同城校园网/流量换 IP 一般不单独作为强风险。</p>
                       </div>
 
                       <div className="flex flex-col gap-0.5">
