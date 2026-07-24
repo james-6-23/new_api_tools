@@ -238,18 +238,26 @@ func (s *IPMonitoringService) GetMultiIPTokens(window string, minIPs, limit int,
 		}
 	}
 
-	query := s.logDB.RebindQuery(`
+	wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+	wlSQL := ""
+	if wlCond != "" {
+		wlSQL = " AND " + wlCond
+	}
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT l.token_id, COALESCE(l.token_name, '') as token_name,
 			l.user_id, COALESCE(l.username, '') as username,
 			COUNT(DISTINCT l.ip) as ip_count, COUNT(*) as request_count
 		FROM logs l
-		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''
+		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''%s
 		GROUP BY l.token_id, l.token_name, l.user_id, l.username
 		HAVING COUNT(DISTINCT l.ip) >= ?
 		ORDER BY ip_count DESC
-		LIMIT ?`)
+		LIMIT ?`, wlSQL))
 
-	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
+	qArgs := []interface{}{startTime}
+	qArgs = append(qArgs, wlArgs...)
+	qArgs = append(qArgs, minIPs, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, qArgs...)
 	if err != nil {
 		return map[string]interface{}{
 			"items":   []interface{}{},
@@ -338,17 +346,25 @@ func (s *IPMonitoringService) GetMultiIPUsers(window string, minIPs, limit int, 
 		}
 	}
 
-	query := s.logDB.RebindQuery(`
+	wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+	wlSQL := ""
+	if wlCond != "" {
+		wlSQL = " AND " + wlCond
+	}
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT l.user_id, COALESCE(l.username, '') as username,
 			COUNT(DISTINCT l.ip) as ip_count, COUNT(*) as request_count
 		FROM logs l
-		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''
+		WHERE l.created_at >= ? AND l.ip IS NOT NULL AND l.ip <> ''%s
 		GROUP BY l.user_id, l.username
 		HAVING COUNT(DISTINCT l.ip) >= ?
 		ORDER BY ip_count DESC
-		LIMIT ?`)
+		LIMIT ?`, wlSQL))
 
-	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, startTime, minIPs, limit)
+	qArgs := []interface{}{startTime}
+	qArgs = append(qArgs, wlArgs...)
+	qArgs = append(qArgs, minIPs, limit)
+	rows, err := s.logDB.QueryWithTimeout(ipMonitoringQueryTimeout, query, qArgs...)
 	if err != nil {
 		return map[string]interface{}{
 			"items":   []interface{}{},

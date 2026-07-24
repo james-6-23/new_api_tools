@@ -110,6 +110,9 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 	if params.UserID > 0 {
 		conditions = append(conditions, "t.user_id = ?")
 		args = append(args, params.UserID)
+	} else if cond, wlArgs := PanelWhitelistNotInClause("t.user_id"); cond != "" {
+		conditions = append(conditions, cond)
+		args = append(args, wlArgs...)
 	}
 	if params.Group != "" {
 		conditions = append(conditions, fmt.Sprintf("t.%s = ?", groupCol))

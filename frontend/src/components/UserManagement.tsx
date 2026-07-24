@@ -47,6 +47,7 @@ import { cn } from '../lib/utils'
 import { UserAnalysisDialog } from './UserAnalysisDialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { AffiliateStats } from './AffiliateStats'
+import { PanelWhitelist } from './PanelWhitelist'
 
 
 
@@ -99,7 +100,7 @@ export function UserManagement() {
   const { token } = useAuth()
   const { showToast } = useToast()
 
-  const [activeTab, setActiveTab] = useState<'list' | 'affiliate'>('list')
+  const [activeTab, setActiveTab] = useState<'list' | 'affiliate' | 'panel-whitelist'>('list')
   const [stats, setStats] = useState<ActivityStats | null>(null)
   const [users, setUsers] = useState<UserInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -707,8 +708,8 @@ export function UserManagement() {
         </Button>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'list' | 'affiliate')} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'list' | 'affiliate' | 'panel-whitelist')} className="w-full">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
           <TabsTrigger value="list" className="gap-2">
             <Users className="h-4 w-4" />
             用户列表
@@ -716,6 +717,10 @@ export function UserManagement() {
           <TabsTrigger value="affiliate" className="gap-2">
             <ShieldCheck className="h-4 w-4" />
             邀请返利统计
+          </TabsTrigger>
+          <TabsTrigger value="panel-whitelist" className="gap-2">
+            <Shield className="h-4 w-4" />
+            面板白名单
           </TabsTrigger>
         </TabsList>
 
@@ -1423,6 +1428,10 @@ export function UserManagement() {
 
         <TabsContent value="affiliate" className="mt-6">
           <AffiliateStats />
+        </TabsContent>
+
+        <TabsContent value="panel-whitelist" className="mt-6">
+          <PanelWhitelist />
         </TabsContent>
       </Tabs>
     </div>

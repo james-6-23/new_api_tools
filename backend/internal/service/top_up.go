@@ -211,6 +211,14 @@ func buildTopUpWhere(params ListTopUpParams) (string, []interface{}, int) {
 		where = append(where, fmt.Sprintf("t.user_id = %s", db.Placeholder(argIdx)))
 		args = append(args, *params.UserID)
 		argIdx++
+	} else {
+		// 全局面板白名单：列表默认排除；显式按 user_id 查询时仍可审计该用户
+		if cond, wlArgs, next := PanelWhitelistNotInSQL("t.user_id", argIdx); cond != "" {
+			// cond 自带 AND 前缀，改成 where 片段
+			where = append(where, strings.TrimPrefix(strings.TrimSpace(cond), "AND "))
+			args = append(args, wlArgs...)
+			argIdx = next
+		}
 	}
 
 	if params.InviterID != nil {
@@ -498,6 +506,11 @@ func GetTopUpStatistics(startDate, endDate string) (*TopUpStatistics, error) {
 			args = append(args, ts)
 			argIdx++
 		}
+	}
+	if cond, wlArgs, next := PanelWhitelistNotInSQL("user_id", argIdx); cond != "" {
+		where = append(where, strings.TrimPrefix(strings.TrimSpace(cond), "AND "))
+		args = append(args, wlArgs...)
+		argIdx = next
 	}
 
 	whereSQL := "1=1"

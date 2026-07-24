@@ -210,7 +210,12 @@ func (s *AIAutoBanService) GetSuspiciousUsers(window string, limit int) ([]map[s
 
 	// Find users with high failure rates or unusual patterns.
 	// logs 自带 username，无需 JOIN users（兼容日志独立库）。
-	query := s.logDB.RebindQuery(`
+	wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+	wlSQL := ""
+	if wlCond != "" {
+		wlSQL = " AND " + wlCond
+	}
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT l.user_id, COALESCE(l.username, '') as username,
 			COUNT(*) as total_requests,
 			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) as failure_count,
@@ -218,13 +223,16 @@ func (s *AIAutoBanService) GetSuspiciousUsers(window string, limit int) ([]map[s
 			COUNT(DISTINCT l.ip) as unique_ips,
 			COUNT(DISTINCT l.model_name) as unique_models
 		FROM logs l
-		WHERE l.created_at >= ? AND l.type IN (2, 5)
+		WHERE l.created_at >= ? AND l.type IN (2, 5)%s
 		GROUP BY l.user_id, l.username
 		HAVING COUNT(*) >= 10
 		ORDER BY failure_count DESC, total_requests DESC
-		LIMIT ?`)
+		LIMIT ?`, wlSQL))
 
-	rows, err := s.logDB.Query(query, startTime, limit)
+	qArgs := []interface{}{startTime}
+	qArgs = append(qArgs, wlArgs...)
+	qArgs = append(qArgs, limit)
+	rows, err := s.logDB.Query(query, qArgs...)
 	if err != nil {
 		return nil, err
 	}

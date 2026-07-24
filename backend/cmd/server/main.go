@@ -92,6 +92,7 @@ func main() {
 		// Phase 2.2: Dashboard, UserManagement, LogAnalytics
 		handler.RegisterDashboardRoutes(api)
 		handler.RegisterUserManagementRoutes(api)
+		handler.RegisterPanelWhitelistRoutes(api)
 		handler.RegisterAffiliateStatsRoutes(api)
 		handler.RegisterLogAnalyticsRoutes(api)
 

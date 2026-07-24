@@ -328,18 +328,26 @@ func (s *DashboardService) GetTopUsers(period string, limit int, noCache bool) (
 	startTime, endTime := parsePeriodToTimestamps(period)
 
 	// logs 表已反范式存有 username，直接聚合，无需 JOIN users（兼容 logs 独立库）。
-	query := s.logDB.RebindQuery(`
+	wlCond, wlArgs := PanelWhitelistNotInClause("user_id")
+	wlSQL := ""
+	if wlCond != "" {
+		wlSQL = " AND " + wlCond
+	}
+	query := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT user_id,
 			COALESCE(MAX(username), '') as username,
 			COUNT(*) as request_count,
 			COALESCE(SUM(quota), 0) as quota_used
 		FROM logs
-		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5)
+		WHERE created_at >= ? AND created_at <= ? AND type IN (2, 5)%s
 		GROUP BY user_id
 		ORDER BY quota_used DESC
-		LIMIT ?`)
+		LIMIT ?`, wlSQL))
 
-	rows, err := s.logDB.QueryWithTimeout(15*time.Second, query, startTime, endTime, limit)
+	qArgs := []interface{}{startTime, endTime}
+	qArgs = append(qArgs, wlArgs...)
+	qArgs = append(qArgs, limit)
+	rows, err := s.logDB.QueryWithTimeout(15*time.Second, query, qArgs...)
 	if err != nil {
 		return nil, err
 	}

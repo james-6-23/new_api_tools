@@ -148,6 +148,11 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 		// Aggregate from logs first (logs may live in a separate DB → no JOIN users).
 		// display_name / status come from the main DB in a second step below.
 		uniqueIPsExpr := s.logDB.CountDistinctNonEmpty("l.ip")
+		wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+		wlSQL := ""
+		if wlCond != "" {
+			wlSQL = " AND " + wlCond
+		}
 		query := s.logDB.RebindQuery(fmt.Sprintf(`
 			SELECT l.user_id as user_id,
 				COALESCE(NULLIF(MAX(l.username), ''), '') as username,
@@ -161,12 +166,15 @@ func (s *RiskMonitoringService) GetLeaderboards(windows []string, limit int, sor
 			FROM logs l
 			WHERE l.created_at >= ? AND l.created_at <= ?
 				AND l.type IN (2, 5)
-				AND l.user_id IS NOT NULL
+				AND l.user_id IS NOT NULL%s
 			GROUP BY l.user_id
 			ORDER BY %s
-			LIMIT ?`, uniqueIPsExpr, orderBy))
+			LIMIT ?`, uniqueIPsExpr, wlSQL, orderBy))
 
-		rows, err := s.logDB.Query(query, startTime, now, limit)
+		qArgs := []interface{}{startTime, now}
+		qArgs = append(qArgs, wlArgs...)
+		qArgs = append(qArgs, limit)
+		rows, err := s.logDB.Query(query, qArgs...)
 		if err != nil {
 			windowsData[window] = []map[string]interface{}{}
 			continue

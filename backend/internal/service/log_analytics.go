@@ -66,32 +66,47 @@ func (s *LogAnalyticsService) GetUserRequestRanking(limit int) ([]map[string]int
 
 	if IsQuotaDataAvailable() {
 		// Fast path: aggregate from quota_data
-		query := s.db.RebindQuery(`
+		wlCond, wlArgs := PanelWhitelistNotInClause("q.user_id")
+		wlSQL := ""
+		if wlCond != "" {
+			wlSQL = " AND " + wlCond
+		}
+		query := s.db.RebindQuery(fmt.Sprintf(`
 			SELECT q.user_id,
 				COALESCE(u.username, '') as username,
 				COALESCE(SUM(q.count), 0) as request_count,
 				COALESCE(SUM(q.quota), 0) as quota_used
 			FROM quota_data q
 			LEFT JOIN users u ON q.user_id = u.id
-			WHERE q.user_id > 0
+			WHERE q.user_id > 0%s
 			GROUP BY q.user_id, u.username
 			ORDER BY request_count DESC
-			LIMIT ?`)
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, limit)
+			LIMIT ?`, wlSQL))
+		qArgs := append([]interface{}{}, wlArgs...)
+		qArgs = append(qArgs, limit)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, qArgs...)
 	} else {
 		// Fallback: scan logs with 30-day filter
 		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
-		query := s.logDB.RebindQuery(`
+		wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+		wlSQL := ""
+		if wlCond != "" {
+			wlSQL = " AND " + wlCond
+		}
+		query := s.logDB.RebindQuery(fmt.Sprintf(`
 			SELECT l.user_id,
 				COALESCE(l.username, '') as username,
 				COUNT(*) as request_count,
 				COALESCE(SUM(l.quota), 0) as quota_used
 			FROM logs l
-			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?
+			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?%s
 			GROUP BY l.user_id, l.username
 			ORDER BY request_count DESC
-			LIMIT ?`)
-		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+			LIMIT ?`, wlSQL))
+		qArgs := []interface{}{thirtyDaysAgo}
+		qArgs = append(qArgs, wlArgs...)
+		qArgs = append(qArgs, limit)
+		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, qArgs...)
 	}
 	if err != nil {
 		return nil, err
@@ -117,31 +132,46 @@ func (s *LogAnalyticsService) GetUserQuotaRanking(limit int) ([]map[string]inter
 	var err error
 
 	if IsQuotaDataAvailable() {
-		query := s.db.RebindQuery(`
+		wlCond, wlArgs := PanelWhitelistNotInClause("q.user_id")
+		wlSQL := ""
+		if wlCond != "" {
+			wlSQL = " AND " + wlCond
+		}
+		query := s.db.RebindQuery(fmt.Sprintf(`
 			SELECT q.user_id,
 				COALESCE(u.username, '') as username,
 				COALESCE(SUM(q.count), 0) as request_count,
 				COALESCE(SUM(q.quota), 0) as quota_used
 			FROM quota_data q
 			LEFT JOIN users u ON q.user_id = u.id
-			WHERE q.user_id > 0
+			WHERE q.user_id > 0%s
 			GROUP BY q.user_id, u.username
 			ORDER BY quota_used DESC
-			LIMIT ?`)
-		rows, err = s.db.QueryWithTimeout(30*time.Second, query, limit)
+			LIMIT ?`, wlSQL))
+		qArgs := append([]interface{}{}, wlArgs...)
+		qArgs = append(qArgs, limit)
+		rows, err = s.db.QueryWithTimeout(30*time.Second, query, qArgs...)
 	} else {
 		thirtyDaysAgo := time.Now().AddDate(0, 0, -30).Unix()
-		query := s.logDB.RebindQuery(`
+		wlCond, wlArgs := PanelWhitelistNotInClause("l.user_id")
+		wlSQL := ""
+		if wlCond != "" {
+			wlSQL = " AND " + wlCond
+		}
+		query := s.logDB.RebindQuery(fmt.Sprintf(`
 			SELECT l.user_id,
 				COALESCE(l.username, '') as username,
 				COUNT(*) as request_count,
 				COALESCE(SUM(l.quota), 0) as quota_used
 			FROM logs l
-			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?
+			WHERE l.type IN (2, 5) AND l.user_id > 0 AND l.created_at >= ?%s
 			GROUP BY l.user_id, l.username
 			ORDER BY quota_used DESC
-			LIMIT ?`)
-		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, thirtyDaysAgo, limit)
+			LIMIT ?`, wlSQL))
+		qArgs := []interface{}{thirtyDaysAgo}
+		qArgs = append(qArgs, wlArgs...)
+		qArgs = append(qArgs, limit)
+		rows, err = s.logDB.QueryWithTimeout(30*time.Second, query, qArgs...)
 	}
 	if err != nil {
 		return nil, err

@@ -208,6 +208,15 @@ func (s *UserManagementService) GetUsers(params ListUsersParams) (map[string]int
 	args := []interface{}{}
 	argIdx := 1
 
+	// 全局面板白名单：用户列表默认隐藏（管理白名单页通过 search 精确找人仍可用）
+	if params.Search == "" {
+		if cond, wlArgs, next := PanelWhitelistNotInSQL("u.id", argIdx); cond != "" {
+			where = append(where, strings.TrimPrefix(strings.TrimSpace(cond), "AND "))
+			args = append(args, wlArgs...)
+			argIdx = next
+		}
+	}
+
 	if params.Search != "" {
 		// Build search fields: always include username, display_name, email, aff_code
 		// Conditionally include linux_do_id if it exists
