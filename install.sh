@@ -441,10 +441,11 @@ show_management_menu() {
     else
       echo " 11) 安全设置     (切换 SERVER_HOST / 切换前端端口暴露范围)"
     fi
+    echo " 12) 下载 GeoIP   (可选：IP 地理定位，约 70MB，需访问外网)"
     echo ""
     echo "  0) 退出"
     echo ""
-    read -r -p "请选择操作 [0-11]: " choice
+    read -r -p "请选择操作 [0-12]: " choice
 
     case "$choice" in
       1)
@@ -510,6 +511,12 @@ show_management_menu() {
         read -r -p "按回车键继续..."
         # 重新读取以刷新菜单上的状态
         detect_env_details "$target_dir"
+        ;;
+      12)
+        PROJECT_DIR="$target_dir"
+        maybe_download_geoip_database force
+        echo ""
+        read -r -p "按回车键继续..."
         ;;
       0|"")
         log_info "退出"
@@ -720,9 +727,9 @@ do_update_interactive() {
     git reset --hard origin/main 2>/dev/null || log_warn "代码更新跳过"
   fi
 
-  # 下载 GeoIP 数据库
+  # GeoIP 可选下载（#25，默认询问/跳过，不阻塞更新）
   PROJECT_DIR="$project_dir"
-  download_geoip_database
+  maybe_download_geoip_database
 
   # 迁移旧版 .env（补充 Go 版本所需字段）
   migrate_env_file "$project_dir"
@@ -1064,12 +1071,13 @@ download_geoip_file() {
   for url in "${urls[@]}"; do
     rm -f "$tmp"
     # --fail: HTTP 非 2xx 失败；--max-time: 整次传输超时；--max-filesize: 硬体积上限
+    # 可选步骤：短超时 + 少重试，避免国内机器连不上 GitHub 时拖垮整次部署（#25）
     if ! curl -fsSL \
-        --connect-timeout 15 \
-        --max-time 180 \
+        --connect-timeout 8 \
+        --max-time 60 \
         --max-filesize "$max_bytes" \
-        --retry 2 \
-        --retry-delay 2 \
+        --retry 1 \
+        --retry-delay 1 \
         -o "$tmp" \
         "$url" 2>/dev/null; then
       rm -f "$tmp"
@@ -1098,30 +1106,39 @@ download_geoip_file() {
 }
 
 #######################################
-# 下载 GeoIP 数据库
+# GeoIP 文件是否已就绪（体积合理）
+#######################################
+geoip_files_ready() {
+  local geoip_dir="${1:-${PROJECT_DIR}/data/geoip}"
+  local city_db="${geoip_dir}/GeoLite2-City.mmdb"
+  local asn_db="${geoip_dir}/GeoLite2-ASN.mmdb"
+  [[ -f "$city_db" && -f "$asn_db" ]] || return 1
+  local cs as
+  cs=$(stat -c%s "$city_db" 2>/dev/null || stat -f%z "$city_db" 2>/dev/null || echo 0)
+  as=$(stat -c%s "$asn_db" 2>/dev/null || stat -f%z "$asn_db" 2>/dev/null || echo 0)
+  [[ "$cs" -ge 1048576 && "$cs" -le 120000000 && "$as" -ge 1048576 && "$as" -le 50000000 ]]
+}
+
+#######################################
+# 下载 GeoIP 数据库（实际下载；失败不退出部署）
 #######################################
 download_geoip_database() {
   local geoip_dir="${PROJECT_DIR}/data/geoip"
   local city_db="${geoip_dir}/GeoLite2-City.mmdb"
   local asn_db="${geoip_dir}/GeoLite2-ASN.mmdb"
 
-  # City ~66MB / ASN ~12MB；已存在且体积合理则跳过
-  if [[ -f "$city_db" && -f "$asn_db" ]]; then
-    local cs as
-    cs=$(stat -c%s "$city_db" 2>/dev/null || stat -f%z "$city_db" 2>/dev/null || echo 0)
-    as=$(stat -c%s "$asn_db" 2>/dev/null || stat -f%z "$asn_db" 2>/dev/null || echo 0)
-    if [[ "$cs" -ge 1048576 && "$cs" -le 120000000 && "$as" -ge 1048576 && "$as" -le 50000000 ]]; then
-      log_success "GeoIP 数据库已存在"
-      return 0
-    fi
+  if geoip_files_ready "$geoip_dir"; then
+    log_success "GeoIP 数据库已存在"
+    return 0
+  fi
+  if [[ -f "$city_db" || -f "$asn_db" ]]; then
     log_warn "已有 GeoIP 文件体积异常，重新下载"
     rm -f "$city_db" "$asn_db"
   fi
 
-  log_info "下载 GeoIP 数据库..."
+  log_info "下载 GeoIP 数据库（约 70MB，需可访问 GitHub/镜像）..."
   mkdir -p "$geoip_dir"
 
-  # City: 预期约 66MB，上限 100MB；ASN: 约 12MB，上限 40MB
   local city_urls=(
     "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb"
     "https://cdn.jsdelivr.net/gh/adysec/IP_database@main/geolite/GeoLite2-City.mmdb"
@@ -1137,7 +1154,7 @@ download_geoip_database() {
     if download_geoip_file "$city_db" 1048576 100000000 "${city_urls[@]}"; then
       log_success "GeoLite2-City.mmdb 下载完成"
     else
-      log_warn "GeoLite2-City.mmdb 下载失败（已超时/体积限制，不会无限写入磁盘）"
+      log_warn "GeoLite2-City.mmdb 下载失败（短超时，不阻塞部署）"
       rm -f "$city_db" "${city_db}.tmp"*
     fi
   fi
@@ -1146,12 +1163,65 @@ download_geoip_database() {
     if download_geoip_file "$asn_db" 1048576 40000000 "${asn_urls[@]}"; then
       log_success "GeoLite2-ASN.mmdb 下载完成"
     else
-      log_warn "GeoLite2-ASN.mmdb 下载失败（已超时/体积限制，不会无限写入磁盘）"
+      log_warn "GeoLite2-ASN.mmdb 下载失败（短超时，不阻塞部署）"
       rm -f "$asn_db" "${asn_db}.tmp"*
     fi
   fi
 
-  [[ -f "$city_db" && -f "$asn_db" ]] && log_success "GeoIP 数据库就绪"
+  if [[ -f "$city_db" && -f "$asn_db" ]]; then
+    log_success "GeoIP 数据库就绪"
+    return 0
+  fi
+  log_warn "GeoIP 未就绪：IP 地理定位不可用，其它功能不受影响。可稍后在菜单「下载 GeoIP」或设置 DOWNLOAD_GEOIP=1 重试"
+  return 0
+}
+
+#######################################
+# 可选下载 GeoIP（#25）
+# 优先级：
+#   1) 文件已存在 → 跳过
+#   2) DOWNLOAD_GEOIP=1 / --with-geoip → 下载
+#   3) SKIP_GEOIP_DOWNLOAD=1 / DOWNLOAD_GEOIP=0 → 跳过
+#   4) 交互终端 → 询问 [y/N]，默认跳过
+#   5) 非交互 → 默认跳过
+#######################################
+maybe_download_geoip_database() {
+  local force="${1:-}"  # force = 强制下载（菜单项）
+  local geoip_dir="${PROJECT_DIR}/data/geoip"
+
+  if [[ "$force" != "force" ]] && geoip_files_ready "$geoip_dir"; then
+    log_success "GeoIP 数据库已存在，跳过下载"
+    return 0
+  fi
+
+  local want=""
+  if [[ "$force" == "force" ]]; then
+    want="yes"
+  elif [[ "${DOWNLOAD_GEOIP:-}" =~ ^(1|true|yes|YES|True)$ ]]; then
+    want="yes"
+  elif [[ "${SKIP_GEOIP_DOWNLOAD:-}" =~ ^(1|true|yes|YES|True)$ || "${DOWNLOAD_GEOIP:-}" =~ ^(0|false|no|NO|False)$ ]]; then
+    want="no"
+  elif [[ -t 0 ]]; then
+    echo ""
+    log_info "GeoIP 数据库用于 IP 地理定位 / 跨城风控（约 70MB）"
+    log_info "国内云主机若无法访问 GitHub，下载会失败；跳过不影响核心功能"
+    read -r -p "是否现在下载 GeoIP 数据库? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[yY]$ ]]; then
+      want="yes"
+    else
+      want="no"
+    fi
+  else
+    want="no"
+  fi
+
+  if [[ "$want" != "yes" ]]; then
+    log_info "已跳过 GeoIP 下载（可选）。需要时: DOWNLOAD_GEOIP=1 重新运行，或安装菜单「下载 GeoIP」"
+    mkdir -p "$geoip_dir" 2>/dev/null || true
+    return 0
+  fi
+
+  download_geoip_database
 }
 
 #######################################
@@ -1177,7 +1247,7 @@ check_and_update_configs() {
   fi
 
   if [[ "$updated" == "true" ]]; then
-    log_success "配置已更新，将下载 GeoIP 数据库"
+    log_success "配置已更新（GeoIP 下载为可选项，见菜单或 DOWNLOAD_GEOIP）"
   fi
 }
 
@@ -1307,8 +1377,8 @@ quick_update() {
   # 安全检查：SERVER_HOST 是否绑定到不安全的 0.0.0.0
   check_server_host_security "$PROJECT_DIR"
 
-  # 下载 GeoIP 数据库
-  download_geoip_database
+  # GeoIP 可选下载（#25）
+  maybe_download_geoip_database
 
   # 根据 .env 自动选择 compose 文件（host 模式叠加 overlay）
   setup_compose_files "$PROJECT_DIR"

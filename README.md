@@ -128,6 +128,8 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 | `REDIS_PASSWORD` | 内置 Redis 密码 | 留空或自定义 |
 | `TIMEZONE` | 服务时区 | `Asia/Shanghai` |
 | `LOG_LEVEL` | 日志级别 | `info` |
+| `DOWNLOAD_GEOIP` | 部署脚本是否下载 GeoIP（IP 定位用，约 70MB；可选，默认交互询问且默认跳过） | `0` 跳过 / `1` 下载 |
+| `SKIP_GEOIP_DOWNLOAD` | 设为 `1` 时强制跳过 GeoIP 下载 | 可选 |
 
 ## 联合违规广播接入
 
