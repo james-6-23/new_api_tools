@@ -154,10 +154,7 @@ func (s *AIAutoBanService) ClearAuditLogs() map[string]interface{} {
 // groupCol returns the properly quoted column name for 'group' (reserved word).
 // Uses the log DB engine since 'group' only appears in logs-table queries.
 func (s *AIAutoBanService) groupCol() string {
-	if s.logDB.IsPG {
-		return `"group"`
-	}
-	return "`group`"
+	return s.logDB.QuoteIdentifier("group")
 }
 
 // GetAvailableGroups returns groups used in recent logs

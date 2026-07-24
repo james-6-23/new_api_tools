@@ -85,7 +85,7 @@ docker-compose up -d
 
 ### 日志分库（LOG_SQL_DSN）自动兼容
 
-部分 NewAPI fork 支持 `LOG_SQL_DSN`，把 `logs` 表整张分离到**独立日志数据库**。这种部署下主库的 `logs` 表会被冻结、不再更新——本工具若只连主库，则**仪表盘流量分析、使用日志、模型监控、风控 / IP 分析全部显示为 0**（其余如用户、令牌、兑换码数据正常）。
+部分 NewAPI fork 支持 `LOG_SQL_DSN`，把 `logs` 表整张分离到**独立日志数据库**（MySQL、PostgreSQL 或 ClickHouse）。这种部署下主库的 `logs` 表会被冻结、不再更新——本工具若只连主库，则**仪表盘流量分析、使用日志、模型监控、风控 / IP 分析全部显示为 0**（其余如用户、令牌、兑换码数据正常）。
 
 **无需任何额外操作**：上面的一键脚本 / `deploy.sh` 会自动检测 NewAPI 是否启用了 `LOG_SQL_DSN`，若启用则自动解析、做容器名 / 网络改写、写入工具 `.env` 并把工具容器接入日志库网络。NewAPI 未启用时则跳过（日志查询回落主库，行为不变）。
 
@@ -114,7 +114,7 @@ bash <(curl -sSL https://raw.githubusercontent.com/james-6-23/new_api_tools/main
 | `JWT_SECRET` | JWT 签名密钥 | 部署脚本自动生成 |
 | `JWT_EXPIRE_HOURS` | JWT 过期时间（小时） | `24` |
 | `SQL_DSN` | 推荐的完整数据库连接串 | `host=... port=5432 user=...` |
-| `LOG_SQL_DSN` | 日志专用库连接串（NewAPI 用 `LOG_SQL_DSN` 分库时才需要；留空则日志查询回落主库）。建议用 `setup-log-db.sh` 自动生成 | 可选 |
+| `LOG_SQL_DSN` | 日志专用库连接串（支持 MySQL、PostgreSQL 和 ClickHouse；留空则日志查询回落主库）。建议用 `setup-log-db.sh` 自动生成 | `clickhouse://user:pass@host:9000/logs` / 可选 |
 | `DB_ENGINE` | 兼容旧版分离配置的数据库类型 | `postgres` / `mysql` |
 | `DB_DNS` | 数据库主机或容器服务名 | `postgres` |
 | `DB_PORT` | 数据库端口 | `5432` / `3306` |

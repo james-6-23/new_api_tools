@@ -878,10 +878,7 @@ func (s *AbuseBroadcastService) matchLocalUsers(ctx context.Context, identities 
 		logDB := database.GetLog()
 		// Step 1: aggregate from logs by user (logs may live in a separate DB →
 		// no JOIN users; use logs' own denormalized username, enrich below).
-		ipAgg := "GROUP_CONCAT(DISTINCT l.ip)"
-		if logDB.IsPG {
-			ipAgg = "STRING_AGG(DISTINCT l.ip, ',')"
-		}
+		ipAgg := logDB.StringAggDistinct("l.ip")
 		query := fmt.Sprintf(`
 			SELECT l.user_id AS user_id,
 				COALESCE(MAX(l.username), '') AS username,

@@ -10,6 +10,7 @@ import (
 	"github.com/new-api-tools/backend/internal/config"
 	"github.com/new-api-tools/backend/internal/logger"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -19,6 +20,7 @@ type Manager struct {
 	DB     *sqlx.DB
 	Config *config.Config
 	IsPG   bool
+	IsCH   bool
 }
 
 // Global database manager
@@ -108,15 +110,19 @@ func initLogDB(cfg *config.Config, maxOpen, maxIdle int) error {
 	db.SetConnMaxIdleTime(3 * time.Minute)
 
 	isPG := cfg.LogDatabaseEngine == config.PostgreSQL
+	isCH := cfg.LogDatabaseEngine == config.ClickHouse
 
 	logMgr = &Manager{
 		DB:     db,
 		Config: cfg,
 		IsPG:   isPG,
+		IsCH:   isCH,
 	}
 
 	engineStr := "MySQL"
-	if isPG {
+	if isCH {
+		engineStr = "ClickHouse"
+	} else if isPG {
 		engineStr = "PostgreSQL"
 	}
 	logger.L.DBConnected(engineStr+" [日志库]", extractHost(dsn), extractDB(dsn))
@@ -274,8 +280,8 @@ func (m *Manager) ExecuteDDL(query string) error {
 	return err
 }
 
-// Placeholder returns the correct placeholder for the database engine
-// MySQL uses ?, PostgreSQL uses $1, $2, etc.
+// Placeholder returns the correct placeholder for the database engine.
+// MySQL and ClickHouse use ?, PostgreSQL uses $1, $2, etc.
 func (m *Manager) Placeholder(index int) string {
 	if m.IsPG {
 		return fmt.Sprintf("$%d", index)
@@ -285,7 +291,38 @@ func (m *Manager) Placeholder(index int) string {
 
 // RebindQuery converts ? placeholders to $1, $2 for PostgreSQL
 func (m *Manager) RebindQuery(query string) string {
+	if m.IsCH {
+		return query
+	}
 	return m.DB.Rebind(query)
+}
+
+// QuoteIdentifier quotes a single column or table identifier for the current SQL dialect.
+func (m *Manager) QuoteIdentifier(name string) string {
+	if m.IsPG {
+		escaped := strings.ReplaceAll(name, `"`, `""`)
+		return fmt.Sprintf(`"%s"`, escaped)
+	}
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(name, "`", "``"))
+}
+
+// StringAggDistinct returns a comma-separated distinct string aggregation expression.
+func (m *Manager) StringAggDistinct(expr string) string {
+	if m.IsPG {
+		return fmt.Sprintf("STRING_AGG(DISTINCT %s, ',')", expr)
+	}
+	if m.IsCH {
+		return fmt.Sprintf("arrayStringConcat(arraySort(groupUniqArray(%s)), ',')", expr)
+	}
+	return fmt.Sprintf("GROUP_CONCAT(DISTINCT %s)", expr)
+}
+
+// CountDistinctNonEmpty returns a distinct count expression that ignores empty strings.
+func (m *Manager) CountDistinctNonEmpty(expr string) string {
+	if m.IsCH {
+		return fmt.Sprintf("uniqExactIf(%s, length(%s) > 0)", expr, expr)
+	}
+	return fmt.Sprintf("COUNT(DISTINCT NULLIF(%s, ''))", expr)
 }
 
 // TableExists checks if a table exists in the database

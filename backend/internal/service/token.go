@@ -61,18 +61,12 @@ func NewTokenService() *TokenService {
 
 // keyCol returns the properly quoted column name for 'key' (reserved word)
 func (s *TokenService) keyCol() string {
-	if s.db.IsPG {
-		return `"key"`
-	}
-	return "`key`"
+	return s.db.QuoteIdentifier("key")
 }
 
 // groupCol returns the properly quoted column name for 'group' (reserved word)
 func (s *TokenService) groupCol() string {
-	if s.db.IsPG {
-		return `"group"`
-	}
-	return "`group`"
+	return s.db.QuoteIdentifier("group")
 }
 
 // MaskTokenKey masks a token key, showing only the first 8 chars

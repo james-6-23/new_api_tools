@@ -788,6 +788,20 @@ func toFloat64(v interface{}) float64 {
 		return float64(val)
 	case int32:
 		return float64(val)
+	case int16:
+		return float64(val)
+	case int8:
+		return float64(val)
+	case uint64:
+		return float64(val)
+	case uint:
+		return float64(val)
+	case uint32:
+		return float64(val)
+	case uint16:
+		return float64(val)
+	case uint8:
+		return float64(val)
 	case string:
 		var f float64
 		fmt.Sscanf(val, "%f", &f)

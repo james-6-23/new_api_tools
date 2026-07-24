@@ -113,10 +113,31 @@ dsn_field() {
   fi
 }
 
+dsn_engine() {
+  local dsn="$1"
+  if [[ "$dsn" =~ ^postgres(ql)?:// || "$dsn" == host=* || "$dsn" == *" host="* ]]; then
+    echo "postgres"
+  elif [[ "$dsn" =~ ^mysql:// || "$dsn" == *"@tcp("* ]]; then
+    echo "mysql"
+  elif [[ "$dsn" =~ ^clickhouse:// ]]; then
+    echo "clickhouse"
+  fi
+}
+
 # 重新组装成 Go pgx/mysql 可用的 keyword DSN（统一输出形式，便于本工具消费）
 build_pg_keyword_dsn() {
   local host="$1" port="$2" user="$3" pass="$4" db="$5"
   echo "host=${host} port=${port:-5432} user=${user} password=${pass} dbname=${db} sslmode=disable"
+}
+
+build_mysql_dsn() {
+  local host="$1" port="$2" user="$3" pass="$4" db="$5"
+  echo "${user}:${pass}@tcp(${host}:${port:-3306})/${db}?charset=utf8mb4&parseTime=True"
+}
+
+build_clickhouse_dsn() {
+  local host="$1" port="$2" user="$3" pass="$4" db="$5"
+  echo "clickhouse://${user}:${pass}@${host}:${port:-9000}/${db}"
 }
 
 #######################################
@@ -268,13 +289,19 @@ main() {
   log_success "检测到 LOG_SQL_DSN（原始）: ${raw_dsn}"
 
   # 2) 解析
-  local host port user pass db
+  local engine host port user pass db
+  engine="$(dsn_engine "$raw_dsn")"
   host="$(dsn_field "$raw_dsn" host)"
-  port="$(dsn_field "$raw_dsn" port)"; port="${port:-5432}"
+  port="$(dsn_field "$raw_dsn" port)"
   user="$(dsn_field "$raw_dsn" user)"
   pass="$(dsn_field "$raw_dsn" password)"
   db="$(dsn_field "$raw_dsn" dbname)"
   [[ -n "$host" && -n "$db" ]] || die "无法解析 LOG_SQL_DSN（host/dbname 缺失）: $raw_dsn"
+  case "$engine" in
+    mysql) port="${port:-3306}" ;;
+    clickhouse) port="${port:-9000}" ;;
+    *) engine="postgres"; port="${port:-5432}" ;;
+  esac
 
   # 3) 决定工具怎么连到日志库（与 deploy.sh 主库逻辑同款）
   local need_network=""
@@ -309,7 +336,11 @@ main() {
   fi
 
   local final_dsn
-  final_dsn="$(build_pg_keyword_dsn "$host" "$port" "$user" "$pass" "$db")"
+  case "$engine" in
+    mysql) final_dsn="$(build_mysql_dsn "$host" "$port" "$user" "$pass" "$db")" ;;
+    clickhouse) final_dsn="$(build_clickhouse_dsn "$host" "$port" "$user" "$pass" "$db")" ;;
+    *) final_dsn="$(build_pg_keyword_dsn "$host" "$port" "$user" "$pass" "$db")" ;;
+  esac
 
   echo ""
   log_success "最终写入的 LOG_SQL_DSN:"
