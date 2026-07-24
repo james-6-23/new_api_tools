@@ -38,6 +38,7 @@ func RegisterTopUpRoutes(r *gin.RouterGroup) {
 	{
 		g.GET("", ListTopUps)
 		g.GET("/statistics", GetTopUpStatistics)
+		g.GET("/user-income-summary", GetUserTopUpIncomeSummary)
 		g.GET("/payment-methods", GetPaymentMethods)
 		g.GET("/payment-providers", GetPaymentProviders)
 		g.GET("/export", ExportTopUps)
@@ -104,6 +105,31 @@ func GetTopUpStatistics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    stats,
+	})
+}
+
+// GET /api/top-ups/user-income-summary — 单用户充值 vs 兑换码入账汇总（剔除兑换后的实付额度）
+func GetUserTopUpIncomeSummary(c *gin.Context) {
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "user_id is required", ""))
+		return
+	}
+	uid, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil || uid <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResp("INVALID_PARAMS", "invalid user_id", ""))
+		return
+	}
+
+	summary, err := service.GetUserQuotaIncomeSummary(uid, c.Query("start_date"), c.Query("end_date"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResp("QUERY_ERROR", err.Error(), ""))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    summary,
 	})
 }
 
@@ -199,6 +225,10 @@ func ExportTopUps(c *gin.Context) {
 	}
 
 	filename := fmt.Sprintf("top_ups_%s.csv", time.Now().Format("20060102_150405"))
+	if params.UserID != nil && *params.UserID > 0 {
+		// 单用户导出含兑换码标注与统计摘要
+		filename = fmt.Sprintf("user_%d_quota_income_%s.csv", *params.UserID, time.Now().Format("20060102_150405"))
+	}
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Header("Cache-Control", "no-store")

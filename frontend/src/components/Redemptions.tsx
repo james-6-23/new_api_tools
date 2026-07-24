@@ -47,6 +47,17 @@ interface PaginatedResponse {
 
 type StatusFilter = '' | 'unused' | 'used' | 'expired'
 
+/** 纯数字 → used_user_id 精确查；否则 → 使用人用户名模糊查 */
+function appendUserSearchParam(params: URLSearchParams, query: string) {
+  const q = query.trim()
+  if (!q) return
+  if (/^\d+$/.test(q)) {
+    params.append('user_id', q)
+  } else {
+    params.append('username', q)
+  }
+}
+
 export function Redemptions() {
   const { showToast } = useToast()
   const { token } = useAuth()
@@ -61,6 +72,7 @@ export function Redemptions() {
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(1)
   const [nameFilter, setNameFilter] = useState('')
+  const [userFilter, setUserFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -95,6 +107,7 @@ export function Redemptions() {
     try {
       const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() })
       if (nameFilter) params.append('name', nameFilter)
+      appendUserSearchParam(params, userFilter)
       if (statusFilter) params.append('status', statusFilter)
       if (startDate) params.append('start_date', startDate)
       if (endDate) params.append('end_date', endDate)
@@ -115,11 +128,11 @@ export function Redemptions() {
     } finally {
       setLoading(false)
     }
-  }, [apiUrl, getAuthHeaders, page, pageSize, nameFilter, statusFilter, startDate, endDate, showToast])
+  }, [apiUrl, getAuthHeaders, page, pageSize, nameFilter, userFilter, statusFilter, startDate, endDate, showToast])
 
   useEffect(() => { fetchCodes() }, [fetchCodes])
   useEffect(() => { fetchStatistics() }, [fetchStatistics])
-  useEffect(() => { setPage(1) }, [nameFilter, statusFilter, startDate, endDate])
+  useEffect(() => { setPage(1) }, [nameFilter, userFilter, statusFilter, startDate, endDate])
 
   const formatTimestamp = (ts: number) => {
     if (!ts || ts <= 0) return '-'
@@ -256,6 +269,12 @@ export function Redemptions() {
             <span className="text-muted-foreground">总额度价值:</span>
             <span className="font-semibold text-primary">{statsLoading ? '-' : formatQuota(statistics?.total_quota || 0)}</span>
           </div>
+          {userFilter.trim() && (
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">该用户匹配:</span>
+              <span className="font-semibold text-primary">{loading ? '-' : `${total} 个`}</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -268,7 +287,7 @@ export function Redemptions() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">名称搜索</label>
               <div className="relative">
@@ -279,6 +298,21 @@ export function Redemptions() {
                   onChange={(e) => setNameFilter(e.target.value)} 
                   placeholder="搜索兑换码名称..." 
                   className="pl-9" 
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">使用用户</label>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  value={userFilter}
+                  onChange={(e) => setUserFilter(e.target.value)}
+                  placeholder="用户名模糊查 / 用户ID精确查"
+                  className="pl-9"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
               </div>
             </div>
@@ -309,7 +343,7 @@ export function Redemptions() {
               </div>
             </div>
             <div className="flex items-end">
-              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => { setNameFilter(''); setStatusFilter(''); setStartDate(''); setEndDate('') }}>
+              <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground" onClick={() => { setNameFilter(''); setUserFilter(''); setStatusFilter(''); setStartDate(''); setEndDate('') }}>
                 清除筛选
               </Button>
             </div>
@@ -374,8 +408,9 @@ export function Redemptions() {
                           </div>
                           <div className="col-span-2 text-muted-foreground">创建：{formatTimestamp(code.created_time)}</div>
                           {code.used_user_id > 0 && (
-                            <div className="col-span-2">
+                            <div className="col-span-2 flex items-center gap-2 flex-wrap">
                               <button
+                                type="button"
                                 onClick={() => {
                                   setSelectedUser({ id: code.used_user_id, username: code.used_username || `用户 #${code.used_user_id}` })
                                   setAnalysisDialogOpen(true)
@@ -386,6 +421,14 @@ export function Redemptions() {
                                   {(code.used_username || '#')[0]?.toUpperCase()}
                                 </div>
                                 {code.used_username || `用户 #${code.used_user_id}`}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-[11px] text-muted-foreground hover:text-primary"
+                                title="按此用户筛选"
+                                onClick={() => setUserFilter(String(code.used_user_id))}
+                              >
+                                ID: {code.used_user_id}
                               </button>
                             </div>
                           )}
@@ -460,20 +503,31 @@ export function Redemptions() {
                       </TableCell>
                       <TableCell>
                         {code.used_user_id > 0 ? (
-                          <div
-                            className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all cursor-pointer border border-transparent hover:border-primary/20 w-fit"
-                            onClick={() => {
-                              setSelectedUser({ id: code.used_user_id, username: code.used_username || `用户 #${code.used_user_id}` })
-                              setAnalysisDialogOpen(true)
-                            }}
-                            title="查看用户分析"
-                          >
-                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
-                              {(code.used_username || '#')[0]?.toUpperCase()}
-                            </div>
-                            <span className="font-medium text-sm whitespace-nowrap">
-                              {code.used_username || `用户 #${code.used_user_id}`}
-                            </span>
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 px-2 py-1 rounded-full bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all border border-transparent hover:border-primary/20 w-fit"
+                              onClick={() => {
+                                setSelectedUser({ id: code.used_user_id, username: code.used_username || `用户 #${code.used_user_id}` })
+                                setAnalysisDialogOpen(true)
+                              }}
+                              title="查看用户分析"
+                            >
+                              <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 text-[10px] text-primary font-bold">
+                                {(code.used_username || '#')[0]?.toUpperCase()}
+                              </div>
+                              <span className="font-medium text-sm whitespace-nowrap">
+                                {code.used_username || `用户 #${code.used_user_id}`}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="text-[11px] text-muted-foreground hover:text-primary pl-2 w-fit"
+                              title="按此用户筛选其使用的兑换码"
+                              onClick={() => setUserFilter(String(code.used_user_id))}
+                            >
+                              ID: {code.used_user_id}
+                            </button>
                           </div>
                         ) : (
                           <span className="text-sm text-muted-foreground">-</span>
@@ -510,7 +564,9 @@ export function Redemptions() {
           {total > 0 && (
             <div className="px-4 py-4 border-t flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
-                显示 {codes.length} 条，共 {total} 条
+                {userFilter.trim()
+                  ? `显示 ${codes.length} 条，该用户共使用 ${total} 个兑换码`
+                  : `显示 ${codes.length} 条，共 ${total} 条`}
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>上一页</Button>

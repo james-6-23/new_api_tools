@@ -376,7 +376,14 @@ var TopUpExportLimit int64 = 100000
 // responsible for setting response headers and (recommended) running CountTopUps
 // first to short-circuit oversized exports — this function only flips on the
 // limit if the count exceeds it mid-stream.
+//
+// 当 params.UserID 已指定时，走「单用户额度入账」导出：在线充值 + 兑换码明细，
+// CSV 标注类型/是否计入实付，并在末尾附剔除兑换码后的统计摘要。
 func ExportTopUpsToCSV(ctx context.Context, w io.Writer, params ListTopUpParams) error {
+	if params.UserID != nil && *params.UserID > 0 {
+		return exportUserIncomeCSV(ctx, w, params)
+	}
+
 	db := database.Get()
 	whereSQL, args, _ := buildTopUpWhere(params)
 

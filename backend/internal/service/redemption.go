@@ -61,12 +61,16 @@ type GenerateResult struct {
 
 // ListRedemptionParams holds list query parameters
 type ListRedemptionParams struct {
-	Page      int    `json:"page"`
-	PageSize  int    `json:"page_size"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date"`
+	Page         int    `json:"page"`
+	PageSize     int    `json:"page_size"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	// UsedUserID 按使用人用户 ID 精确过滤（对应 redemptions.used_user_id）
+	UsedUserID *int64 `json:"used_user_id"`
+	// UsedUsername 按使用人用户名模糊过滤（JOIN users）
+	UsedUsername string `json:"used_username"`
+	StartDate    string `json:"start_date"`
+	EndDate      string `json:"end_date"`
 }
 
 // PaginatedRedemptions holds paginated redemption results
@@ -206,11 +210,26 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 	where := []string{"r.deleted_at IS NULL"}
 	args := []interface{}{}
 	argIdx := 1
+	// 按使用人用户名过滤时需要 JOIN users；user_id 精确过滤不需要
+	needUserJoin := false
 
 	if params.Name != "" {
 		where = append(where, fmt.Sprintf("r.name LIKE %s", db.Placeholder(argIdx)))
 		args = append(args, "%"+params.Name+"%")
 		argIdx++
+	}
+
+	if params.UsedUserID != nil {
+		where = append(where, fmt.Sprintf("r.used_user_id = %s", db.Placeholder(argIdx)))
+		args = append(args, *params.UsedUserID)
+		argIdx++
+	}
+
+	if uname := strings.TrimSpace(params.UsedUsername); uname != "" {
+		where = append(where, fmt.Sprintf("u.username LIKE %s", db.Placeholder(argIdx)))
+		args = append(args, "%"+uname+"%")
+		argIdx++
+		needUserJoin = true
 	}
 
 	if params.Status != "" {
@@ -252,8 +271,12 @@ func ListCodes(params ListRedemptionParams) (*PaginatedRedemptions, error) {
 
 	whereSQL := strings.Join(where, " AND ")
 
-	// Count total
-	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM redemptions r WHERE %s", whereSQL)
+	// Count total（用户名过滤时 JOIN users，与列表查询保持一致）
+	fromSQL := "redemptions r"
+	if needUserJoin {
+		fromSQL = "redemptions r LEFT JOIN users u ON r.used_user_id = u.id AND r.used_user_id > 0"
+	}
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", fromSQL, whereSQL)
 	var total int64
 	if err := db.DB.Get(&total, countSQL, args...); err != nil {
 		return nil, fmt.Errorf("count query failed: %w", err)

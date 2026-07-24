@@ -58,12 +58,24 @@ func ListRedemptionCodes(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
 	params := service.ListRedemptionParams{
-		Page:      page,
-		PageSize:  pageSize,
-		Name:      c.Query("name"),
-		Status:    c.Query("status"),
-		StartDate: c.Query("start_date"),
-		EndDate:   c.Query("end_date"),
+		Page:         page,
+		PageSize:     pageSize,
+		Name:         c.Query("name"),
+		Status:       c.Query("status"),
+		UsedUsername: c.Query("username"),
+		StartDate:    c.Query("start_date"),
+		EndDate:      c.Query("end_date"),
+	}
+
+	// 兼容 used_user_id / user_id 两种参数名
+	userIDStr := c.Query("used_user_id")
+	if userIDStr == "" {
+		userIDStr = c.Query("user_id")
+	}
+	if userIDStr != "" {
+		if uid, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
+			params.UsedUserID = &uid
+		}
 	}
 
 	result, err := service.ListCodes(params)
