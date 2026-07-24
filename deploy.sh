@@ -776,6 +776,56 @@ check_compose_file() {
 }
 
 #######################################
+# 安全下载单个 GeoIP 文件（带总超时 / 体积上限 / 校验）
+# 解决：镜像挂起或返回异常流时 curl 无限写入占满磁盘（#26）
+# 参数: $1=目标路径  $2=最小字节  $3=最大字节  $4...=URL 列表
+#######################################
+download_geoip_file() {
+  local dest="$1"
+  local min_bytes="$2"
+  local max_bytes="$3"
+  shift 3
+  local urls=("$@")
+  local tmp="${dest}.tmp.$$"
+  local url size head
+
+  for url in "${urls[@]}"; do
+    rm -f "$tmp"
+    # --fail: HTTP 非 2xx 失败；--max-time: 整次传输超时；--max-filesize: 硬体积上限
+    if ! curl -fsSL \
+        --connect-timeout 15 \
+        --max-time 180 \
+        --max-filesize "$max_bytes" \
+        --retry 2 \
+        --retry-delay 2 \
+        -o "$tmp" \
+        "$url" 2>/dev/null; then
+      rm -f "$tmp"
+      continue
+    fi
+
+    size=$(stat -c%s "$tmp" 2>/dev/null || stat -f%z "$tmp" 2>/dev/null || echo 0)
+    if [[ -z "$size" || "$size" -lt "$min_bytes" || "$size" -gt "$max_bytes" ]]; then
+      rm -f "$tmp"
+      continue
+    fi
+
+    # 拒绝 HTML/文本错误页（正常 mmdb 为二进制）
+    head=$(head -c 16 "$tmp" 2>/dev/null || true)
+    if [[ "$head" == \<* || "$head" == version\ https://git-lfs* ]]; then
+      rm -f "$tmp"
+      continue
+    fi
+
+    mv -f "$tmp" "$dest"
+    return 0
+  done
+
+  rm -f "$tmp"
+  return 1
+}
+
+#######################################
 # 下载 GeoIP 数据库
 #######################################
 download_geoip_database() {
@@ -783,44 +833,53 @@ download_geoip_database() {
   local city_db="${geoip_dir}/GeoLite2-City.mmdb"
   local asn_db="${geoip_dir}/GeoLite2-ASN.mmdb"
 
-  # 如果数据库已存在，跳过下载
+  # City ~66MB / ASN ~12MB；已存在且体积合理则跳过
   if [[ -f "$city_db" && -f "$asn_db" ]]; then
-    log_success "GeoIP 数据库已存在，跳过下载"
-    return 0
+    local cs as
+    cs=$(stat -c%s "$city_db" 2>/dev/null || stat -f%z "$city_db" 2>/dev/null || echo 0)
+    as=$(stat -c%s "$asn_db" 2>/dev/null || stat -f%z "$asn_db" 2>/dev/null || echo 0)
+    if [[ "$cs" -ge 1048576 && "$cs" -le 120000000 && "$as" -ge 1048576 && "$as" -le 50000000 ]]; then
+      log_success "GeoIP 数据库已存在，跳过下载"
+      return 0
+    fi
+    log_warn "已有 GeoIP 文件体积异常，重新下载"
+    rm -f "$city_db" "$asn_db"
   fi
 
   log_info "正在下载 GeoIP 数据库..."
   mkdir -p "$geoip_dir"
 
-  # 下载源（优先 GitHub 直链，备用国内镜像）
-  local base_url="https://raw.githubusercontent.com/adysec/IP_database/main/geolite"
-  local fallback_url="https://raw.gitmirror.com/adysec/IP_database/main/geolite"
+  local city_urls=(
+    "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb"
+    "https://cdn.jsdelivr.net/gh/adysec/IP_database@main/geolite/GeoLite2-City.mmdb"
+    "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-City.mmdb"
+  )
+  local asn_urls=(
+    "https://raw.githubusercontent.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb"
+    "https://cdn.jsdelivr.net/gh/adysec/IP_database@main/geolite/GeoLite2-ASN.mmdb"
+    "https://raw.gitmirror.com/adysec/IP_database/main/geolite/GeoLite2-ASN.mmdb"
+  )
 
-  # 下载 City 数据库
   if [[ ! -f "$city_db" ]]; then
     log_info "下载 GeoLite2-City.mmdb..."
-    if ! curl -sL --connect-timeout 15 -o "$city_db" "${base_url}/GeoLite2-City.mmdb" 2>/dev/null; then
-      log_warn "GitHub 下载失败，尝试国内镜像..."
-      curl -sL --connect-timeout 30 -o "$city_db" "${fallback_url}/GeoLite2-City.mmdb" 2>/dev/null || {
-        log_warn "GeoLite2-City.mmdb 下载失败，IP 地理位置功能可能不可用"
-        rm -f "$city_db"
-      }
+    if download_geoip_file "$city_db" 1048576 100000000 "${city_urls[@]}"; then
+      log_success "GeoLite2-City.mmdb 下载完成"
+    else
+      log_warn "GeoLite2-City.mmdb 下载失败，IP 地理位置功能可能不可用（已超时/体积限制，不会无限写入磁盘）"
+      rm -f "$city_db" "${city_db}.tmp"*
     fi
   fi
 
-  # 下载 ASN 数据库
   if [[ ! -f "$asn_db" ]]; then
     log_info "下载 GeoLite2-ASN.mmdb..."
-    if ! curl -sL --connect-timeout 15 -o "$asn_db" "${base_url}/GeoLite2-ASN.mmdb" 2>/dev/null; then
-      log_warn "GitHub 下载失败，尝试国内镜像..."
-      curl -sL --connect-timeout 30 -o "$asn_db" "${fallback_url}/GeoLite2-ASN.mmdb" 2>/dev/null || {
-        log_warn "GeoLite2-ASN.mmdb 下载失败，ASN 查询功能可能不可用"
-        rm -f "$asn_db"
-      }
+    if download_geoip_file "$asn_db" 1048576 40000000 "${asn_urls[@]}"; then
+      log_success "GeoLite2-ASN.mmdb 下载完成"
+    else
+      log_warn "GeoLite2-ASN.mmdb 下载失败，ASN 查询功能可能不可用（已超时/体积限制，不会无限写入磁盘）"
+      rm -f "$asn_db" "${asn_db}.tmp"*
     fi
   fi
 
-  # 检查下载结果
   if [[ -f "$city_db" && -f "$asn_db" ]]; then
     log_success "GeoIP 数据库下载完成"
   else

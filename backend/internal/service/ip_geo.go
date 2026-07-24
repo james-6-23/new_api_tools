@@ -39,6 +39,10 @@ const geoipUpdateInterval = 24 * time.Hour
 // geoipMinFileSize is the minimum valid database file size (1 MB)
 const geoipMinFileSize = 1024 * 1024
 
+// geoipMaxFileSize caps a single download so a runaway mirror cannot fill the disk (#26).
+// GeoLite2-City is ~66MB; 120MB leaves headroom for future growth without unbounded writes.
+const geoipMaxFileSize int64 = 120 * 1024 * 1024
+
 // IPGeoService provides IP geolocation queries using MaxMind GeoLite2
 type IPGeoService struct {
 	cityReader *geoip2.Reader
@@ -149,7 +153,8 @@ func (s *IPGeoService) downloadDatabase(destPath string) error {
 	tempPath := destPath + ".tmp"
 	defer os.Remove(tempPath) // clean up temp file on any failure
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	// Hard cap: connection + transfer cannot hang forever and fill the disk (#26).
+	client := &http.Client{Timeout: 180 * time.Second}
 
 	for _, url := range geoipDownloadURLs {
 		fmt.Printf("[GeoIP] Downloading from %s ...\n", url)
@@ -166,18 +171,32 @@ func (s *IPGeoService) downloadDatabase(destPath string) error {
 			continue
 		}
 
+		// Reject absurd Content-Length early (when present).
+		if resp.ContentLength > 0 && (resp.ContentLength < geoipMinFileSize || resp.ContentLength > geoipMaxFileSize) {
+			resp.Body.Close()
+			fmt.Printf("[GeoIP] Unexpected Content-Length %d from %s, skipping\n", resp.ContentLength, url)
+			continue
+		}
+
 		out, err := os.Create(tempPath)
 		if err != nil {
 			resp.Body.Close()
 			return fmt.Errorf("create temp file: %w", err)
 		}
 
-		written, err := io.Copy(out, resp.Body)
+		// LimitReader stops after max+1 bytes so a runaway body cannot fill the disk.
+		limited := io.LimitReader(resp.Body, geoipMaxFileSize+1)
+		written, err := io.Copy(out, limited)
 		out.Close()
 		resp.Body.Close()
 
 		if err != nil {
 			fmt.Printf("[GeoIP] Download write failed from %s: %v\n", url, err)
+			os.Remove(tempPath)
+			continue
+		}
+		if written > geoipMaxFileSize {
+			fmt.Printf("[GeoIP] Download exceeded max size (%d bytes > %d), skipping\n", written, geoipMaxFileSize)
 			os.Remove(tempPath)
 			continue
 		}
