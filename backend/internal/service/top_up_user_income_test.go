@@ -42,11 +42,12 @@ func seedUserIncomeTables(t *testing.T) {
 	}
 
 	db.MustExec(`INSERT INTO users (id, username) VALUES (42, 'alice')`)
-	// 2 成功 + 1 待支付
+	// 2 成功 + 1 待支付 + 1 已过期（未成功 = pending + expired）
 	db.MustExec(`INSERT INTO top_ups (id, user_id, amount, money, trade_no, payment_method, create_time, complete_time, status) VALUES
 		(1, 42, 10, 70.00, 'T1', 'alipay', 1000, 1100, 'success'),
 		(2, 42, 20, 140.00, 'T2', 'wechat', 2000, 2100, 'success'),
-		(3, 42, 5, 35.00, 'T3', 'alipay', 3000, 0, 'pending')`)
+		(3, 42, 5, 35.00, 'T3', 'alipay', 3000, 0, 'pending'),
+		(4, 42, 8, 50.00, 'T4', 'wechat', 4000, 0, 'expired')`)
 	// 兑换码：配额 500000 = $1
 	db.MustExec(`INSERT INTO redemptions (id, user_id, "key", name, quota, created_time, redeemed_time, used_user_id, deleted_at, expired_time) VALUES
 		(1, 1, 'CODEAAA', '拉新', 500000, 900, 2500, 42, NULL, 0),
@@ -71,6 +72,12 @@ func TestGetUserQuotaIncomeSummary(t *testing.T) {
 	}
 	if sum.PaidMoney != 210 {
 		t.Errorf("paid_money=%v want 210", sum.PaidMoney)
+	}
+	if sum.UnsuccessCount != 2 {
+		t.Errorf("unsuccess_count=%d want 2 (pending+expired)", sum.UnsuccessCount)
+	}
+	if sum.UnsuccessMoney != 85 {
+		t.Errorf("unsuccess_money=%v want 85 (35+50)", sum.UnsuccessMoney)
 	}
 	if sum.RedemptionCount != 2 {
 		t.Errorf("redemption_count=%d want 2", sum.RedemptionCount)

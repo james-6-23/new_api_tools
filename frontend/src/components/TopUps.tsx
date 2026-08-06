@@ -87,6 +87,8 @@ interface UserQuotaIncomeSummary {
   paid_count: number
   paid_money: number
   paid_amount: number
+  unsuccess_count: number
+  unsuccess_money: number
   redemption_count: number
   redemption_quota_raw: number
   redemption_quota_usd: number
@@ -462,7 +464,7 @@ export function TopUps() {
                     加载用户入账统计...
                   </div>
                 ) : userIncome ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 text-sm">
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
                       <div className="text-xs text-muted-foreground">成功充值</div>
                       <div className="font-semibold text-lg">{userIncome.paid_count} 笔</div>
@@ -474,6 +476,16 @@ export function TopUps() {
                         {formatMoney(userIncome.paid_money)}
                       </div>
                       <div className="text-xs text-muted-foreground">用户实际支付合计</div>
+                    </div>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/80 dark:bg-amber-950/20 dark:border-amber-900 p-3 space-y-1">
+                      <div className="text-xs text-muted-foreground">未成功充值</div>
+                      <div className="font-semibold text-lg text-amber-700 dark:text-amber-400">
+                        {userIncome.unsuccess_count ?? 0} 笔
+                      </div>
+                      <div className="text-muted-foreground">
+                        金额 {formatMoney(userIncome.unsuccess_money ?? 0)}
+                      </div>
+                      <div className="text-xs text-muted-foreground">待处理 + 已过期</div>
                     </div>
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
                       <div className="text-xs text-muted-foreground">兑换码使用</div>

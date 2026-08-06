@@ -23,6 +23,10 @@ type UserQuotaIncomeSummary struct {
 	PaidMoney  float64 `json:"paid_money"`  // 实付金额 CNY（top_ups.money）
 	PaidAmount float64 `json:"paid_amount"` // 获得额度 USD（top_ups.amount）
 
+	// 未成功（待处理 + 已过期）
+	UnsuccessCount int64   `json:"unsuccess_count"`
+	UnsuccessMoney float64 `json:"unsuccess_money"` // 金额 CNY（top_ups.money）
+
 	// 兑换码使用
 	RedemptionCount    int64   `json:"redemption_count"`
 	RedemptionQuotaRaw int64   `json:"redemption_quota_raw"`
@@ -89,6 +93,43 @@ func GetUserQuotaIncomeSummary(userID int64, startDate, endDate string) (*UserQu
 	out.PaidCount = paid.Cnt
 	out.PaidMoney = paid.Money
 	out.PaidAmount = paid.Amount
+
+	// ---- 未成功（待处理 + 已过期）----
+	unsuccessWhere := []string{
+		fmt.Sprintf("user_id = %s", db.Placeholder(1)),
+		fmt.Sprintf("(%s) IN ('pending', 'expired')", topUpStatusBucketSQL("status")),
+	}
+	unsuccessArgs := []interface{}{userID}
+	argIdx = 2
+
+	if startDate != "" {
+		if ts, err := util.ParseDateToTimestampPublic(startDate, false); err == nil {
+			unsuccessWhere = append(unsuccessWhere, fmt.Sprintf("create_time >= %s", db.Placeholder(argIdx)))
+			unsuccessArgs = append(unsuccessArgs, ts)
+			argIdx++
+		}
+	}
+	if endDate != "" {
+		if ts, err := util.ParseDateToTimestampPublic(endDate, true); err == nil {
+			unsuccessWhere = append(unsuccessWhere, fmt.Sprintf("create_time <= %s", db.Placeholder(argIdx)))
+			unsuccessArgs = append(unsuccessArgs, ts)
+			argIdx++
+		}
+	}
+
+	type unsuccessAgg struct {
+		Cnt   int64   `db:"cnt"`
+		Money float64 `db:"money"`
+	}
+	var unsuccess unsuccessAgg
+	unsuccessSQL := fmt.Sprintf(`SELECT COUNT(*) as cnt,
+		COALESCE(SUM(money), 0) as money
+		FROM top_ups WHERE %s`, strings.Join(unsuccessWhere, " AND "))
+	if err := db.DB.Get(&unsuccess, unsuccessSQL, unsuccessArgs...); err != nil {
+		return nil, fmt.Errorf("unsuccess top-up aggregate failed: %w", err)
+	}
+	out.UnsuccessCount = unsuccess.Cnt
+	out.UnsuccessMoney = unsuccess.Money
 
 	// ---- 兑换码 ----
 	redWhere := []string{
@@ -364,12 +405,23 @@ func exportUserIncomeCSV(ctx context.Context, w io.Writer, params ListTopUpParam
 	_ = csvW.Write([]string{"成功充值笔数", strconv.FormatInt(paidCount, 10)})
 	_ = csvW.Write([]string{"实付金额(CNY)", strconv.FormatFloat(paidMoney, 'f', 2, 64)})
 	_ = csvW.Write([]string{"在线充值获得额度(USD)", strconv.FormatFloat(paidAmount, 'f', 2, 64)})
+	// 未成功：从本导出明细中按归一状态汇总（与 API 统计口径一致：pending + expired）
+	var unsuccessCount int64
+	var unsuccessMoney float64
+	// 摘要行只依赖上方循环累计；此处再扫一遍代价高，改为在在线充值循环中累计更合适。
+	// 为保持改动局部，导出摘要的未成功数通过二次查询补齐（同一 user_id）。
+	if summary, err := GetUserQuotaIncomeSummary(userID, params.StartDate, params.EndDate); err == nil {
+		unsuccessCount = summary.UnsuccessCount
+		unsuccessMoney = summary.UnsuccessMoney
+	}
+	_ = csvW.Write([]string{"未成功充值笔数", strconv.FormatInt(unsuccessCount, 10)})
+	_ = csvW.Write([]string{"未成功金额(CNY)", strconv.FormatFloat(unsuccessMoney, 'f', 2, 64)})
 	_ = csvW.Write([]string{"兑换码使用笔数", strconv.FormatInt(redCount, 10)})
 	_ = csvW.Write([]string{"兑换码获得额度(USD)", strconv.FormatFloat(redQuotaUSD, 'f', 4, 64)})
 	// 兼容旧字段名：剔除兑换后仅含在线充值成功单的获得额度
 	_ = csvW.Write([]string{"剔除兑换码后实付额度(USD)", strconv.FormatFloat(paidAmount, 'f', 2, 64)})
 	_ = csvW.Write([]string{"含兑换总入账额度(USD)", strconv.FormatFloat(paidAmount+redQuotaUSD, 'f', 4, 64)})
-	_ = csvW.Write([]string{"说明", "实付金额=用户实际支付；获得额度=入账额度。「计入实付统计=否」的兑换码行不计入实付；净入账仅统计在线充值成功单"})
+	_ = csvW.Write([]string{"说明", "实付金额=用户实际支付；获得额度=入账额度；未成功=待处理+已过期。「计入实付统计=否」的兑换码行不计入实付；净入账仅统计在线充值成功单"})
 
 	csvW.Flush()
 	return csvW.Error()
