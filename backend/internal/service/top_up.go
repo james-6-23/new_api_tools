@@ -16,10 +16,12 @@ import (
 
 // TopUpRecord represents a top-up record
 type TopUpRecord struct {
-	ID                int64    `json:"id" db:"id"`
-	UserID            int64    `json:"user_id" db:"user_id"`
-	Username          *string  `json:"username" db:"username"`
-	Amount            int64    `json:"amount" db:"amount"`
+	ID       int64   `json:"id" db:"id"`
+	UserID   int64   `json:"user_id" db:"user_id"`
+	Username *string `json:"username" db:"username"`
+	// Amount 用户获得的额度（USD 数量，易支付等渠道；非 raw quota）
+	Amount int64 `json:"amount" db:"amount"`
+	// Money 用户实际支付金额（多为 CNY；Stripe 等渠道语义可能不同）
 	Money             float64  `json:"money" db:"money"`
 	TradeNo           string   `json:"trade_no" db:"trade_no"`
 	PaymentMethod     string   `json:"payment_method" db:"payment_method"`
@@ -404,7 +406,7 @@ func ExportTopUpsToCSV(ctx context.Context, w io.Writer, params ListTopUpParams)
 	defer csvW.Flush()
 
 	header := []string{
-		"ID", "用户ID", "用户名", "额度(USD)", "金额(CNY)",
+		"ID", "用户ID", "用户名", "获得额度(USD)", "实付金额(CNY)",
 		"交易号", "支付方式", "支付渠道", "状态", "归一状态", "完成耗时(秒)", "异常标记", "创建时间", "完成时间",
 	}
 	if err := csvW.Write(header); err != nil {

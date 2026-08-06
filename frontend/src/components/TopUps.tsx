@@ -310,7 +310,9 @@ export function TopUps() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">充值记录</h2>
-          <p className="text-muted-foreground mt-1">查看所有用户的充值历史与状态</p>
+          <p className="text-muted-foreground mt-1">
+            查看充值历史 · 实付金额为用户实际支付，获得额度为入账额度
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading} className="h-9">
@@ -407,13 +409,13 @@ export function TopUps() {
                 <span className="text-muted-foreground">成功充值:</span>
                 <span className="font-semibold">{statsLoading ? '-' : statistics?.success_count || 0} 笔</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">实收金额:</span>
+              <div className="flex items-center gap-2" title="成功充值订单的用户实付金额合计">
+                <span className="text-muted-foreground">实付金额:</span>
                 <span className="font-semibold text-primary">{statsLoading ? '-' : formatMoney(statistics?.success_money || 0)}</span>
               </div>
-              <div className="flex items-center gap-2">
-                 <span className="text-muted-foreground">入账额度:</span>
-                 <span className="font-semibold">{statsLoading ? '-' : formatAmount(statistics?.success_amount || 0)} USD</span>
+              <div className="flex items-center gap-2" title="成功充值后用户获得的额度合计">
+                 <span className="text-muted-foreground">获得额度:</span>
+                 <span className="font-semibold text-green-600">{statsLoading ? '-' : formatAmount(statistics?.success_amount || 0)} USD</span>
               </div>
               {(statistics?.unknown_count || 0) > 0 && (
                 <div className="flex items-center gap-2">
@@ -464,29 +466,38 @@ export function TopUps() {
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
                       <div className="text-xs text-muted-foreground">成功充值（实付）</div>
                       <div className="font-semibold text-lg">{userIncome.paid_count} 笔</div>
-                      <div className="text-muted-foreground">
-                        {formatMoney(userIncome.paid_money)} · {formatAmount(userIncome.paid_amount)} USD
+                      <div className="text-muted-foreground space-y-0.5">
+                        <div>
+                          <span className="text-xs">实付金额 </span>
+                          <span className="font-medium text-primary">{formatMoney(userIncome.paid_money)}</span>
+                        </div>
+                        <div>
+                          <span className="text-xs">获得额度 </span>
+                          <span className="font-medium text-green-600">{formatAmount(userIncome.paid_amount)} USD</span>
+                        </div>
                       </div>
                     </div>
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
                       <div className="text-xs text-muted-foreground">兑换码使用</div>
                       <div className="font-semibold text-lg text-amber-600">{userIncome.redemption_count} 次</div>
                       <div className="text-muted-foreground">
-                        {formatAmount(userIncome.redemption_quota_usd)} USD
+                        获得额度 {formatAmount(userIncome.redemption_quota_usd)} USD
                         <span className="text-xs ml-1">（不计入实付）</span>
                       </div>
                     </div>
                     <div className="rounded-lg border border-green-200 bg-green-50/80 dark:bg-green-950/20 dark:border-green-900 p-3 space-y-1">
-                      <div className="text-xs text-muted-foreground">剔除兑换后实付额度</div>
+                      <div className="text-xs text-muted-foreground">在线充值获得额度</div>
                       <div className="font-semibold text-lg text-green-700 dark:text-green-400">
                         {formatAmount(userIncome.net_paid_amount_usd)} USD
                       </div>
-                      <div className="text-xs text-muted-foreground">仅统计在线充值成功单</div>
+                      <div className="text-xs text-muted-foreground">
+                        仅在线充值成功单 · 不含兑换码
+                      </div>
                     </div>
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
-                      <div className="text-xs text-muted-foreground">含兑换总入账额度</div>
+                      <div className="text-xs text-muted-foreground">总入账额度（含兑换）</div>
                       <div className="font-semibold text-lg">{formatAmount(userIncome.total_income_usd)} USD</div>
-                      <div className="text-xs text-muted-foreground">实付 + 兑换码（参考）</div>
+                      <div className="text-xs text-muted-foreground">在线充值额度 + 兑换码额度</div>
                     </div>
                   </div>
                 ) : (
@@ -612,8 +623,8 @@ export function TopUps() {
                       <TableRow>
                         <TableHead className="w-[80px]">ID</TableHead>
                         <TableHead>用户</TableHead>
-                        <TableHead>额度 (USD)</TableHead>
-                        <TableHead>金额 (CNY)</TableHead>
+                        <TableHead title="用户实际支付的金额（top_ups.money）">实付金额 (CNY)</TableHead>
+                        <TableHead title="用户充值后获得的额度（top_ups.amount，USD）">获得额度 (USD)</TableHead>
                         <TableHead>交易号</TableHead>
                         <TableHead>支付渠道</TableHead>
                         <TableHead>状态</TableHead>
@@ -638,8 +649,12 @@ export function TopUps() {
                               </button>
                             </div>
                           </TableCell>
-                          <TableCell className="font-medium text-green-600">{formatAmount(record.amount)}</TableCell>
-                          <TableCell className="font-medium">{formatMoney(record.money)}</TableCell>
+                          <TableCell className="font-medium text-primary" title="用户实际支付金额">
+                            {formatMoney(record.money)}
+                          </TableCell>
+                          <TableCell className="font-medium text-green-600" title="用户获得额度">
+                            {formatAmount(record.amount)}
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1 max-w-[200px]">
                               <span className="font-mono text-xs text-muted-foreground truncate" title={record.trade_no}>

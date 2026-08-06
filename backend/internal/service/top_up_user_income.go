@@ -20,17 +20,17 @@ type UserQuotaIncomeSummary struct {
 
 	// 在线充值（成功）
 	PaidCount  int64   `json:"paid_count"`
-	PaidMoney  float64 `json:"paid_money"`  // CNY
-	PaidAmount float64 `json:"paid_amount"` // USD（top_ups.amount，成功单）
+	PaidMoney  float64 `json:"paid_money"`  // 实付金额 CNY（top_ups.money）
+	PaidAmount float64 `json:"paid_amount"` // 获得额度 USD（top_ups.amount）
 
 	// 兑换码使用
 	RedemptionCount    int64   `json:"redemption_count"`
 	RedemptionQuotaRaw int64   `json:"redemption_quota_raw"`
-	RedemptionQuotaUSD float64 `json:"redemption_quota_usd"`
+	RedemptionQuotaUSD float64 `json:"redemption_quota_usd"` // 兑换获得额度 USD
 
-	// 剔除兑换码后的实付入账额度（= PaidAmount）
+	// 在线充值获得额度（= PaidAmount，不含兑换码）
 	NetPaidAmountUSD float64 `json:"net_paid_amount_usd"`
-	// 含兑换码的总入账额度（实付 + 兑换）
+	// 总入账额度（在线充值获得 + 兑换码获得）
 	TotalIncomeUSD float64 `json:"total_income_usd"`
 }
 
@@ -151,8 +151,9 @@ func exportUserIncomeCSV(ctx context.Context, w io.Writer, params ListTopUpParam
 	defer csvW.Flush()
 
 	// 统一表头：在线充值与兑换码共用，便于 Excel 筛选
+	// 获得额度 = top_ups.amount / redemptions 换算后的 USD；实付金额 = top_ups.money（兑换码为空）
 	header := []string{
-		"类型", "计入实付统计", "ID", "用户ID", "用户名", "额度(USD)", "金额(CNY)",
+		"类型", "计入实付统计", "ID", "用户ID", "用户名", "获得额度(USD)", "实付金额(CNY)",
 		"交易号/兑换码", "名称/支付方式", "支付渠道", "状态", "归一状态",
 		"完成耗时(秒)", "异常标记", "创建/兑换时间", "完成时间", "备注",
 	}
@@ -361,13 +362,14 @@ func exportUserIncomeCSV(ctx context.Context, w io.Writer, params ListTopUpParam
 	_ = csvW.Write([]string{"用户ID", strconv.FormatInt(userID, 10)})
 	_ = csvW.Write([]string{"用户名", usernameHint})
 	_ = csvW.Write([]string{"成功充值笔数", strconv.FormatInt(paidCount, 10)})
-	_ = csvW.Write([]string{"实收金额(CNY)", strconv.FormatFloat(paidMoney, 'f', 2, 64)})
-	_ = csvW.Write([]string{"充值入账额度(USD)", strconv.FormatFloat(paidAmount, 'f', 2, 64)})
+	_ = csvW.Write([]string{"实付金额(CNY)", strconv.FormatFloat(paidMoney, 'f', 2, 64)})
+	_ = csvW.Write([]string{"在线充值获得额度(USD)", strconv.FormatFloat(paidAmount, 'f', 2, 64)})
 	_ = csvW.Write([]string{"兑换码使用笔数", strconv.FormatInt(redCount, 10)})
-	_ = csvW.Write([]string{"兑换码额度(USD)", strconv.FormatFloat(redQuotaUSD, 'f', 4, 64)})
+	_ = csvW.Write([]string{"兑换码获得额度(USD)", strconv.FormatFloat(redQuotaUSD, 'f', 4, 64)})
+	// 兼容旧字段名：剔除兑换后仅含在线充值成功单的获得额度
 	_ = csvW.Write([]string{"剔除兑换码后实付额度(USD)", strconv.FormatFloat(paidAmount, 'f', 2, 64)})
 	_ = csvW.Write([]string{"含兑换总入账额度(USD)", strconv.FormatFloat(paidAmount+redQuotaUSD, 'f', 4, 64)})
-	_ = csvW.Write([]string{"说明", "「计入实付统计=否」的兑换码行不计入实付；净入账仅统计在线充值成功单"})
+	_ = csvW.Write([]string{"说明", "实付金额=用户实际支付；获得额度=入账额度。「计入实付统计=否」的兑换码行不计入实付；净入账仅统计在线充值成功单"})
 
 	csvW.Flush()
 	return csvW.Error()
