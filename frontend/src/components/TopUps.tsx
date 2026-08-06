@@ -462,20 +462,18 @@ export function TopUps() {
                     加载用户入账统计...
                   </div>
                 ) : userIncome ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
-                      <div className="text-xs text-muted-foreground">成功充值（实付）</div>
+                      <div className="text-xs text-muted-foreground">成功充值</div>
                       <div className="font-semibold text-lg">{userIncome.paid_count} 笔</div>
-                      <div className="text-muted-foreground space-y-0.5">
-                        <div>
-                          <span className="text-xs">实付金额 </span>
-                          <span className="font-medium text-primary">{formatMoney(userIncome.paid_money)}</span>
-                        </div>
-                        <div>
-                          <span className="text-xs">获得额度 </span>
-                          <span className="font-medium text-green-600">{formatAmount(userIncome.paid_amount)} USD</span>
-                        </div>
+                      <div className="text-xs text-muted-foreground">在线充值成功单</div>
+                    </div>
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1">
+                      <div className="text-xs text-muted-foreground">实付金额</div>
+                      <div className="font-semibold text-lg text-primary">
+                        {formatMoney(userIncome.paid_money)}
                       </div>
+                      <div className="text-xs text-muted-foreground">用户实际支付合计</div>
                     </div>
                     <div className="rounded-lg border bg-background/80 p-3 space-y-1">
                       <div className="text-xs text-muted-foreground">兑换码使用</div>
