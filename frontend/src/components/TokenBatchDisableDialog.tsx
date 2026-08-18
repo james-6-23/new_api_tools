@@ -28,9 +28,12 @@ interface TokenBatchDisableDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  // 点击查询结果里的 Key / 用户名，弹出对应的分析弹窗
+  onOpenToken?: (tokenId: number, tokenName: string) => void
+  onOpenUser?: (userId: number, username: string) => void
 }
 
-export function TokenBatchDisableDialog({ open, onOpenChange, onSuccess }: TokenBatchDisableDialogProps) {
+export function TokenBatchDisableDialog({ open, onOpenChange, onSuccess, onOpenToken, onOpenUser }: TokenBatchDisableDialogProps) {
   const { token } = useAuth()
   const { showToast } = useToast()
 
@@ -227,6 +230,7 @@ export function TokenBatchDisableDialog({ open, onOpenChange, onSuccess }: Token
                     <TableHead>Key</TableHead>
                     <TableHead>名称</TableHead>
                     <TableHead>所属用户</TableHead>
+                    <TableHead>所属分组</TableHead>
                     <TableHead>已用额度</TableHead>
                     <TableHead>状态</TableHead>
                   </TableRow>
@@ -254,15 +258,42 @@ export function TokenBatchDisableDialog({ open, onOpenChange, onSuccess }: Token
                           />
                         </TableCell>
                         <TableCell>
-                          <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded" title={item.input_key}>
-                            {item.key_masked}
-                          </code>
+                          {item.found && item.id && onOpenToken ? (
+                            <code
+                              className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded cursor-pointer hover:bg-primary/10 hover:text-primary transition-colors"
+                              title={`${item.input_key}\n点击查看令牌分析`}
+                              onClick={(e) => { e.stopPropagation(); onOpenToken(item.id!, item.name || '') }}
+                            >
+                              {item.key_masked}
+                            </code>
+                          ) : (
+                            <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded" title={item.input_key}>
+                              {item.key_masked}
+                            </code>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm max-w-[140px] truncate" title={item.name}>
                           {item.found ? item.name || '-' : '-'}
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap">
-                          {item.found ? item.username || `#${item.user_id}` : '-'}
+                          {item.found && item.user_id && item.user_id > 0 && onOpenUser ? (
+                            <span
+                              className="cursor-pointer text-primary hover:underline"
+                              title="点击查看用户画像"
+                              onClick={(e) => { e.stopPropagation(); onOpenUser(item.user_id!, item.username || `用户 #${item.user_id}`) }}
+                            >
+                              {item.username || `#${item.user_id}`}
+                            </span>
+                          ) : (
+                            item.found ? item.username || `#${item.user_id}` : '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.found && item.group ? (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary whitespace-nowrap">{item.group}</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{item.found ? 'default' : '-'}</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                           {item.found ? formatQuota(item.used_quota) : '-'}

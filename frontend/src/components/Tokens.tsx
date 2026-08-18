@@ -727,6 +727,14 @@ export function Tokens() {
         open={batchDisableOpen}
         onOpenChange={setBatchDisableOpen}
         onSuccess={() => { fetchTokens(); fetchStatistics() }}
+        onOpenToken={(tokenId, tokenName) => {
+          setSelectedToken({ id: tokenId, name: tokenName })
+          setTokenAnalysisOpen(true)
+        }}
+        onOpenUser={(userId, username) => {
+          setSelectedUser({ id: userId, username })
+          setAnalysisDialogOpen(true)
+        }}
       />
 
       {/* Token Analysis Dialog */}
