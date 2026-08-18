@@ -105,6 +105,10 @@ func main() {
 		// Phase 2.4: Token Management
 		handler.RegisterTokenRoutes(api)
 
+		// Phase 2.5: Channel Monitor, Checkin Analytics
+		handler.RegisterChannelMonitorRoutes(api)
+		handler.RegisterCheckinRoutes(api)
+
 		// Phase 3: AI AutoBan, AutoGroup, LinuxDo Lookup
 		handler.RegisterAIAutoBanRoutes(api)
 		handler.RegisterAutoGroupRoutes(api)
