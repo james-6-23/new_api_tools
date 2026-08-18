@@ -106,16 +106,21 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 	// Exact token-key lookup. NewAPI stores the key without the "sk-" prefix,
 	// so strip it (and any surrounding whitespace) before matching the unique
 	// idx_tokens_key index.
-	if key := strings.TrimPrefix(strings.TrimSpace(params.Key), "sk-"); key != "" {
+	exactKey := strings.TrimPrefix(strings.TrimSpace(params.Key), "sk-")
+	if exactKey != "" {
 		conditions = append(conditions, fmt.Sprintf("t.%s = ?", keyCol))
-		args = append(args, key)
+		args = append(args, exactKey)
 	}
 	if params.UserID > 0 {
 		conditions = append(conditions, "t.user_id = ?")
 		args = append(args, params.UserID)
-	} else if cond, wlArgs := PanelWhitelistNotInClause("t.user_id"); cond != "" {
-		conditions = append(conditions, cond)
-		args = append(args, wlArgs...)
+	} else if exactKey == "" {
+		// 面板白名单只作用于常规运营列表；粘贴完整 key 的精确查找是显式定位行为，
+		// 不受白名单过滤（与批量禁用弹窗的 LookupTokensByKeys 行为保持一致）。
+		if cond, wlArgs := PanelWhitelistNotInClause("t.user_id"); cond != "" {
+			conditions = append(conditions, cond)
+			args = append(args, wlArgs...)
+		}
 	}
 	if params.Group != "" {
 		conditions = append(conditions, fmt.Sprintf("t.%s = ?", groupCol))
