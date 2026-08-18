@@ -109,6 +109,9 @@ func main() {
 		handler.RegisterChannelMonitorRoutes(api)
 		handler.RegisterCheckinRoutes(api)
 
+		// Phase 2.6: Task Logs (任务日志 + 使用日志关联)
+		handler.RegisterTaskLogRoutes(api)
+
 		// Phase 3: AI AutoBan, AutoGroup, LinuxDo Lookup
 		handler.RegisterAIAutoBanRoutes(api)
 		handler.RegisterAutoGroupRoutes(api)

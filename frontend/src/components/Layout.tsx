@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react'
-import { LayoutDashboard, Ticket, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell, Menu, X, Server, CalendarCheck, Settings } from 'lucide-react'
+import { LayoutDashboard, Ticket, DollarSign, BarChart3, Users, LogOut, Activity, Globe, Monitor, UserPlus, Key, RadioTower, Bell, Menu, X, Server, CalendarCheck, Settings, ListChecks } from 'lucide-react'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import {
@@ -9,7 +9,7 @@ import { cn } from '../lib/utils'
 import { useAuth } from '../contexts/AuthContext'
 import { apiFetch, createAuthHeaders } from '../lib/api'
 
-export type TabType = 'dashboard' | 'risk' | 'abuse-broadcast' | 'ip-analysis' | 'redemptions' | 'topups' | 'analytics' | 'model-status' | 'users' | 'auto-group' | 'tokens' | 'channels' | 'checkins'
+export type TabType = 'dashboard' | 'risk' | 'abuse-broadcast' | 'ip-analysis' | 'redemptions' | 'topups' | 'analytics' | 'model-status' | 'users' | 'auto-group' | 'tokens' | 'channels' | 'checkins' | 'task-logs'
 
 interface DbStatus {
   connected: boolean
@@ -32,6 +32,7 @@ const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'abuse-broadcast', label: '联合广播', icon: RadioTower },
   { id: 'ip-analysis', label: 'IP分析', icon: Globe },
   { id: 'analytics', label: '日志分析', icon: BarChart3 },
+  { id: 'task-logs', label: '任务日志', icon: ListChecks },
   { id: 'model-status', label: '模型监控', icon: Monitor },
   { id: 'channels', label: '渠道监控', icon: Server },
   { id: 'checkins', label: '签到分析', icon: CalendarCheck },
@@ -44,12 +45,17 @@ const tabs: { id: TabType; label: string; icon: typeof LayoutDashboard }[] = [
 // 功能项显隐配置（仪表板不可隐藏，作为兜底页）
 const HIDDEN_TABS_KEY = 'newapi_tools_hidden_tabs'
 
+// 用户从未保存过配置时默认关闭的功能页（用户改过一次后完全以其配置为准）
+const DEFAULT_HIDDEN_TABS: TabType[] = ['abuse-broadcast', 'checkins', 'auto-group']
+
 function loadHiddenTabs(): Set<TabType> {
+  const raw = localStorage.getItem(HIDDEN_TABS_KEY)
+  if (raw === null) return new Set(DEFAULT_HIDDEN_TABS)
   try {
-    const saved = JSON.parse(localStorage.getItem(HIDDEN_TABS_KEY) || '[]')
+    const saved = JSON.parse(raw)
     if (Array.isArray(saved)) return new Set(saved.filter((id) => id !== 'dashboard'))
   } catch { /* ignore corrupted value */ }
-  return new Set()
+  return new Set(DEFAULT_HIDDEN_TABS)
 }
 
 export function Layout({ children, activeTab, onTabChange, onLogout }: LayoutProps) {

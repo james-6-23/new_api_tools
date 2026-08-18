@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +48,7 @@ type TokenListParams struct {
 	UserID   int64
 	Group    string
 	Expired  string // "yes", "no", ""
+	Risk     string // "no_ip_limit", "never_expire", "unlimited", ""
 }
 
 // TokenService handles token-related queries
@@ -127,6 +129,17 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 		conditions = append(conditions, "t.status != 1")
 	case "expired":
 		conditions = append(conditions, fmt.Sprintf("t.expired_time > 0 AND t.expired_time <= %d", now))
+	}
+
+	// 安全审计筛选
+	switch params.Risk {
+	case "no_ip_limit":
+		conditions = append(conditions, "(t.allow_ips IS NULL OR t.allow_ips = '')")
+	case "never_expire":
+		conditions = append(conditions, "(t.expired_time = 0 OR t.expired_time = -1)")
+	case "unlimited":
+		conditions = append(conditions, "t.unlimited_quota = ?")
+		args = append(args, true)
 	}
 
 	if params.Expired == "yes" {
@@ -358,6 +371,185 @@ func (s *TokenService) BatchDisableTokens(ids []int64) (int64, error) {
 	}
 	logger.L.Business(fmt.Sprintf("令牌批量禁用 | requested=%d affected=%d", len(ids), affected))
 	return affected, nil
+}
+
+// BatchEnableTokens 将手动禁用（status=2）的令牌恢复启用。
+// 不碰过期(3)/耗尽(4)状态——那是 NewAPI 自动管理的。
+func (s *TokenService) BatchEnableTokens(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("at least one token id is required")
+	}
+	if len(ids) > maxBatchKeys {
+		return 0, fmt.Errorf("单次最多启用 %d 个令牌", maxBatchKeys)
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = s.db.Placeholder(i + 1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE tokens SET status = 1 WHERE id IN (%s) AND deleted_at IS NULL AND status = 2",
+		strings.Join(placeholders, ", "))
+
+	affected, err := s.db.Execute(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("enable failed: %w", err)
+	}
+	logger.L.Business(fmt.Sprintf("令牌批量启用 | requested=%d affected=%d", len(ids), affected))
+	return affected, nil
+}
+
+// GetTokenIPStats 统计指定令牌在窗口期内的去重来源 IP 数（泄漏信号）。
+// 只查当前页的令牌 id，配合 idx_logs_created_token_ip 索引，代价可控。
+func (s *TokenService) GetTokenIPStats(hours int, ids []int64) ([]map[string]interface{}, error) {
+	if hours <= 0 || hours > 24*30 {
+		hours = 24
+	}
+	if len(ids) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+	if len(ids) > 200 {
+		ids = ids[:200]
+	}
+	windowStart := time.Now().Unix() - int64(hours)*3600
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, windowStart)
+	for i, id := range ids {
+		placeholders[i] = s.logDB.Placeholder(i + 2)
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT token_id, COUNT(DISTINCT ip) as ip_count
+		FROM logs
+		WHERE created_at >= %s AND type IN (2, 5)
+			AND ip IS NOT NULL AND ip != ''
+			AND token_id IN (%s)
+		GROUP BY token_id`, s.logDB.Placeholder(1), strings.Join(placeholders, ", "))
+
+	rows, err := s.logDB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []map[string]interface{}{}
+	}
+	return rows, nil
+}
+
+// GetSuspectedLeaks 找出窗口期内来源 IP 数 >= 阈值的令牌（疑似泄漏/共享），
+// 并从主库补齐令牌与所属用户信息。
+func (s *TokenService) GetSuspectedLeaks(hours, minIPs, limit int) ([]map[string]interface{}, error) {
+	if hours <= 0 || hours > 24*30 {
+		hours = 24
+	}
+	if minIPs < 2 {
+		minIPs = 5
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	windowStart := time.Now().Unix() - int64(hours)*3600
+
+	// 第一步：logs 库聚合（logs 可能是独立日志库，不能跨库 JOIN tokens）
+	aggQuery := s.logDB.RebindQuery(fmt.Sprintf(`
+		SELECT token_id, COUNT(DISTINCT ip) as ip_count, COUNT(*) as request_count,
+			%s as ips
+		FROM logs
+		WHERE created_at >= ? AND type IN (2, 5)
+			AND ip IS NOT NULL AND ip != ''
+			AND token_id > 0
+		GROUP BY token_id
+		HAVING COUNT(DISTINCT ip) >= ?
+		ORDER BY COUNT(DISTINCT ip) DESC
+		LIMIT ?`, s.logDB.StringAggDistinct("ip")))
+
+	aggRows, err := s.logDB.Query(aggQuery, windowStart, minIPs, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(aggRows) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	statByToken := make(map[int64]map[string]interface{}, len(aggRows))
+	tokenIDs := make([]int64, 0, len(aggRows))
+	for _, row := range aggRows {
+		id := toInt64(row["token_id"])
+		statByToken[id] = row
+		tokenIDs = append(tokenIDs, id)
+	}
+
+	// 第二步：主库补齐令牌与用户信息
+	keyCol := s.keyCol()
+	groupCol := s.groupCol()
+	placeholders := make([]string, len(tokenIDs))
+	args := make([]interface{}, 0, len(tokenIDs))
+	for i, id := range tokenIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	conditions := []string{
+		"t.deleted_at IS NULL",
+		fmt.Sprintf("t.id IN (%s)", strings.Join(placeholders, ", ")),
+	}
+	if cond, wlArgs := PanelWhitelistNotInClause("t.user_id"); cond != "" {
+		conditions = append(conditions, cond)
+		args = append(args, wlArgs...)
+	}
+
+	tokenQuery := s.db.RebindQuery(fmt.Sprintf(`
+		SELECT t.id, t.%s as token_key, t.name, t.user_id,
+			COALESCE(u.username, '') as username,
+			t.status, t.remain_quota, t.unlimited_quota, t.used_quota,
+			COALESCE(t.allow_ips, '') as subnet,
+			t.%s as token_group,
+			COALESCE(t.expired_time, 0) as expired_time
+		FROM tokens t
+		LEFT JOIN users u ON t.user_id = u.id
+		WHERE %s`, keyCol, groupCol, strings.Join(conditions, " AND ")))
+
+	tokenRows, err := s.db.Query(tokenQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]map[string]interface{}, 0, len(tokenRows))
+	for _, row := range tokenRows {
+		id := toInt64(row["id"])
+		stat := statByToken[id]
+		if stat == nil {
+			continue
+		}
+		items = append(items, map[string]interface{}{
+			"id":              id,
+			"key":             MaskTokenKey(fmt.Sprintf("%v", row["token_key"])),
+			"name":            row["name"],
+			"user_id":         row["user_id"],
+			"username":        row["username"],
+			"status":          row["status"],
+			"remain_quota":    row["remain_quota"],
+			"unlimited_quota": row["unlimited_quota"],
+			"used_quota":      row["used_quota"],
+			"subnet":          row["subnet"],
+			"group":           row["token_group"],
+			"expired_time":    row["expired_time"],
+			"ip_count":        stat["ip_count"],
+			"request_count":   stat["request_count"],
+			"ips":             stat["ips"],
+		})
+	}
+
+	// 按 IP 数降序（主库查询不保证顺序）
+	sort.Slice(items, func(i, j int) bool {
+		return toInt64(items[i]["ip_count"]) > toInt64(items[j]["ip_count"])
+	})
+	return items, nil
 }
 
 // GetTokenGroups 返回所有不同的令牌分组及其令牌数量
