@@ -33,7 +33,8 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // dev.sh 会通过 BACKEND_PORT 指定后端端口，默认 8000
+        target: `http://localhost:${process.env.BACKEND_PORT || 8000}`,
         changeOrigin: true,
       },
     },
