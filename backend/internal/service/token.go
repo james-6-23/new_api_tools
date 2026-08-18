@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/new-api-tools/backend/internal/database"
+	"github.com/new-api-tools/backend/internal/logger"
 )
 
 // TokenInfo represents a token record with joined user info
@@ -240,6 +241,123 @@ func (s *TokenService) ListTokens(params TokenListParams) (map[string]interface{
 		"page_size":   params.PageSize,
 		"total_pages": totalPages,
 	}, nil
+}
+
+// TokenLookupItem 批量 key 查询的单条结果（按输入顺序返回）
+type TokenLookupItem struct {
+	InputKey    string `json:"input_key"`  // 归一化后的完整 key（含 sk- 前缀），供前端对照
+	KeyMasked   string `json:"key_masked"` // 脱敏展示
+	Found       bool   `json:"found"`
+	ID          int64  `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	UserID      int64  `json:"user_id,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Status      int64  `json:"status,omitempty"`
+	ExpiredTime int64  `json:"expired_time,omitempty"`
+	Group       string `json:"group,omitempty"`
+	UsedQuota   int64  `json:"used_quota,omitempty"`
+}
+
+// maxBatchKeys 限制单次批量查询/禁用的规模，避免超长 IN 列表
+const maxBatchKeys = 1000
+
+// LookupTokensByKeys 按粘贴的 key 列表批量查库（精确匹配 idx_tokens_key），
+// 返回与归一化去重后输入同序的结果，未匹配的 key 以 found=false 占位。
+func (s *TokenService) LookupTokensByKeys(inputKeys []string) ([]TokenLookupItem, error) {
+	seen := make(map[string]bool)
+	normalized := make([]string, 0, len(inputKeys))
+	for _, raw := range inputKeys {
+		// NewAPI 存储的 key 不含 "sk-" 前缀
+		k := strings.TrimPrefix(strings.TrimSpace(raw), "sk-")
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		normalized = append(normalized, k)
+	}
+	if len(normalized) == 0 {
+		return []TokenLookupItem{}, nil
+	}
+	if len(normalized) > maxBatchKeys {
+		return nil, fmt.Errorf("单次最多查询 %d 个 key", maxBatchKeys)
+	}
+
+	keyCol := s.keyCol()
+	groupCol := s.groupCol()
+	placeholders := make([]string, len(normalized))
+	args := make([]interface{}, len(normalized))
+	for i, k := range normalized {
+		placeholders[i] = s.db.Placeholder(i + 1)
+		args[i] = k
+	}
+
+	query := fmt.Sprintf(`
+		SELECT t.id, t.%s as token_key, t.name, t.user_id,
+			COALESCE(u.username, '') as username,
+			t.status, COALESCE(t.expired_time, 0) as expired_time,
+			t.%s as token_group,
+			COALESCE(t.used_quota, 0) as used_quota
+		FROM tokens t
+		LEFT JOIN users u ON t.user_id = u.id
+		WHERE t.deleted_at IS NULL AND t.%s IN (%s)`,
+		keyCol, groupCol, keyCol, strings.Join(placeholders, ", "))
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	byKey := make(map[string]map[string]interface{}, len(rows))
+	for _, row := range rows {
+		byKey[fmt.Sprintf("%v", row["token_key"])] = row
+	}
+
+	items := make([]TokenLookupItem, 0, len(normalized))
+	for _, k := range normalized {
+		item := TokenLookupItem{InputKey: "sk-" + k, KeyMasked: "sk-" + MaskTokenKey(k)}
+		if row, ok := byKey[k]; ok {
+			item.Found = true
+			item.ID = toInt64(row["id"])
+			item.Name = fmt.Sprintf("%v", row["name"])
+			item.UserID = toInt64(row["user_id"])
+			item.Username = fmt.Sprintf("%v", row["username"])
+			item.Status = toInt64(row["status"])
+			item.ExpiredTime = toInt64(row["expired_time"])
+			item.Group = fmt.Sprintf("%v", row["token_group"])
+			item.UsedQuota = toInt64(row["used_quota"])
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// BatchDisableTokens 将指定 ID 的令牌置为禁用（NewAPI TokenStatusDisabled = 2）。
+// 不限定当前状态：已过期/已耗尽的令牌一并置 2，防止上游充值后自动恢复可用。
+func (s *TokenService) BatchDisableTokens(ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, fmt.Errorf("at least one token id is required")
+	}
+	if len(ids) > maxBatchKeys {
+		return 0, fmt.Errorf("单次最多禁用 %d 个令牌", maxBatchKeys)
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = s.db.Placeholder(i + 1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE tokens SET status = 2 WHERE id IN (%s) AND deleted_at IS NULL AND status != 2",
+		strings.Join(placeholders, ", "))
+
+	affected, err := s.db.Execute(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("disable failed: %w", err)
+	}
+	logger.L.Business(fmt.Sprintf("令牌批量禁用 | requested=%d affected=%d", len(ids), affected))
+	return affected, nil
 }
 
 // GetTokenGroups 返回所有不同的令牌分组及其令牌数量

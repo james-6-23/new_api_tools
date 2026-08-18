@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from './Toast'
 import { useAuth } from '../contexts/AuthContext'
-import { Key, Loader2, RefreshCw, Filter, Search, CheckCircle2, XCircle, AlertCircle, Clock, Tag } from 'lucide-react'
+import { Key, Loader2, RefreshCw, Filter, Search, CheckCircle2, XCircle, AlertCircle, Clock, Tag, ShieldBan } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -10,6 +10,7 @@ import { Select } from './ui/select'
 import { Input } from './ui/input'
 import { StatCard } from './StatCard'
 import { UserAnalysisDialog } from './UserAnalysisDialog'
+import { TokenBatchDisableDialog } from './TokenBatchDisableDialog'
 import { cn } from '../lib/utils'
 
 interface TokenRecord {
@@ -73,6 +74,7 @@ export function Tokens() {
   const [availableGroups, setAvailableGroups] = useState<TokenGroup[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [analysisDialogOpen, setAnalysisDialogOpen] = useState(false)
+  const [batchDisableOpen, setBatchDisableOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null)
 
   const apiUrl = import.meta.env.VITE_API_URL || ''
@@ -170,6 +172,10 @@ export function Tokens() {
           <p className="text-muted-foreground mt-1">查看所有令牌的状态与使用情况</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => setBatchDisableOpen(true)} className="h-9 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:hover:bg-red-950">
+            <ShieldBan className="h-4 w-4 mr-2" />
+            批量禁用
+          </Button>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing || loading} className="h-9">
             <RefreshCw className={cn("h-4 w-4 mr-2", refreshing && "animate-spin")} />
             刷新
@@ -470,6 +476,13 @@ export function Tokens() {
           )}
         </CardContent>
       </Card>
+
+      {/* Batch Disable Dialog */}
+      <TokenBatchDisableDialog
+        open={batchDisableOpen}
+        onOpenChange={setBatchDisableOpen}
+        onSuccess={() => { fetchTokens(); fetchStatistics() }}
+      />
 
       {/* User Analysis Dialog */}
       {selectedUser && (
