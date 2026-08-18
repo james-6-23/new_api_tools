@@ -131,12 +131,13 @@ func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[strin
 	//   - type=2 with completion_tokens = 0 → empty response (likely failure)
 	//   - type=5 → explicit failure (if NewAPI version supports it)
 	// This ensures correct success rate even when NewAPI doesn't log type=5 failures.
+	// NOTE: alias must be empty_count, not empty — EMPTY is a reserved word in MySQL 8.
 	slotQuery := s.logDB.RebindQuery(fmt.Sprintf(`
 		SELECT FLOOR((created_at - %d) / %d) as slot_idx,
 			COUNT(*) as total,
 			SUM(CASE WHEN type = 2 AND completion_tokens > 0 THEN 1 ELSE 0 END) as success,
 			SUM(CASE WHEN type = 5 THEN 1 ELSE 0 END) as failure,
-			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty
+			SUM(CASE WHEN type = 2 AND completion_tokens = 0 THEN 1 ELSE 0 END) as empty_count
 		FROM logs
 		WHERE model_name = ?
 			AND created_at >= ? AND created_at < ?
@@ -165,7 +166,7 @@ func (s *ModelStatusService) GetModelStatus(modelName, window string) (map[strin
 					total:   toInt64(row["total"]),
 					success: toInt64(row["success"]),
 					failure: toInt64(row["failure"]),
-					empty:   toInt64(row["empty"]),
+					empty:   toInt64(row["empty_count"]),
 				}
 			}
 		}

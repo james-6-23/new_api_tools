@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 COMPOSE_HOST_FILE="${SCRIPT_DIR}/docker-compose.host.yml"
+COMPOSE_HOST_LOOPBACK_FILE="${SCRIPT_DIR}/docker-compose.host-loopback.yml"
 COMPOSE_LOGDB_FILE="${SCRIPT_DIR}/docker-compose.logdb.yml"
 
 # 由 detect_environment() 设置：host 模式下需要追加 overlay compose 文件
@@ -83,14 +84,19 @@ first_csv() {
 # Docker 环境检测函数 (来自 newapi_detect.sh)
 #######################################
 
+# 识别 DSN 引擎。除 URL 格式外，还要认 NewAPI 常用的两种非 URL 格式：
+#   MySQL Go 原生: user:pass@tcp(host:port)/dbname?charset=...
+#   PG keyword:    host=... user=... password=... dbname=... port=...
 extract_dsn_engine() {
   local dsn="${1:-}"
   if [[ -z "$dsn" ]]; then return 0; fi
-  if [[ "$dsn" =~ ^postgres(ql)?:// ]]; then
+  local lower
+  lower="$(printf '%s' "$dsn" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lower" =~ ^postgres(ql)?:// || "$lower" =~ (^|[[:space:]])host= ]]; then
     echo "postgres"
-  elif [[ "$dsn" =~ ^mysql:// ]]; then
+  elif [[ "$lower" =~ ^mysql:// || "$lower" =~ @tcp\( ]]; then
     echo "mysql"
-  elif [[ "$dsn" =~ ^clickhouse:// ]]; then
+  elif [[ "$lower" =~ ^clickhouse:// ]]; then
     echo "clickhouse"
   fi
 }
@@ -102,35 +108,79 @@ extract_dsn_host() {
   host="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@/]*@([^:/]+).*#\1#p')"
   if [[ -n "$host" ]]; then echo "$host"; return 0; fi
   host="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:/]+).*#\1#p')"
+  if [[ -n "$host" ]]; then echo "$host"; return 0; fi
+  host="$(echo "$dsn" | sed -nE 's#^.*@tcp\(([^:)]+)(:[0-9]+)?\)/.*#\1#p')"
+  if [[ -n "$host" ]]; then echo "$host"; return 0; fi
+  host="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])host=([^[:space:]]+).*#\2#p')"
   echo "$host"
 }
 
-# 从 DSN URL 解析用户名 (postgresql://user:pass@host:port/db)
+# 从 DSN 解析用户名 (postgresql://user:pass@host:port/db | user:pass@tcp(...)/db | user=...)
 extract_dsn_user() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:@/]+)(:[^@/]*)?@.*#\1#p'
+  local user
+  user="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://([^:@/]+)(:[^@/]*)?@.*#\1#p')"
+  if [[ -n "$user" ]]; then echo "$user"; return 0; fi
+  user="$(echo "$dsn" | sed -nE 's#^([^:@/]+)(:[^@/]*)?@tcp\(.*#\1#p')"
+  if [[ -n "$user" ]]; then echo "$user"; return 0; fi
+  user="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])user=([^[:space:]]+).*#\2#p')"
+  echo "$user"
 }
 
-# 从 DSN URL 解析密码
+# 从 DSN 解析密码
 extract_dsn_password() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^:@/]+:([^@]*)@.*#\1#p'
+  local password
+  password="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^:@/]+:([^@]*)@.*#\1#p')"
+  if [[ -n "$password" ]]; then echo "$password"; return 0; fi
+  password="$(echo "$dsn" | sed -nE 's#^[^:@/]+:([^@]*)@tcp\(.*#\1#p')"
+  if [[ -n "$password" ]]; then echo "$password"; return 0; fi
+  password="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])password=([^[:space:]]+).*#\2#p')"
+  echo "$password"
 }
 
-# 从 DSN URL 解析端口
+# 从 DSN 解析端口
 extract_dsn_port() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^:/]+:([0-9]+).*#\1#p'
+  local port
+  port="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^:/]+:([0-9]+).*#\1#p')"
+  if [[ -n "$port" ]]; then echo "$port"; return 0; fi
+  port="$(echo "$dsn" | sed -nE 's#^.*@tcp\([^:)]*:([0-9]+)\)/.*#\1#p')"
+  if [[ -n "$port" ]]; then echo "$port"; return 0; fi
+  port="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])port=([0-9]+).*#\2#p')"
+  echo "$port"
 }
 
-# 从 DSN URL 解析数据库名
+# 从 DSN 解析数据库名
 extract_dsn_dbname() {
   local dsn="${1:-}"
   [[ -z "$dsn" ]] && return 0
-  echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^/]+/([^?]+).*#\1#p'
+  local dbname
+  dbname="$(echo "$dsn" | sed -nE 's#^[a-zA-Z0-9+.-]+://[^@]*@[^/]+/([^?]+).*#\1#p')"
+  if [[ -n "$dbname" ]]; then echo "$dbname"; return 0; fi
+  dbname="$(echo "$dsn" | sed -nE 's#^.*@tcp\([^)]*\)/([^?]+).*#\1#p')"
+  if [[ -n "$dbname" ]]; then echo "$dbname"; return 0; fi
+  dbname="$(echo "$dsn" | sed -nE 's#(^|.*[[:space:]])dbname=([^[:space:]]+).*#\2#p')"
+  echo "$dbname"
+}
+
+# 情形 (a2)：数据库是宿主机裸装进程、只在 127.0.0.1 上监听。
+# 用 host 网络的 socat（docker-compose.host-loopback.yml）把
+# host.docker.internal:HOST_DB_PROXY_PORT 转发到宿主机 127.0.0.1:HOST_DB_PORT。
+configure_host_loopback_proxy() {
+  HOST_DB_PORT="${HOST_DB_PORT:-$DB_PORT}"
+  if [[ -z "${HOST_DB_PROXY_PORT:-}" ]]; then
+    if [[ "$DB_ENGINE" == "postgres" ]]; then
+      HOST_DB_PROXY_PORT="15432"
+    else
+      HOST_DB_PROXY_PORT="13306"
+    fi
+  fi
+  DB_DNS="host.docker.internal"
+  DB_PORT="$HOST_DB_PROXY_PORT"
 }
 
 detect_newapi_container() {
@@ -335,6 +385,9 @@ detect_environment() {
 
   DB_ENGINE="$(extract_dsn_engine "$detected_dsn" || true)"
   DB_DNS="$(extract_dsn_host "$detected_dsn" || true)"
+  USE_HOST_LOOPBACK_PROXY=false
+  HOST_DB_PORT="${HOST_DB_PORT:-}"
+  HOST_DB_PROXY_PORT="${HOST_DB_PROXY_PORT:-}"
 
   # ===== Host 模式：完全从 DSN 解析凭证，跳过数据库容器探测 =====
   if [[ "$USE_HOST_MODE" == "true" ]]; then
@@ -382,9 +435,11 @@ detect_environment() {
         USE_HOST_MODE=false   # 不再脱离 external 网络：我们要挂进它，而非走 host overlay
         ORIGINAL_NETWORK="$_hit_net"
       else
-        # 情形 (a2)：DB 在宿主机回环但非容器（或发布到 0.0.0.0）→ 走宿主机网关
-        DB_DNS="host.docker.internal"
-        log_info "数据库地址改写: 127.0.0.1 → host.docker.internal（数据库在宿主机回环上）"
+        # 情形 (a2)：DB 在宿主机回环但非容器（宿主机裸装进程）。
+        # 不能只改写成 host.docker.internal：若数据库只 bind 127.0.0.1（MySQL/PG 默认常见），
+        # 从网关 IP 进来的连接会被拒。改用 host 网络的 socat 代理转发到宿主机回环。
+        USE_HOST_LOOPBACK_PROXY=true
+        log_info "数据库地址为宿主机回环地址，将通过本机 TCP 代理访问"
       fi
     elif is_ipv4_literal "$DB_DNS"; then
       local _hit _hit_net _hit_name
@@ -406,10 +461,23 @@ detect_environment() {
     fi
 
     if [[ "$USE_HOST_MODE" == "true" ]]; then
+      # 情形 (a2)：宿主机回环数据库 → 配置 socat 代理地址并追加 loopback overlay
+      if [[ "$USE_HOST_LOOPBACK_PROXY" == "true" ]]; then
+        configure_host_loopback_proxy
+        log_info "数据库地址改写: 127.0.0.1:${HOST_DB_PORT} → ${DB_DNS}:${DB_PORT}（本机 TCP 代理）"
+      fi
+
       # 情形 (a)/(c)：数据库走宿主机（host.docker.internal）或外部地址，
       # newapi-tools 无需任何 external 网络 → 加载 host overlay 去掉 newapi-network 依赖。
       if [[ -f "$COMPOSE_HOST_FILE" ]]; then
         COMPOSE_FILES=("-f" "$COMPOSE_FILE" "-f" "$COMPOSE_HOST_FILE")
+        if [[ "$USE_HOST_LOOPBACK_PROXY" == "true" ]]; then
+          if [[ -f "$COMPOSE_HOST_LOOPBACK_FILE" ]]; then
+            COMPOSE_FILES+=("-f" "$COMPOSE_HOST_LOOPBACK_FILE")
+          else
+            log_warn "未找到 $COMPOSE_HOST_LOOPBACK_FILE，宿主机回环数据库可能无法连接"
+          fi
+        fi
       else
         log_warn "未找到 $COMPOSE_HOST_FILE，host 模式可能启动失败"
       fi
@@ -737,6 +805,9 @@ DB_PORT=${DB_PORT}
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
+# 宿主机回环数据库代理 (情形 a2；为空表示未启用)
+HOST_DB_PORT=${HOST_DB_PORT:-}
+HOST_DB_PROXY_PORT=${HOST_DB_PROXY_PORT:-}
 
 # 日志分库 (NewAPI 启用 LOG_SQL_DSN 时自动检测；为空则日志查询回落主库)
 LOG_SQL_DSN=${LOG_SQL_DSN_FINAL:-}
@@ -957,6 +1028,8 @@ start_services() {
     log_warn "发现已存在的服务容器，正在停止..."
     $DOCKER_COMPOSE "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" down 2>/dev/null || true
   fi
+  # 回环代理容器可能属于上一次不同的 compose 组合，单独清理
+  docker rm -f newapi-tools-db-proxy 2>/dev/null || true
 
   # 拉取最新镜像
   log_info "拉取最新镜像..."
@@ -1048,6 +1121,7 @@ uninstall() {
 
   if [[ -f "$COMPOSE_FILE" && -f "$ENV_FILE" ]]; then
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v 2>/dev/null || true
+    docker rm -f newapi-tools-db-proxy 2>/dev/null || true
     log_success "容器已停止并移除"
   fi
 

@@ -41,6 +41,7 @@ setup_compose_files() {
   local env_file="${project_dir}/.env"
   local base="${project_dir}/docker-compose.yml"
   local host_overlay="${project_dir}/docker-compose.host.yml"
+  local host_loopback_overlay="${project_dir}/docker-compose.host-loopback.yml"
 
   unset COMPOSE_FILE
 
@@ -58,6 +59,12 @@ setup_compose_files() {
   # NEWAPI_NETWORK= （空值）→ deploy.sh 在 host 模式下生成的标记
   if [[ -z "$nw" && -f "$host_overlay" ]]; then
     export COMPOSE_FILE="${base}:${host_overlay}"
+    # deploy.sh 写入了非空 HOST_DB_PROXY_PORT → 宿主机回环数据库，需要 socat 代理叠加层
+    local proxy_port_line
+    proxy_port_line=$(grep -E '^HOST_DB_PROXY_PORT=.' "$env_file" 2>/dev/null | head -n1 || true)
+    if [[ -n "$proxy_port_line" && -f "$host_loopback_overlay" ]]; then
+      export COMPOSE_FILE="${COMPOSE_FILE}:${host_loopback_overlay}"
+    fi
   fi
 }
 
@@ -226,9 +233,12 @@ show_initial_env_detection() {
     sql_dsn=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$newapi_container" 2>/dev/null | awk -F= '$1=="SQL_DSN"{print $2; exit}')
 
     if [[ -n "$sql_dsn" ]]; then
-      if [[ "$sql_dsn" =~ ^postgres ]]; then
+      # 兼容 URL / Go 原生 (user:pass@tcp(...)/db) / PG keyword (host=...) 三种 DSN 格式
+      local sql_dsn_lower
+      sql_dsn_lower="$(printf '%s' "$sql_dsn" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$sql_dsn_lower" =~ ^postgres || "$sql_dsn_lower" =~ (^|[[:space:]])host= ]]; then
         echo -e "  ${GREEN}✓${NC} 数据库类型: ${GREEN}PostgreSQL${NC}"
-      elif [[ "$sql_dsn" =~ ^mysql ]]; then
+      elif [[ "$sql_dsn_lower" =~ ^mysql:// || "$sql_dsn_lower" =~ @tcp\( ]]; then
         echo -e "  ${GREEN}✓${NC} 数据库类型: ${GREEN}MySQL${NC}"
       fi
     fi

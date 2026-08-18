@@ -1,0 +1,21 @@
+# 当 NewAPI 使用 host 网络，且数据库 DSN 指向宿主机 127.0.0.1/localhost
+# （裸装 MySQL/PG，通常只 bind 回环）时，由 deploy.sh 叠加此文件使用。
+# bridge 容器无法直接访问宿主机回环地址，所以这里用 host 网络的 socat 代理
+# 将 host.docker.internal:HOST_DB_PROXY_PORT 转发到 127.0.0.1:HOST_DB_PORT。
+
+services:
+  newapi-tools:
+    depends_on:
+      redis:
+        condition: service_healthy
+      db-loopback-proxy:
+        condition: service_started
+
+  db-loopback-proxy:
+    image: alpine/socat:latest
+    container_name: newapi-tools-db-proxy
+    network_mode: host
+    command:
+      - "tcp-listen:${HOST_DB_PROXY_PORT:-13306},fork,reuseaddr,bind=0.0.0.0"
+      - "tcp-connect:127.0.0.1:${HOST_DB_PORT:-3306}"
+    restart: unless-stopped

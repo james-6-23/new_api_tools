@@ -3,8 +3,9 @@
 #
 # 作用：
 #   - 不再尝试加入 NewAPI 的 docker 网络（host 模式下根本没有可加入的网络）
-#   - newapi-tools 仍跑在自己的 bridge 网络里，通过 host.docker.internal 访问宿主机数据库
-#   - 数据库 DSN 中的 127.0.0.1 / localhost 由 deploy.sh 改写为 host.docker.internal
+#   - newapi-tools 仍跑在自己的 bridge 网络里，通过 host.docker.internal 访问宿主机或外部数据库
+#   - 如果数据库 DSN 是 127.0.0.1 / localhost（裸装数据库通常只 bind 回环），deploy.sh
+#     会额外叠加 docker-compose.host-loopback.yml，用本机 TCP 代理转发宿主机回环数据库
 #
 # 需要 docker compose v2.24+（依赖 !reset 语法）
 
