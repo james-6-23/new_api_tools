@@ -647,11 +647,20 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
           setSelectedModels(defaultModels)
           saveSelectedModelsToBackend(defaultModels)
         }
+        // 库里一个模型都没有时不会触发任何状态请求，必须在这里收掉加载态，
+        // 否则骨架屏会永远显示（fetchModelStatuses 的空分支只在有模型时清 initialLoading）
+        if (models.length === 0) {
+          setLoading(false)
+          setInitialLoading(false)
+        }
       }
       // 同时加载令牌分组
       fetchTokenGroups()
     } catch (error) {
       console.error('Failed to fetch available models:', error)
+      // 模型列表拉取失败同样要收掉加载态，避免骨架屏卡死
+      setLoading(false)
+      setInitialLoading(false)
     }
   }, [apiUrl, getApiPrefix, getAuthHeaders, loadConfigFromBackend, saveSelectedModelsToBackend, fetchTokenGroups])
 
@@ -1649,7 +1658,9 @@ export function ModelStatusMonitor({ isEmbed = false }: ModelStatusMonitorProps)
       ) : (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            {selectedModels.length === 0 ? (
+            {availableModels.length === 0 ? (
+              <p>暂无可用模型：NewAPI 还没有模型调用记录，产生调用日志后这里会自动出现</p>
+            ) : selectedModels.length === 0 ? (
               <p>请选择要监控的模型</p>
             ) : (
               <p>暂无模型状态数据</p>
